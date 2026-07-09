@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -350,6 +351,14 @@ func progressView(p enroll.Progress) ProgressView {
 
 // enrolError maps the enroll package's sentinels onto status codes.
 func enrolError(err error) error {
+	// Checked before the sentinel switch, because it carries detail the switch
+	// would throw away: which courses the learner still owes. errors.As, not a
+	// parsed message.
+	var unmet *enroll.UnmetPrerequisites
+	if errors.As(err, &unmet) {
+		return huma.Error403Forbidden(prerequisiteMessage(unmet.Missing))
+	}
+
 	switch {
 	case errors.Is(err, enroll.ErrNotFound):
 		return huma.Error404NotFound("Not found.")
@@ -365,10 +374,38 @@ func enrolError(err error) error {
 	case errors.Is(err, enroll.ErrCourseNotOpen):
 		return huma.Error409Conflict("That course is not open for enrolment.")
 
+	case errors.Is(err, enroll.ErrPrerequisitesUnmet):
+		// Reached only when a caller loses the detail on the way here. The status is
+		// the same either way; a client that shows the generic sentence is merely
+		// less helpful, not wrong.
+		return huma.Error403Forbidden("Finish this course's prerequisites first.")
+
 	case errors.Is(err, enroll.ErrEnrolmentEnded):
 		return huma.Error403Forbidden("Your enrolment has expired.")
 
 	default:
 		return err
+	}
+}
+
+// prerequisiteMessage names the courses standing in the learner's way.
+//
+// 403 rather than 404: the course is published and plainly visible, and the
+// answer is "finish those first". A 404 here would hide the reason along with
+// the button.
+func prerequisiteMessage(missing []enroll.MissingCourse) string {
+	titles := make([]string, 0, len(missing))
+	for _, c := range missing {
+		titles = append(titles, c.Title)
+	}
+
+	switch len(titles) {
+	case 0:
+		// Not reachable: the service only raises this with at least one course.
+		return "Finish this course's prerequisites first."
+	case 1:
+		return "Finish " + titles[0] + " before enrolling on this course."
+	default:
+		return "Finish these courses first: " + strings.Join(titles, ", ") + "."
 	}
 }

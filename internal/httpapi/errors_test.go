@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -59,6 +60,8 @@ func TestEveryDomainSentinelMapsToADeliberateStatus(t *testing.T) {
 		{"incomplete order", catalog.ErrIncompleteOrder, http.StatusUnprocessableEntity},
 		{"empty course", catalog.ErrEmptyCourse, http.StatusConflict},
 		{"already published", catalog.ErrAlreadyPublished, http.StatusConflict},
+		{"prerequisite cycle", catalog.ErrPrerequisiteCycle, http.StatusUnprocessableEntity},
+		{"prerequisite exists", catalog.ErrPrerequisiteExists, http.StatusConflict},
 	}
 
 	for _, tt := range tests {
@@ -68,6 +71,7 @@ func TestEveryDomainSentinelMapsToADeliberateStatus(t *testing.T) {
 				catalog.ErrNotFound, catalog.ErrInvalidPage, catalog.ErrInvalidLimit,
 				catalog.ErrInvalidSlug, catalog.ErrSlugTaken, catalog.ErrInvalidLesson,
 				catalog.ErrIncompleteOrder, catalog.ErrEmptyCourse, catalog.ErrAlreadyPublished,
+				catalog.ErrPrerequisiteCycle, catalog.ErrPrerequisiteExists,
 			} {
 				if errors.Is(tt.err, catalogErr) {
 					mapper = catalogError
@@ -127,6 +131,10 @@ func TestEnrolmentSentinelsMapToADeliberateStatus(t *testing.T) {
 		enroll.ErrAlreadyEnrolled: http.StatusConflict,
 		enroll.ErrCourseNotOpen:   http.StatusConflict,
 		enroll.ErrEnrolmentEnded:  http.StatusForbidden,
+
+		// Also 403, and for the same reason: the course is visible, and the answer
+		// is "finish those first" rather than "no such course".
+		enroll.ErrPrerequisitesUnmet: http.StatusForbidden,
 	}
 
 	for err, want := range tests {
@@ -137,6 +145,46 @@ func TestEnrolmentSentinelsMapToADeliberateStatus(t *testing.T) {
 		if got := statusOf(enrolError(wrapped)); got != want {
 			t.Errorf("wrapped %v mapped to %d, want %d", err, got, want)
 		}
+	}
+}
+
+// The typed error carries the courses. It must map to the same status as its
+// sentinel, and its message must name them — a client should never have to parse
+// prose to learn which course to finish.
+func TestUnmetPrerequisitesNamesTheCourses(t *testing.T) {
+	t.Parallel()
+
+	err := &enroll.UnmetPrerequisites{Missing: []enroll.MissingCourse{
+		{Slug: "go-basics", Title: "Go Basics"},
+		{Slug: "pointers", Title: "Pointers"},
+	}}
+
+	if !errors.Is(err, enroll.ErrPrerequisitesUnmet) {
+		t.Fatal("UnmetPrerequisites does not unwrap to its sentinel")
+	}
+
+	mapped := enrolError(err)
+	if got := statusOf(mapped); got != http.StatusForbidden {
+		t.Errorf("mapped to %d, want 403", got)
+	}
+
+	var statusErr huma.StatusError
+	if !errors.As(mapped, &statusErr) {
+		t.Fatal("no status error")
+	}
+	detail := statusErr.Error()
+	for _, want := range []string{"Go Basics", "Pointers"} {
+		if !strings.Contains(detail, want) {
+			t.Errorf("message %q does not name %q", detail, want)
+		}
+	}
+
+	// One missing course reads as a sentence, not as a list of one.
+	single := enrolError(&enroll.UnmetPrerequisites{
+		Missing: []enroll.MissingCourse{{Slug: "go-basics", Title: "Go Basics"}},
+	})
+	if !strings.Contains(single.Error(), "Finish Go Basics before") {
+		t.Errorf("single-course message reads badly: %q", single.Error())
 	}
 }
 

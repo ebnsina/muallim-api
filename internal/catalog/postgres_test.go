@@ -123,7 +123,7 @@ func (a testAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, 
 
 func newService(db *database.DB) *catalog.Service {
 	repo := catalog.NewPostgresRepository()
-	return catalog.NewService(db, repo, repo, testAuditor{audit.NewRecorder()})
+	return catalog.NewService(db, repo, repo, repo, testAuditor{audit.NewRecorder()})
 }
 
 // The regression guard. Loading a curriculum must cost a fixed number of queries

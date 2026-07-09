@@ -288,6 +288,14 @@ func catalogError(err error) error {
 	switch {
 	case errors.Is(err, catalog.ErrNotFound):
 		return huma.Error404NotFound("Course not found.")
+
+	case errors.Is(err, catalog.ErrPrerequisiteCycle):
+		// 422: the request was understood and is impossible. A course that requires
+		// itself, however indirectly, is a course nobody can ever start.
+		return huma.Error422UnprocessableEntity(err.Error())
+
+	case errors.Is(err, catalog.ErrPrerequisiteExists):
+		return huma.Error409Conflict("That course is already a prerequisite.")
 	case errors.Is(err, catalog.ErrInvalidPage):
 		return huma.Error422UnprocessableEntity("The cursor is not valid.")
 	case errors.Is(err, catalog.ErrInvalidLimit), errors.Is(err, catalog.ErrInvalidSlug):

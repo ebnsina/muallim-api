@@ -80,6 +80,7 @@ func New(opts Options) (http.Handler, huma.API) {
 	registerCatalog(api, opts.Catalog)
 	registerCatalogWrites(api, opts.Catalog)
 	registerAuthoring(api, opts.Catalog)
+	registerPrerequisites(api, opts.Catalog)
 	registerEnrolment(api, opts.Enrol)
 
 	// Order matters, outermost first.

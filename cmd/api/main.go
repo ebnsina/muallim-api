@@ -150,7 +150,7 @@ func run() error {
 	authRepo := auth.NewPostgresRepository()
 	identities := auth.NewService(db, authRepo, authRepo, authRepo, tokens, authAuditor{recorder}, outbox, revocations, log)
 	catalogRepo := catalog.NewPostgresRepository()
-	courses := catalog.NewService(db, catalogRepo, catalogRepo, catalogAuditor{recorder})
+	courses := catalog.NewService(db, catalogRepo, catalogRepo, catalogRepo, catalogAuditor{recorder})
 	learning := enroll.NewService(db, enroll.NewPostgresRepository(), enrolAuditor{recorder})
 
 	handler, _ := httpapi.New(httpapi.Options{
