@@ -278,6 +278,22 @@ A reorder rewrites every position in **one statement**, via `unnest($1::uuid[]) 
 
 The submitted order must name **every sibling exactly once**. A short list silently leaves the unnamed ones where they were; a list naming a foreign id silently does nothing to it. Both are refused, and the transaction rolls back, rather than half-applied.
 
+### The access rule is one pure function
+
+Entitlement decides what a paying customer can read, so it is written **once, in full, in one place** — a pure function of facts already loaded, not three scattered checks that each look reasonable alone. `enroll.decide` is the reference. Being pure, every branch is enumerable and enumerated in a table test; being one function, there is no way to accidentally skip a database check inside it.
+
+The clause order is load-bearing and must be commented as such. Checking `IsPreview` before enrolment made an enrolled learner read a preview lesson as a mere previewer — and since completing a lesson requires enrolment, no course containing a preview lesson could ever reach 100%.
+
+The zero value of an access level **denies**. A bug that forgets to assign one locks the door rather than opening it.
+
+Load the entitlement in the **same query** as the resource. The access check runs on the hottest path in the product, and "load lesson, load course, load enrolment" is three round trips where a `LEFT JOIN` is none. A test asserts one query.
+
+Content whose visibility depends on who is asking is **never shared-cacheable**. `private, no-store`, always. A cache keyed on the URL alone would hand one reader's entitlement to another.
+
+### Choosing 404 over 403
+
+`404` when admitting the resource exists would leak something: an unpublished course, a lesson behind a paywall on a course the reader cannot see. `403` when the resource is plainly visible and the answer is simply "you need to enrol" — there, `404` would be a lie that hides the enrol button.
+
 ### Every domain sentinel needs a deliberate status
 
 A sentinel with no case in its mapper falls through the default branch and renders as *"An unexpected error occurred"* with a 500. Users have been told that instead of "this workspace is invitation-only". `errors_test.go` asserts the mapping for every sentinel, wrapped and unwrapped; a new sentinel gets a line there in the same commit that introduces it.

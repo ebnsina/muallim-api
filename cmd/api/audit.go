@@ -9,6 +9,7 @@ import (
 	"github.com/ebnsina/lms-api/internal/audit"
 	"github.com/ebnsina/lms-api/internal/auth"
 	"github.com/ebnsina/lms-api/internal/catalog"
+	"github.com/ebnsina/lms-api/internal/enroll"
 )
 
 // The dependency rule forbids a domain package from importing a sibling, so auth
@@ -40,6 +41,22 @@ type catalogAuditor struct{ recorder *audit.Recorder }
 var _ catalog.AuditRecorder = catalogAuditor{}
 
 func (a catalogAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, e catalog.AuditEntry) error {
+	return a.recorder.Record(ctx, tx, tenantID, audit.Entry{
+		ActorID:    e.ActorID,
+		Action:     e.Action,
+		TargetType: e.TargetType,
+		TargetID:   e.TargetID,
+		IP:         e.IP,
+		UserAgent:  e.UserAgent,
+		Metadata:   e.Metadata,
+	})
+}
+
+type enrolAuditor struct{ recorder *audit.Recorder }
+
+var _ enroll.AuditRecorder = enrolAuditor{}
+
+func (a enrolAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, e enroll.AuditEntry) error {
 	return a.recorder.Record(ctx, tx, tenantID, audit.Entry{
 		ActorID:    e.ActorID,
 		Action:     e.Action,

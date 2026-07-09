@@ -20,6 +20,7 @@ import (
 	"github.com/ebnsina/lms-api/internal/audit"
 	"github.com/ebnsina/lms-api/internal/auth"
 	"github.com/ebnsina/lms-api/internal/catalog"
+	"github.com/ebnsina/lms-api/internal/enroll"
 	"github.com/ebnsina/lms-api/internal/httpapi"
 	"github.com/ebnsina/lms-api/internal/platform/cache"
 	"github.com/ebnsina/lms-api/internal/platform/config"
@@ -120,6 +121,7 @@ func run() error {
 	identities := auth.NewService(db, authRepo, authRepo, tokens, authAuditor{recorder}, log)
 	catalogRepo := catalog.NewPostgresRepository()
 	courses := catalog.NewService(db, catalogRepo, catalogRepo, catalogAuditor{recorder})
+	learning := enroll.NewService(db, enroll.NewPostgresRepository(), enrolAuditor{recorder})
 
 	handler, _ := httpapi.New(httpapi.Options{
 		Version:     cfg.Version,
@@ -128,6 +130,7 @@ func run() error {
 		Tenants:     tenants,
 		Catalog:     courses,
 		Auth:        identities,
+		Enrol:       learning,
 		DB:          db,
 		AuthLimiter: ratelimit.New(ratelimit.Options{
 			Burst: cfg.AuthRateBurst,

@@ -62,6 +62,12 @@ make spec           # write bin/openapi.json — the contract for lms-web
 
 **Ordering: dense positions, one-statement reorders.** Deletes close the gap in the same statement. Reorders use `unnest($1::uuid[]) WITH ORDINALITY`, never one UPDATE per row, and the sibling unique constraint is `DEFERRABLE` so a reversal is legal mid-statement. A submitted order must name every sibling exactly once, or it is refused rather than half-applied.
 
+**The access rule is one pure function** (`enroll.decide`), enumerated in a table test. Zero value denies. Clause order is load-bearing — enrolment before preview, or a course with a preview lesson can never reach 100%. Load the entitlement in the same query as the resource: one query, asserted. Content whose visibility depends on the reader is `private, no-store`, never shared-cacheable.
+
+**404 vs 403.** 404 when admitting existence would leak (a draft, a lesson in an invisible course). 403 when the resource is plainly visible and the answer is "enrol first" — there a 404 hides the button.
+
+**Roll-ups are recomputed in the transaction that changes their inputs.** Not on read (a course page would count every lesson for every student), not in a trigger (action at a distance). `RecomputeProgress` is one statement, so the roll-up can never disagree with the rows it summarises.
+
 **Money is `bigint` minor units + `currency char(3)`.** Never a float.
 
 **Enqueue jobs in the transaction that produced them** (`client.InsertTx`). That is the whole reason River is Postgres-backed.

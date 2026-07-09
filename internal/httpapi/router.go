@@ -15,6 +15,7 @@ import (
 
 	"github.com/ebnsina/lms-api/internal/auth"
 	"github.com/ebnsina/lms-api/internal/catalog"
+	"github.com/ebnsina/lms-api/internal/enroll"
 	"github.com/ebnsina/lms-api/internal/platform/ratelimit"
 	"github.com/ebnsina/lms-api/internal/tenant"
 )
@@ -40,6 +41,7 @@ type Options struct {
 	Tenants *tenant.Service
 	Catalog *catalog.Service
 	Auth    *auth.Service
+	Enrol   *enroll.Service
 	DB      Pinger
 
 	// AuthLimiter throttles credential-verifying endpoints. Nil disables it, which
@@ -78,6 +80,7 @@ func New(opts Options) (http.Handler, huma.API) {
 	registerCatalog(api, opts.Catalog)
 	registerCatalogWrites(api, opts.Catalog)
 	registerAuthoring(api, opts.Catalog)
+	registerEnrolment(api, opts.Enrol)
 
 	// Order matters, outermost first.
 	//

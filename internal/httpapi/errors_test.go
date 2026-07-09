@@ -10,6 +10,7 @@ import (
 
 	"github.com/ebnsina/lms-api/internal/auth"
 	"github.com/ebnsina/lms-api/internal/catalog"
+	"github.com/ebnsina/lms-api/internal/enroll"
 )
 
 // statusOf extracts the HTTP status a mapped error will render as, or 500 when
@@ -109,6 +110,35 @@ func TestMembershipSentinelsMapToADeliberateStatus(t *testing.T) {
 	}
 }
 
+// The enrolment sentinels go through their own mapper.
+func TestEnrolmentSentinelsMapToADeliberateStatus(t *testing.T) {
+	t.Parallel()
+
+	tests := map[error]int{
+		// A lesson a reader may not see is 404: they learn nothing about whether it
+		// exists.
+		enroll.ErrNotFound: http.StatusNotFound,
+
+		// But "not enrolled" is 403: the course is published and visible, so there
+		// is nothing to conceal, and the client should show an enrol button.
+		enroll.ErrNotEnrolled: http.StatusForbidden,
+
+		enroll.ErrAlreadyEnrolled: http.StatusConflict,
+		enroll.ErrCourseNotOpen:   http.StatusConflict,
+		enroll.ErrEnrolmentEnded:  http.StatusForbidden,
+	}
+
+	for err, want := range tests {
+		if got := statusOf(enrolError(err)); got != want {
+			t.Errorf("%v mapped to %d, want %d", err, got, want)
+		}
+		wrapped := fmt.Errorf("enroll: doing a thing: %w", err)
+		if got := statusOf(enrolError(wrapped)); got != want {
+			t.Errorf("wrapped %v mapped to %d, want %d", err, got, want)
+		}
+	}
+}
+
 // An error nobody anticipated must become a 500, not leak through as a 200 or a
 // misleading 4xx.
 func TestUnmappedErrorBecomes500(t *testing.T) {
@@ -120,6 +150,9 @@ func TestUnmappedErrorBecomes500(t *testing.T) {
 		t.Errorf("an unmapped error mapped to %d, want 500", got)
 	}
 	if got := statusOf(catalogError(mystery)); got != http.StatusInternalServerError {
+		t.Errorf("an unmapped error mapped to %d, want 500", got)
+	}
+	if got := statusOf(enrolError(mystery)); got != http.StatusInternalServerError {
 		t.Errorf("an unmapped error mapped to %d, want 500", got)
 	}
 }

@@ -58,6 +58,16 @@ An unpublished course is invisible to anyone without authoring rights: they rece
 
 Positions are dense within a parent. A delete closes its gap in the same statement, and a reorder rewrites every position in one `UPDATE` — the sibling unique constraint is deferred so a full reversal is legal mid-statement. A submitted order must name every sibling exactly once, or it is refused rather than half-applied.
 
+## Learning
+
+Enrolment is a person's right to study a course, and it is not a payment — commerce will create enrolments, and so will a manual grant, a bulk import, and a free course. `source` records which, because "why does this person have access" is the first question support asks.
+
+Who may read a lesson is decided by one pure function. An author reads anything, including their own draft. Nobody else reads anything in an unpublished course. A live enrolment reads everything. Otherwise a preview lesson is a free sample, readable by a stranger. A reader who may not see a lesson receives 404; a reader who simply needs to enrol receives 403.
+
+The whole decision — access, content, and the reader's own progress — is **one query**, asserted by a test, because it runs on the hottest path in the product.
+
+Progress is a materialised roll-up recomputed in the transaction that changes a lesson, so it can never disagree with the rows it summarises. Finishing the last lesson completes the enrolment. Cancelling ends access but keeps progress: re-enrolling reactivates the original row, and the learner finds their place.
+
 ## Performance
 
 The competitive claim is that this is fast, so the guarantees are tested rather than hoped for.
@@ -97,7 +107,8 @@ internal/platform       config, logging, server, database, cache, ratelimit
 internal/tenant         host resolution, cached; context propagation
 internal/auth           identity, sessions, RBAC, invitations, membership
 internal/audit          append-only audit trail
-internal/catalog        courses, topics, lessons
+internal/catalog        courses, topics, lessons, authoring
+internal/enroll         enrolments, access rules, progress
 internal/httpapi        transport: routes, middleware, RFC 9457 problem documents
 migrations/             embedded goose SQL
 ```
