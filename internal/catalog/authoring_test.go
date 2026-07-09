@@ -275,6 +275,44 @@ func TestDraftsAreInvisibleWithoutAuthorRights(t *testing.T) {
 			t.Error("a draft appeared in the published catalog")
 		}
 	}
+
+	// It does appear once the caller has been authorised to see drafts.
+	authored, err := svc.ListCourses(t.Context(), tenantID,
+		catalog.ListParams{Limit: 50, IncludeDrafts: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, c := range authored.Courses {
+		if c.Slug == slug {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("an author cannot find their own draft in the authored listing")
+	}
+}
+
+// The zero value of ListParams lists published courses. A caller who forgets to
+// think about drafts must leak none.
+func TestListParamsZeroValueHidesDrafts(t *testing.T) {
+	t.Parallel()
+
+	db := testDB(t)
+	svc := newService(db)
+	tenantID := seedTenant(t, db)
+	a := seedAuthor(t, db, tenantID)
+	slug := draftCourse(t, svc, tenantID, a)
+
+	page, err := svc.ListCourses(t.Context(), tenantID, catalog.ListParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range page.Courses {
+		if c.Slug == slug {
+			t.Fatal("the zero value of ListParams surfaced a draft")
+		}
+	}
 }
 
 func TestPublishRequiresAtLeastOneLesson(t *testing.T) {

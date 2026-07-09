@@ -112,10 +112,5 @@ func (p ListParams) normalise() (ListParams, error) {
 		return p, fmt.Errorf("%w: limit must be between 1 and %d", ErrInvalidLimit, MaxPageSize)
 	}
 
-	// An anonymous catalog request must never surface drafts.
-	if p.Status == "" {
-		p.Status = StatusPublished
-	}
-
 	return p, nil
 }

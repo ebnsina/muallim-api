@@ -101,11 +101,15 @@ type Page struct {
 	HasMore    bool
 }
 
-// ListParams filters and paginates a course list.
+// ListParams paginates a course list.
 type ListParams struct {
-	// Status filters by course status. Empty means published only, because an
-	// unauthenticated catalog request must never surface drafts.
-	Status string
+	// IncludeDrafts widens the listing to every status.
+	//
+	// It carries an authorisation decision made by the transport layer, never a
+	// request parameter: a client that could ask for drafts by adding one to the
+	// query string would be the whole vulnerability. The zero value lists
+	// published courses, so a caller who forgets it leaks nothing.
+	IncludeDrafts bool
 
 	// Limit is the page size, bounded by MaxPageSize.
 	Limit int

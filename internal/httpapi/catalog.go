@@ -98,6 +98,8 @@ func registerCatalog(api huma.API, svc *catalog.Service) {
 		Limit  int    `query:"limit" minimum:"1" maximum:"100" default:"20" doc:"Page size"`
 		Cursor string `query:"cursor" maxLength:"128" doc:"Opaque cursor from a previous page"`
 	}) (*ListCoursesOutput, error) {
+		// IncludeDrafts is left false. This route is anonymous, and there is no
+		// query parameter that could set it.
 		page, err := svc.ListCourses(ctx, tenant.ID(ctx), catalog.ListParams{
 			Limit:  in.Limit,
 			Cursor: in.Cursor,
@@ -107,6 +109,43 @@ func registerCatalog(api huma.API, svc *catalog.Service) {
 		}
 
 		out := &ListCoursesOutput{CacheControl: catalogCacheControl}
+		out.Body.Courses = make([]CourseSummary, 0, len(page.Courses))
+		for _, c := range page.Courses {
+			out.Body.Courses = append(out.Body.Courses, courseSummary(c))
+		}
+		out.Body.NextCursor = page.NextCursor
+		out.Body.HasMore = page.HasMore
+		return out, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "list-authored-courses",
+		Method:      http.MethodGet,
+		Path:        "/v1/me/courses",
+		Summary:     "List every course in this workspace, drafts included",
+		Description: "Requires course:write. A separate route rather than a status filter on the public " +
+			"listing: what an author may see follows from their permission, never from a query parameter.",
+		Tags:     []string{"Catalog"},
+		Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, in *struct {
+		Limit  int    `query:"limit" minimum:"1" maximum:"100" default:"20" doc:"Page size"`
+		Cursor string `query:"cursor" maxLength:"128" doc:"Opaque cursor from a previous page"`
+	}) (*ListCoursesOutput, error) {
+		if _, err := requirePermission(ctx, auth.PermCourseWrite); err != nil {
+			return nil, err
+		}
+
+		page, err := svc.ListCourses(ctx, tenant.ID(ctx), catalog.ListParams{
+			Limit:         in.Limit,
+			Cursor:        in.Cursor,
+			IncludeDrafts: true,
+		})
+		if err != nil {
+			return nil, catalogError(err)
+		}
+
+		// Drafts must never reach a shared cache, whoever asked for them.
+		out := &ListCoursesOutput{CacheControl: draftCacheControl}
 		out.Body.Courses = make([]CourseSummary, 0, len(page.Courses))
 		for _, c := range page.Courses {
 			out.Body.Courses = append(out.Body.Courses, courseSummary(c))

@@ -25,16 +25,35 @@ func NewPostgresRepository() *PostgresRepository { return &PostgresRepository{} 
 //
 // It fetches limit+1 rows: the extra row answers "is there a next page" without
 // a COUNT(*), which would scan every matching row on every request.
-const listCoursesSQL = `
+const listPublishedCoursesSQL = `
 	SELECT id, slug, title, summary, difficulty, status, published_at, created_at, updated_at
 	FROM courses
 	WHERE tenant_id = $1
-	  AND status = $4
+	  AND status = 'published'
 	  AND ($2::timestamptz IS NULL OR (created_at, id) < ($2, $3))
 	ORDER BY created_at DESC, id DESC
-	LIMIT $5`
+	LIMIT $4`
+
+// listAllCoursesSQL is the same page without the status predicate.
+//
+// It is a separate statement rather than `status = 'published' OR $4`, because
+// that predicate is not sargable: the planner would abandon
+// courses_tenant_status_created_idx even when the flag is false, and every
+// anonymous catalog request would pay for a feature only authors use. Each
+// statement gets an index that covers its filter and its sort.
+const listAllCoursesSQL = `
+	SELECT id, slug, title, summary, difficulty, status, published_at, created_at, updated_at
+	FROM courses
+	WHERE tenant_id = $1
+	  AND ($2::timestamptz IS NULL OR (created_at, id) < ($2, $3))
+	ORDER BY created_at DESC, id DESC
+	LIMIT $4`
 
 // ListCourses returns one keyset page.
+//
+// Drafts are excluded by the statement, not filtered out of its result. A draft
+// that is loaded and then discarded has already been loaded, and the first
+// refactor that forgets the discard publishes it.
 func (r *PostgresRepository) ListCourses(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, p ListParams) ([]Course, error) {
 	var (
 		afterTime any
@@ -48,7 +67,12 @@ func (r *PostgresRepository) ListCourses(ctx context.Context, tx pgx.Tx, tenantI
 		afterTime, afterID = c.CreatedAt, c.ID
 	}
 
-	rows, err := tx.Query(ctx, listCoursesSQL, tenantID, afterTime, afterID, p.Status, p.Limit+1)
+	query := listPublishedCoursesSQL
+	if p.IncludeDrafts {
+		query = listAllCoursesSQL
+	}
+
+	rows, err := tx.Query(ctx, query, tenantID, afterTime, afterID, p.Limit+1)
 	if err != nil {
 		return nil, fmt.Errorf("catalog: list courses: %w", err)
 	}
