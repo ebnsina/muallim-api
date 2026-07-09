@@ -16,10 +16,14 @@ import (
 // still pending makes a duplicate outstanding invitation a conflict rather than a
 // second row. Re-inviting after expiry or acceptance is ordinary and permitted.
 func (r *PostgresRepository) CreateInvitation(ctx context.Context, tx pgx.Tx, inv Invitation, digest []byte) error {
+	// created_at is written rather than left to the column default, so the row and
+	// the Invitation handed back to the caller carry the same instant. The default
+	// would fill the column and leave the struct's zero value to be rendered as
+	// year 1.
 	_, err := tx.Exec(ctx,
-		`INSERT INTO invitations (id, tenant_id, email, role, token_hash, invited_by, expires_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		inv.ID, inv.TenantID, inv.Email, inv.Role, digest, inv.InvitedBy, inv.ExpiresAt)
+		`INSERT INTO invitations (id, tenant_id, email, role, token_hash, invited_by, expires_at, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		inv.ID, inv.TenantID, inv.Email, inv.Role, digest, inv.InvitedBy, inv.ExpiresAt, inv.CreatedAt)
 
 	if err != nil {
 		var pgErr *pgconn.PgError

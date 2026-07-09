@@ -61,13 +61,15 @@ func (s *Service) Invite(ctx context.Context, p Principal, email, role, workspac
 		return Invitation{}, "", err
 	}
 
+	now := s.now()
 	inv := Invitation{
 		ID:        uuid.New(),
 		TenantID:  p.TenantID,
 		Email:     email,
 		Role:      role,
 		InvitedBy: &p.UserID,
-		ExpiresAt: s.now().Add(InvitationTTL),
+		ExpiresAt: now.Add(InvitationTTL),
+		CreatedAt: now,
 	}
 
 	err = s.db.WithTenant(ctx, p.TenantID, func(ctx context.Context, tx pgx.Tx) error {

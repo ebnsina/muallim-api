@@ -370,6 +370,55 @@ func TestAcceptingAnInvitationVerifiesANewAccount(t *testing.T) {
 	}
 }
 
+// The Invitation handed back to the caller must carry the timestamps the row
+// carries. Leaving created_at to the column default renders it to a client as
+// year 1, which is what a JSON zero time looks like.
+func TestInviteReturnsAPopulatedInvitation(t *testing.T) {
+	t.Parallel()
+
+	db := testDB(t)
+	svc, _ := newServiceWithMailer(t, db)
+	tenantID := seedTenant(t, db)
+
+	ownerPair, _, _, err := svc.Register(t.Context(), tenantID,
+		auth.Credentials{Email: uniqueEmail(), Password: password}, "Owner", auth.RequestContext{})
+	if err != nil {
+		t.Fatalf("register owner: %v", err)
+	}
+	owner, err := svc.Verify(ownerPair.AccessToken)
+	if err != nil {
+		t.Fatalf("verify owner token: %v", err)
+	}
+
+	inv, _, err := svc.Invite(t.Context(), owner, uniqueEmail(), auth.RoleStudent, "Acme", auth.RequestContext{})
+	if err != nil {
+		t.Fatalf("invite: %v", err)
+	}
+
+	if inv.CreatedAt.IsZero() {
+		t.Error("returned invitation has a zero CreatedAt")
+	}
+	if inv.ExpiresAt.IsZero() {
+		t.Error("returned invitation has a zero ExpiresAt")
+	}
+
+	// And the row agrees with the struct: listing it back must not shift the time.
+	list, err := svc.Invitations(t.Context(), owner, 10)
+	if err != nil {
+		t.Fatalf("list invitations: %v", err)
+	}
+	for _, got := range list {
+		if got.ID != inv.ID {
+			continue
+		}
+		if !got.CreatedAt.Equal(inv.CreatedAt) {
+			t.Errorf("stored CreatedAt %v != returned %v", got.CreatedAt, inv.CreatedAt)
+		}
+		return
+	}
+	t.Fatal("the invitation just created is not in the list")
+}
+
 // Resending is a no-op once the address is confirmed, and supersedes the
 // outstanding link otherwise.
 func TestResendVerification(t *testing.T) {
