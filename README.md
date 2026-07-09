@@ -95,8 +95,16 @@ make check          # vet, format check, and race-enabled tests — what CI runs
 make test
 make lint
 make fmt
+make seed           # the "localhost" workspace, in both databases
+make worker         # background jobs
 make build          # binaries into bin/
 ```
+
+## CI
+
+`.github/workflows/ci.yml` runs `make check`, `staticcheck`, `make spec`, and a build, against a real Postgres 17.
+
+The `lms` role it creates is `NOSUPERUSER NOBYPASSRLS`, and a step asserts as much before any test runs. A superuser bypasses row-level security, so every tenant-isolation test would pass against a database enforcing nothing — the most expensive kind of green build.
 
 ## Layout
 
