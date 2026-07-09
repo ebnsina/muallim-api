@@ -67,6 +67,15 @@ type Lesson struct {
 	DurationSeconds int
 	IsPreview       bool
 	Position        int
+
+	// The drip schedule as stored. Which of the two the course reads is decided by
+	// its drip_mode; both are carried so an author can see and edit the schedule
+	// they set, and a learner's client can mark a lesson as not yet open.
+	//
+	// Neither is a secret. A learner refused the lesson is told the date anyway,
+	// and knowing that lesson four opens in a week is the point of a drip.
+	AvailableAt        *time.Time
+	AvailableAfterDays *int
 }
 
 // Curriculum is a course together with its full topic and lesson tree.

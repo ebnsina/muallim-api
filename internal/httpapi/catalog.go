@@ -52,6 +52,11 @@ type LessonView struct {
 	DurationSeconds int    `json:"duration_seconds"`
 	IsPreview       bool   `json:"is_preview"`
 	Position        int    `json:"position"`
+
+	// The drip schedule as stored. Read against the course's drip_mode: neither
+	// means anything on its own.
+	AvailableAt        *time.Time `json:"available_at,omitempty"`
+	AvailableAfterDays *int       `json:"available_after_days,omitempty"`
 }
 
 // TopicView is a topic with its lessons.
@@ -196,12 +201,14 @@ func registerCatalog(api huma.API, svc *catalog.Service) {
 			lessons := make([]LessonView, 0, len(t.Lessons))
 			for _, l := range t.Lessons {
 				lessons = append(lessons, LessonView{
-					ID:              l.ID.String(),
-					Title:           l.Title,
-					ContentType:     l.ContentType,
-					DurationSeconds: l.DurationSeconds,
-					IsPreview:       l.IsPreview,
-					Position:        l.Position,
+					ID:                 l.ID.String(),
+					Title:              l.Title,
+					ContentType:        l.ContentType,
+					DurationSeconds:    l.DurationSeconds,
+					IsPreview:          l.IsPreview,
+					AvailableAt:        l.AvailableAt,
+					AvailableAfterDays: l.AvailableAfterDays,
+					Position:           l.Position,
 				})
 			}
 			out.Body.Topics = append(out.Body.Topics, TopicView{

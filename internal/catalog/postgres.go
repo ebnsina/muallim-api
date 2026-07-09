@@ -135,7 +135,8 @@ const topicsByCourseSQL = `
 // `topic_id = ANY($2)` collapses that to a single index scan, and the ORDER BY
 // means the rows arrive grouped and ordered, so the service never sorts in Go.
 const lessonsByTopicsSQL = `
-	SELECT id, topic_id, title, content_type, duration_seconds, is_preview, position
+	SELECT id, topic_id, title, content_type, duration_seconds, is_preview, position,
+	       available_at, available_after_days
 	FROM lessons
 	WHERE tenant_id = $1 AND topic_id = ANY($2)
 	ORDER BY topic_id, position, id`
@@ -179,7 +180,8 @@ func (r *PostgresRepository) CurriculumFor(ctx context.Context, tx pgx.Tx, tenan
 	lessons, err := pgx.CollectRows(lessonRows, func(row pgx.CollectableRow) (Lesson, error) {
 		var l Lesson
 		err := row.Scan(&l.ID, &l.TopicID, &l.Title, &l.ContentType,
-			&l.DurationSeconds, &l.IsPreview, &l.Position)
+			&l.DurationSeconds, &l.IsPreview, &l.Position,
+			&l.AvailableAt, &l.AvailableAfterDays)
 		return l, err
 	})
 	if err != nil {
