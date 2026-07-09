@@ -84,12 +84,20 @@ type LessonContentOutput struct {
 
 // LessonContentView is a lesson's full body.
 type LessonContentView struct {
-	ID              string     `json:"id" format:"uuid"`
-	Title           string     `json:"title"`
-	ContentType     string     `json:"content_type" enum:"text,video,quiz,assignment,live,scorm,h5p"`
-	Content         string     `json:"content"`
-	VideoSource     string     `json:"video_source" enum:"none,youtube,vimeo,embed,hosted"`
-	VideoURL        string     `json:"video_url,omitempty"`
+	ID          string `json:"id" format:"uuid"`
+	Title       string `json:"title"`
+	ContentType string `json:"content_type" enum:"text,video,quiz,assignment,live,scorm,h5p"`
+	Content     string `json:"content"`
+	VideoSource string `json:"video_source" enum:"none,youtube,vimeo,embed,hosted"`
+
+	// VideoURL is what the author typed. It is here so an author's editor can show
+	// it back to them; it is not safe to frame, and a client that puts it in an
+	// `iframe` src has reintroduced the hole VideoEmbedURL exists to close.
+	VideoURL string `json:"video_url,omitempty"`
+
+	// VideoEmbedURL is the player. The server built it from a validated id, on a
+	// host it recognises, over https. This is the one to embed.
+	VideoEmbedURL   string     `json:"video_embed_url,omitempty"`
 	DurationSeconds int        `json:"duration_seconds"`
 	IsPreview       bool       `json:"is_preview"`
 	Position        int        `json:"position"`
@@ -255,6 +263,7 @@ func registerEnrolment(api huma.API, svc *enroll.Service) {
 			Content:         lesson.Content,
 			VideoSource:     lesson.VideoSource,
 			VideoURL:        lesson.VideoURL,
+			VideoEmbedURL:   lesson.VideoEmbedURL,
 			DurationSeconds: lesson.DurationSeconds,
 			IsPreview:       lesson.IsPreview,
 			Position:        lesson.Position,

@@ -131,11 +131,16 @@ type LessonContent struct {
 	TopicID  uuid.UUID
 	CourseID uuid.UUID
 
-	Title           string
-	ContentType     string
-	Content         string
-	VideoSource     string
-	VideoURL        string
+	Title       string
+	ContentType string
+	Content     string
+	VideoSource string
+	VideoURL    string
+
+	// VideoEmbedURL is the player, written by a provider from a validated id. It is
+	// the only one of the three a client may put in an `iframe`; VideoURL is what an
+	// author typed, and nothing has vouched for it.
+	VideoEmbedURL   string
 	DurationSeconds int
 	IsPreview       bool
 	Position        int

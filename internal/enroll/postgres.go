@@ -140,7 +140,7 @@ func (r *PostgresRepository) CancelEnrolment(ctx context.Context, tx pgx.Tx, ten
 // constraint allows mid-reorder.
 const lessonForReaderSQL = `
 	SELECT l.id, l.topic_id, t.course_id,
-	       l.title, l.content_type, l.content, l.video_source, l.video_url,
+	       l.title, l.content_type, l.content, l.video_source, l.video_url, l.video_embed_url,
 	       l.duration_seconds, l.is_preview, l.position,
 	       l.available_at, l.available_after_days,
 	       c.status, c.drip_mode,
@@ -205,7 +205,7 @@ func (r *PostgresRepository) LessonForReader(ctx context.Context, tx pgx.Tx, ten
 	err := tx.QueryRow(ctx, lessonForReaderSQL, tenantID, lessonID, userID).Scan(
 		&v.Lesson.ID, &v.Lesson.TopicID, &v.Lesson.CourseID,
 		&v.Lesson.Title, &v.Lesson.ContentType, &v.Lesson.Content,
-		&v.Lesson.VideoSource, &v.Lesson.VideoURL,
+		&v.Lesson.VideoSource, &v.Lesson.VideoURL, &v.Lesson.VideoEmbedURL,
 		&v.Lesson.DurationSeconds, &v.Lesson.IsPreview, &v.Lesson.Position,
 		&v.Lesson.AvailableAt, &v.AvailableAfterDays,
 		&v.CourseStatus, &v.DripMode,

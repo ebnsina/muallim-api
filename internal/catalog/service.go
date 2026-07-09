@@ -25,11 +25,12 @@ type Service struct {
 	authoring AuthoringRepository
 	prereqs   PrerequisiteRepository
 	audit     AuditRecorder
+	video     VideoResolver
 }
 
 // NewService returns a Service.
-func NewService(db *database.DB, repo Repository, authoring AuthoringRepository, prereqs PrerequisiteRepository, recorder AuditRecorder) *Service {
-	return &Service{db: db, repo: repo, authoring: authoring, prereqs: prereqs, audit: recorder}
+func NewService(db *database.DB, repo Repository, authoring AuthoringRepository, prereqs PrerequisiteRepository, recorder AuditRecorder, video VideoResolver) *Service {
+	return &Service{db: db, repo: repo, authoring: authoring, prereqs: prereqs, audit: recorder, video: video}
 }
 
 // ListCourses returns one page of a tenant's courses.

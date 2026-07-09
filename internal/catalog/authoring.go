@@ -60,6 +60,11 @@ type NewLesson struct {
 	VideoURL        string
 	DurationSeconds int
 	IsPreview       bool
+
+	// The player URL, written by AddLesson from the resolved video and unexported
+	// so that no caller can supply one. That is the whole guarantee: an `iframe`
+	// src that a request body could set is a request body that runs on this origin.
+	videoEmbedURL string
 }
 
 // LessonPatch updates a lesson.
@@ -80,6 +85,10 @@ type LessonPatch struct {
 	// course's mode makes it inert, which is the case authors actually have.
 	AvailableAt        *time.Time
 	AvailableAfterDays *int
+
+	// Set by EditLesson from the resolved video, never by a caller. Non-nil exactly
+	// when VideoSource and VideoURL are, which is why they must be sent together.
+	videoEmbedURL *string
 }
 
 // AuthoringRepository is the persistence contract for editing a curriculum.
@@ -199,8 +208,16 @@ func (s *Service) AddLesson(ctx context.Context, tenantID, topicID uuid.UUID, n 
 		return Lesson{}, err
 	}
 
+	// Resolved before the transaction opens, because it is pure and because a
+	// rejected URL should cost nothing.
+	video, err := s.resolveVideo(n.VideoSource, n.VideoURL)
+	if err != nil {
+		return Lesson{}, err
+	}
+	n.VideoSource, n.VideoURL, n.videoEmbedURL = video.Source, video.URL, video.EmbedURL
+
 	var created Lesson
-	err := s.db.WithTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+	err = s.db.WithTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		created, err = s.authoring.CreateLesson(ctx, tx, tenantID, topicID, n)
 		if err != nil {
@@ -220,9 +237,22 @@ func (s *Service) AddLesson(ctx context.Context, tenantID, topicID uuid.UUID, n 
 }
 
 // EditLesson applies a patch.
+//
+// A patch that touches the video re-resolves it. The player URL is derived from
+// the source and the URL together, so a patch may not name one without the other:
+// changing `video_source` to `hosted` while leaving the old YouTube link in place
+// would otherwise store a player that plays the wrong thing, or nothing.
 func (s *Service) EditLesson(ctx context.Context, tenantID, lessonID uuid.UUID, p LessonPatch, author Author) (Lesson, error) {
 	if err := p.validate(); err != nil {
 		return Lesson{}, err
+	}
+
+	if p.VideoSource != nil {
+		video, err := s.resolveVideo(*p.VideoSource, *p.VideoURL)
+		if err != nil {
+			return Lesson{}, err
+		}
+		p.VideoSource, p.VideoURL, p.videoEmbedURL = &video.Source, &video.URL, &video.EmbedURL
 	}
 
 	var updated Lesson
@@ -349,12 +379,12 @@ func (s *Service) Unpublish(ctx context.Context, tenantID uuid.UUID, slug string
 
 // validate checks a new lesson's shape. A video lesson without a video is a
 // lesson that renders as an empty box.
+//
+// Whether the URL itself is one this deployment will frame is a separate question,
+// answered by the VideoResolver, because the answer depends on configuration.
 func (n NewLesson) validate() error {
 	if n.ContentType == "video" && n.VideoSource == VideoNone {
 		return fmt.Errorf("%w: a video lesson needs a video source", ErrInvalidLesson)
-	}
-	if n.VideoSource != VideoNone && n.VideoURL == "" {
-		return fmt.Errorf("%w: a video source needs a URL", ErrInvalidLesson)
 	}
 	if n.DurationSeconds < 0 {
 		return fmt.Errorf("%w: duration cannot be negative", ErrInvalidLesson)
@@ -366,8 +396,15 @@ func (p LessonPatch) validate() error {
 	if p.DurationSeconds != nil && *p.DurationSeconds < 0 {
 		return fmt.Errorf("%w: duration cannot be negative", ErrInvalidLesson)
 	}
-	if p.VideoSource != nil && *p.VideoSource != VideoNone && p.VideoURL != nil && *p.VideoURL == "" {
-		return fmt.Errorf("%w: a video source needs a URL", ErrInvalidLesson)
+
+	// The player URL is a function of both, so both are re-derived together or
+	// neither is touched. Half a patch would leave the three columns disagreeing
+	// about which video this lesson is.
+	if (p.VideoSource == nil) != (p.VideoURL == nil) {
+		return fmt.Errorf("%w: change the video source and the video URL together", ErrInvalidLesson)
+	}
+	if p.ContentType != nil && *p.ContentType == "video" && p.VideoSource != nil && *p.VideoSource == VideoNone {
+		return fmt.Errorf("%w: a video lesson needs a video source", ErrInvalidLesson)
 	}
 	return nil
 }

@@ -119,8 +119,8 @@ func (r *PostgresRepository) ReorderTopics(ctx context.Context, tx pgx.Tx, tenan
 
 const appendLessonSQL = `
 	INSERT INTO lessons (tenant_id, topic_id, title, content_type, content, video_source, video_url,
-	                     duration_seconds, is_preview, position)
-	SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, coalesce(max(position) + 1, 0)
+	                     video_embed_url, duration_seconds, is_preview, position)
+	SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, coalesce(max(position) + 1, 0)
 	FROM lessons WHERE tenant_id = $1 AND topic_id = $2
 	RETURNING id, topic_id, title, content_type, duration_seconds, is_preview, position`
 
@@ -128,7 +128,7 @@ const appendLessonSQL = `
 func (r *PostgresRepository) CreateLesson(ctx context.Context, tx pgx.Tx, tenantID, topicID uuid.UUID, n NewLesson) (Lesson, error) {
 	var l Lesson
 	err := tx.QueryRow(ctx, appendLessonSQL, tenantID, topicID, n.Title, n.ContentType,
-		n.Content, n.VideoSource, n.VideoURL, n.DurationSeconds, n.IsPreview).
+		n.Content, n.VideoSource, n.VideoURL, n.videoEmbedURL, n.DurationSeconds, n.IsPreview).
 		Scan(&l.ID, &l.TopicID, &l.Title, &l.ContentType, &l.DurationSeconds, &l.IsPreview, &l.Position)
 
 	if err != nil {
@@ -152,15 +152,16 @@ func (r *PostgresRepository) UpdateLesson(ctx context.Context, tx pgx.Tx, tenant
 		     content              = coalesce($5, content),
 		     video_source         = coalesce($6, video_source),
 		     video_url            = coalesce($7, video_url),
-		     duration_seconds     = coalesce($8, duration_seconds),
-		     is_preview           = coalesce($9, is_preview),
-		     available_at         = coalesce($10, available_at),
-		     available_after_days = coalesce($11, available_after_days),
+		     video_embed_url      = coalesce($8, video_embed_url),
+		     duration_seconds     = coalesce($9, duration_seconds),
+		     is_preview           = coalesce($10, is_preview),
+		     available_at         = coalesce($11, available_at),
+		     available_after_days = coalesce($12, available_after_days),
 		     updated_at           = now()
 		 WHERE tenant_id = $1 AND id = $2
 		 RETURNING id, topic_id, title, content_type, duration_seconds, is_preview, position`,
 		tenantID, lessonID, p.Title, p.ContentType, p.Content, p.VideoSource, p.VideoURL,
-		p.DurationSeconds, p.IsPreview, p.AvailableAt, p.AvailableAfterDays).
+		p.videoEmbedURL, p.DurationSeconds, p.IsPreview, p.AvailableAt, p.AvailableAfterDays).
 		Scan(&l.ID, &l.TopicID, &l.Title, &l.ContentType, &l.DurationSeconds, &l.IsPreview, &l.Position)
 
 	if err != nil {

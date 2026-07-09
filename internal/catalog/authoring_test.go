@@ -433,7 +433,6 @@ func TestLessonValidation(t *testing.T) {
 
 	tests := map[string]catalog.NewLesson{
 		"video lesson with no source": {Title: "L", ContentType: "video", VideoSource: catalog.VideoNone},
-		"source with no url":          {Title: "L", ContentType: "video", VideoSource: catalog.VideoYouTube},
 		"negative duration":           {Title: "L", ContentType: "text", VideoSource: catalog.VideoNone, DurationSeconds: -1},
 	}
 

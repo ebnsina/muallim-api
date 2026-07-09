@@ -2,6 +2,7 @@ package catalog_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/ebnsina/lms-api/internal/audit"
 	"github.com/ebnsina/lms-api/internal/catalog"
+	"github.com/ebnsina/lms-api/internal/media"
 	"github.com/ebnsina/lms-api/internal/platform/database"
 )
 
@@ -121,9 +123,29 @@ func (a testAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, 
 	})
 }
 
+// testVideos adapts the real media registry, exactly as cmd/ does, with the
+// `embed` source enabled for one host. A stub would let a lesson store an embed
+// URL nothing validated, which is the defect this seam exists to prevent.
+type testVideos struct{ registry *media.Registry }
+
+func (v testVideos) ResolveVideo(source, url string) (catalog.Video, error) {
+	video, err := v.registry.Resolve(source, url)
+	if err != nil {
+		if errors.Is(err, media.ErrInvalidVideo) || errors.Is(err, media.ErrUnsupportedSource) {
+			return catalog.Video{}, fmt.Errorf("%w: %s", catalog.ErrInvalidVideo, media.Detail(err))
+		}
+		return catalog.Video{}, err
+	}
+	return catalog.Video{Source: video.Source, URL: video.URL, EmbedURL: video.EmbedURL}, nil
+}
+
+func newVideos() testVideos {
+	return testVideos{registry: media.NewRegistry(media.NewEmbed([]string{"player.example.test"}))}
+}
+
 func newService(db *database.DB) *catalog.Service {
 	repo := catalog.NewPostgresRepository()
-	return catalog.NewService(db, repo, repo, repo, testAuditor{audit.NewRecorder()})
+	return catalog.NewService(db, repo, repo, repo, testAuditor{audit.NewRecorder()}, newVideos())
 }
 
 // The regression guard. Loading a curriculum must cost a fixed number of queries

@@ -99,6 +99,20 @@ type Config struct {
 	// development.
 	MailFile string
 
+	// StreamCustomer is the Cloudflare Stream customer code — the label in
+	// `customer-<code>.cloudflarestream.com`. Empty means this deployment hosts no
+	// video of its own, and the `hosted` source is refused rather than stored.
+	StreamCustomer string
+
+	// EmbedHosts are the hosts whose pages an author may put in an `iframe` with
+	// the `embed` video source.
+	//
+	// Empty by default, and empty means the source is off. It is the one source
+	// where the framed URL is an author's own, so a deployment that has not named
+	// the hosts it trusts has not decided to allow it. YouTube and Vimeo are
+	// unaffected: their URLs are written from a video id, not pasted.
+	EmbedHosts []string
+
 	// WorkerMaxWorkers bounds how many jobs the worker process runs at once.
 	WorkerMaxWorkers int
 
@@ -151,6 +165,9 @@ func Load() (Config, error) {
 		MailFrom:     env("LMS_MAIL_FROM", "LMS <no-reply@localhost>"),
 		MailFile:     env("LMS_MAIL_FILE", ""),
 
+		StreamCustomer: env("LMS_CLOUDFLARE_STREAM_CUSTOMER", ""),
+		EmbedHosts:     list(env("LMS_EMBED_ALLOWED_HOSTS", "")),
+
 		WorkerMaxWorkers: number("LMS_WORKER_MAX_WORKERS", 10),
 	}
 
@@ -190,6 +207,14 @@ func (c Config) validate() error {
 	// alongside a wildcard origin. Failing here beats debugging it in a browser.
 	if slices.Contains(c.CORSOrigins, "*") {
 		errs = append(errs, errors.New(`config: LMS_CORS_ORIGINS cannot contain "*" because the API allows credentials; list exact origins`))
+	}
+
+	// An allowlist is a list of hosts, and there is no host called "*". Nothing
+	// would honour a wildcard here — the check is an exact map lookup — so an
+	// operator who wrote one would believe they had opened the door and be wrong in
+	// the safe direction, which is still a lie worth refusing.
+	if slices.Contains(c.EmbedHosts, "*") {
+		errs = append(errs, errors.New(`config: LMS_EMBED_ALLOWED_HOSTS cannot contain "*"; list exact hosts, e.g. fast.wistia.net`))
 	}
 
 	// A signing secret is not optional anywhere it will actually sign anything.

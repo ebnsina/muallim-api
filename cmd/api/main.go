@@ -149,8 +149,13 @@ func run() error {
 
 	authRepo := auth.NewPostgresRepository()
 	identities := auth.NewService(db, authRepo, authRepo, authRepo, tokens, authAuditor{recorder}, outbox, revocations, log)
+	videos, err := newVideoResolver(cfg)
+	if err != nil {
+		return err
+	}
+
 	catalogRepo := catalog.NewPostgresRepository()
-	courses := catalog.NewService(db, catalogRepo, catalogRepo, catalogRepo, catalogAuditor{recorder})
+	courses := catalog.NewService(db, catalogRepo, catalogRepo, catalogRepo, catalogAuditor{recorder}, videos)
 	learning := enroll.NewService(db, enroll.NewPostgresRepository(), enrolAuditor{recorder})
 
 	handler, _ := httpapi.New(httpapi.Options{
