@@ -60,16 +60,17 @@ type Service struct {
 	tokens  *TokenIssuer
 	audit   AuditRecorder
 	mail    Mailer
+	jobs    Enqueuer
 	log     *slog.Logger
 
 	now func() time.Time
 }
 
 // NewService returns a Service.
-func NewService(db *database.DB, repo Repository, members MembershipRepository, creds CredentialRepository, tokens *TokenIssuer, recorder AuditRecorder, mail Mailer, log *slog.Logger) *Service {
+func NewService(db *database.DB, repo Repository, members MembershipRepository, creds CredentialRepository, tokens *TokenIssuer, recorder AuditRecorder, mail Mailer, jobs Enqueuer, log *slog.Logger) *Service {
 	return &Service{
 		db: db, repo: repo, members: members, creds: creds,
-		tokens: tokens, audit: recorder, mail: mail, log: log, now: time.Now,
+		tokens: tokens, audit: recorder, mail: mail, jobs: jobs, log: log, now: time.Now,
 	}
 }
 

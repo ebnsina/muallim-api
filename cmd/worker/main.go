@@ -101,9 +101,15 @@ func run() error {
 		return err
 	}
 
+	revocations, err := auth.NewRevokeSessionsWorker(maintenance)
+	if err != nil {
+		return err
+	}
+
 	workers := river.NewWorkers()
 	river.AddWorker(workers, emails)
 	river.AddWorker(workers, orphans)
+	river.AddWorker(workers, revocations)
 
 	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Logger:  log,

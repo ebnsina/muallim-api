@@ -156,14 +156,15 @@ func (s *Service) RequestPasswordReset(ctx context.Context, tenantID uuid.UUID, 
 
 // ResetPassword spends a reset token and sets a new password.
 //
-// Every session in this workspace is revoked. Whoever forced the reset — the
-// owner of the account or the person who stole it — the other one is now logged
-// out and must present the new password.
+// Every session the user holds is revoked. Whoever forced the reset — the owner
+// of the account or the person who stole it — the other one is now logged out and
+// must present the new password.
 //
-// The revocation is bounded by the bound tenant, because sessions are. A person
-// who is a member of two workspaces has their password changed globally and their
-// other workspace's sessions left alive. That is a gap, and closing it needs a
-// cross-tenant sweep through WithoutTenant.
+// This workspace's sessions go in this transaction. The others cannot: a session
+// is tenant-scoped and a password is not, so reaching them means running unbound,
+// which this transaction is not. A job does it, enqueued here so that it commits
+// with the password change or not at all — a password changed without the job is
+// a device still signed in somewhere.
 func (s *Service) ResetPassword(ctx context.Context, tenantID uuid.UUID, token, password string, rc RequestContext) error {
 	if err := validateRefreshTokenFormat(token); err != nil {
 		return ErrTokenInvalid
@@ -203,7 +204,15 @@ func (s *Service) ResetPassword(ctx context.Context, tenantID uuid.UUID, token, 
 		if err := s.creds.SetPasswordHash(ctx, tx, tenantID, ct.UserID, hash); err != nil {
 			return err
 		}
+		// This workspace, now: the reset should not depend on a worker being up for
+		// the browser in front of us to be logged out.
 		if err := s.members.RevokeAllUserSessions(ctx, tx, tenantID, ct.UserID); err != nil {
+			return err
+		}
+
+		// Every other workspace, shortly. Same transaction, so the job exists if and
+		// only if the password changed.
+		if err := s.jobs.RevokeSessionsEverywhere(ctx, tx, ct.UserID); err != nil {
 			return err
 		}
 

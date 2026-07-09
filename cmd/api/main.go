@@ -139,8 +139,16 @@ func run() error {
 		log.Warn("LMS_SMTP_HOST is unset; the worker will log messages instead of sending them, including single-use tokens")
 	}
 
+	// Session revocation crosses workspaces, so it cannot run inside the
+	// tenant-bound transaction that resets a password. It is enqueued there
+	// instead, on the same transaction, and worked by cmd/worker.
+	revocations, err := auth.NewRiverEnqueuer(jobs, log)
+	if err != nil {
+		return err
+	}
+
 	authRepo := auth.NewPostgresRepository()
-	identities := auth.NewService(db, authRepo, authRepo, authRepo, tokens, authAuditor{recorder}, outbox, log)
+	identities := auth.NewService(db, authRepo, authRepo, authRepo, tokens, authAuditor{recorder}, outbox, revocations, log)
 	catalogRepo := catalog.NewPostgresRepository()
 	courses := catalog.NewService(db, catalogRepo, catalogRepo, catalogAuditor{recorder})
 	learning := enroll.NewService(db, enroll.NewPostgresRepository(), enrolAuditor{recorder})

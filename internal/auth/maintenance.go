@@ -18,11 +18,12 @@ import (
 // holding a connection for all of it.
 const DefaultErasureBatch = 100
 
-// MaintenanceRepository reads and erases across tenants. It is satisfied by the
+// MaintenanceRepository reads and writes across tenants. It is satisfied by the
 // same Postgres repository, but its methods run only under WithoutTenant.
 type MaintenanceRepository interface {
 	OrphanedUsers(ctx context.Context, tx pgx.Tx, limit int) ([]User, error)
 	DeleteUser(ctx context.Context, tx pgx.Tx, userID uuid.UUID) (bool, error)
+	RevokeSessionsEverywhere(ctx context.Context, tx pgx.Tx, userID uuid.UUID) (int64, error)
 }
 
 // Maintenance performs platform-wide work that belongs to no tenant.
@@ -64,6 +65,36 @@ func NewMaintenance(db *database.DB, repo MaintenanceRepository, log *slog.Logge
 // and an orphan has no tenant to file it under. The erasure is logged instead,
 // by id and count, never by address: a log line naming the person who asked to
 // be forgotten is its own violation.
+// RevokeSessionsEverywhere ends every session a user holds, in every workspace,
+// and returns how many it ended.
+//
+// A password is global and a session is not, so a reset performed from one
+// workspace must reach the others — otherwise the device the user is trying to
+// lock out stays signed in wherever they happen to belong. Only an unbound
+// session can see across that boundary, which is why this is maintenance work
+// and not something the reset does inline.
+//
+// Idempotent: sessions already revoked are not matched, so a retried job revokes
+// nothing and reports zero.
+func (m *Maintenance) RevokeSessionsEverywhere(ctx context.Context, userID uuid.UUID) (int64, error) {
+	var revoked int64
+
+	err := m.db.WithoutTenant(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		revoked, err = m.repo.RevokeSessionsEverywhere(ctx, tx, userID)
+		return err
+	})
+	if err != nil {
+		return 0, fmt.Errorf("auth: revoke sessions everywhere: %w", err)
+	}
+
+	if revoked > 0 {
+		m.log.InfoContext(ctx, "revoked every session a user held",
+			slog.String("user_id", userID.String()), slog.Int64("sessions", revoked))
+	}
+	return revoked, nil
+}
+
 func (m *Maintenance) EraseOrphanedUsers(ctx context.Context, limit int) (int, error) {
 	if limit <= 0 {
 		limit = DefaultErasureBatch

@@ -64,3 +64,21 @@ func (r *PostgresRepository) DeleteUser(ctx context.Context, tx pgx.Tx, userID u
 	}
 	return tag.RowsAffected() == 1, nil
 }
+
+// RevokeSessionsEverywhere ends every live session a user holds, in every
+// workspace, and reports how many it ended.
+//
+// No tenant_id in the WHERE clause, deliberately: that is the whole point, and
+// it is why this must run under database.WithoutTenant. Under a bound tenant the
+// sessions of every other workspace are invisible and the statement would report
+// success having changed nothing.
+func (r *PostgresRepository) RevokeSessionsEverywhere(ctx context.Context, tx pgx.Tx, userID uuid.UUID) (int64, error) {
+	tag, err := tx.Exec(ctx,
+		`UPDATE sessions SET revoked_at = now()
+		 WHERE user_id = $1 AND revoked_at IS NULL`,
+		userID)
+	if err != nil {
+		return 0, fmt.Errorf("auth: revoke sessions everywhere for %s: %w", userID, err)
+	}
+	return tag.RowsAffected(), nil
+}

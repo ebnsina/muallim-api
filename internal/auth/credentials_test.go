@@ -229,6 +229,126 @@ func TestPasswordResetRevokesExistingSessions(t *testing.T) {
 	}
 }
 
+// A password is global; a session is not. Resetting from one workspace must end
+// the sessions the same person holds in the others, or the device they are trying
+// to lock out stays signed in wherever they happen to belong.
+//
+// The revocation is a job, so this test does what the worker does: the service
+// queues it, and the sweep is then run for real against both workspaces.
+func TestPasswordResetRevokesSessionsInEveryWorkspace(t *testing.T) {
+	t.Parallel()
+
+	db := testDB(t)
+	svc, mail, jobs := newServiceWithFakes(t, db)
+
+	acme := seedTenant(t, db)
+	globex := seedTenant(t, db)
+
+	// One person, two workspaces: registered here, invited there.
+	email := registerOwner(t, svc, acme)
+	globexOwnerPair, _, _, err := svc.Register(t.Context(), globex,
+		auth.Credentials{Email: uniqueEmail(), Password: password}, "Owner", auth.RequestContext{})
+	if err != nil {
+		t.Fatalf("register globex owner: %v", err)
+	}
+	globexOwner, err := svc.Verify(globexOwnerPair.AccessToken)
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+
+	_, invite, err := svc.Invite(t.Context(), globexOwner, email, auth.RoleStudent, "Globex", auth.RequestContext{})
+	if err != nil {
+		t.Fatalf("invite: %v", err)
+	}
+	globexPair, user, _, err := svc.AcceptInvitation(t.Context(), globex, invite, password, "Ada", auth.RequestContext{})
+	if err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+
+	// A live session in Acme too, held by the device we are trying to lock out.
+	acmePair, _, _, err := svc.Login(t.Context(), acme,
+		auth.Credentials{Email: email, Password: password}, auth.RequestContext{})
+	if err != nil {
+		t.Fatalf("login to acme: %v", err)
+	}
+
+	// Reset from Acme.
+	if err := svc.RequestPasswordReset(t.Context(), acme, email, auth.RequestContext{}); err != nil {
+		t.Fatalf("request reset: %v", err)
+	}
+	sent, _ := mail.lastOf("password_reset", email)
+	if err := svc.ResetPassword(t.Context(), acme, sent.Token, "a-fresh-global-password", auth.RequestContext{}); err != nil {
+		t.Fatalf("reset: %v", err)
+	}
+
+	// Acme's sessions die with the reset itself: the browser in front of us must
+	// not depend on a worker being up.
+	if _, err := svc.Refresh(t.Context(), acme, acmePair.RefreshToken, auth.RequestContext{}); !errors.Is(err, auth.ErrSessionInvalid) {
+		t.Errorf("acme refresh after reset = %v, want ErrSessionInvalid", err)
+	}
+
+	// Globex's session outlives the transaction, and the job is what ends it.
+	if !jobs.queued(user.ID) {
+		t.Fatal("resetting a password queued no cross-workspace revocation")
+	}
+	if _, err := svc.Refresh(t.Context(), globex, globexPair.RefreshToken, auth.RequestContext{}); err != nil {
+		t.Fatalf("globex session should still be live until the job runs: %v", err)
+	}
+
+	// Run the job, as the worker would.
+	revoked, err := newMaintenance(t, db).RevokeSessionsEverywhere(t.Context(), user.ID)
+	if err != nil {
+		t.Fatalf("revoke everywhere: %v", err)
+	}
+	if revoked == 0 {
+		t.Fatal("the sweep revoked nothing")
+	}
+
+	// The Refresh above rotated Globex's token, so present the successor.
+	if _, err := svc.Refresh(t.Context(), globex, globexPair.RefreshToken, auth.RequestContext{}); err == nil {
+		t.Error("a session in another workspace survived the password reset")
+	}
+}
+
+// Idempotent, because jobs are retried.
+func TestRevokeSessionsEverywhereIsIdempotent(t *testing.T) {
+	t.Parallel()
+
+	db := testDB(t)
+	svc := newService(t, db)
+	tenantID := seedTenant(t, db)
+
+	email := uniqueEmail()
+	if _, _, _, err := svc.Register(t.Context(), tenantID,
+		auth.Credentials{Email: email, Password: password}, "Ada", auth.RequestContext{}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	_, user, _, err := svc.Login(t.Context(), tenantID,
+		auth.Credentials{Email: email, Password: password}, auth.RequestContext{})
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+
+	maintenance := newMaintenance(t, db)
+
+	first, err := maintenance.RevokeSessionsEverywhere(t.Context(), user.ID)
+	if err != nil {
+		t.Fatalf("first sweep: %v", err)
+	}
+	if first == 0 {
+		t.Fatal("the first sweep revoked nothing, so the second proves nothing")
+	}
+
+	second, err := maintenance.RevokeSessionsEverywhere(t.Context(), user.ID)
+	if err != nil {
+		t.Fatalf("second sweep: %v", err)
+	}
+	if second != 0 {
+		t.Errorf("a repeated sweep revoked %d sessions again", second)
+	}
+}
+
 // Asking to reset an address that has no account here reports success and mails
 // nothing. Any other behaviour is an enumeration oracle: a stranger learns which
 // addresses belong to this workspace by reading status codes.

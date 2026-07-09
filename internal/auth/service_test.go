@@ -139,13 +139,49 @@ func (m *fakeMailer) countOf(kind string) int {
 	return n
 }
 
+// fakeEnqueuer records the jobs a service queues.
+//
+// It records rather than performs. Doing the work here would open a second
+// transaction while the caller's is still holding row locks on the very sessions
+// it wants to revoke, and the two would wait on each other forever. River has the
+// same property for the same reason: the job runs after the commit.
+type fakeEnqueuer struct {
+	mu      sync.Mutex
+	revoked []uuid.UUID
+}
+
+func (e *fakeEnqueuer) RevokeSessionsEverywhere(_ context.Context, _ pgx.Tx, userID uuid.UUID) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.revoked = append(e.revoked, userID)
+	return nil
+}
+
+func (e *fakeEnqueuer) queued(userID uuid.UUID) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	for _, id := range e.revoked {
+		if id == userID {
+			return true
+		}
+	}
+	return false
+}
+
 func newService(t *testing.T, db *database.DB) *auth.Service {
 	t.Helper()
-	svc, _ := newServiceWithMailer(t, db)
+	svc, _, _ := newServiceWithFakes(t, db)
 	return svc
 }
 
 func newServiceWithMailer(t *testing.T, db *database.DB) (*auth.Service, *fakeMailer) {
+	t.Helper()
+	svc, mail, _ := newServiceWithFakes(t, db)
+	return svc, mail
+}
+
+func newServiceWithFakes(t *testing.T, db *database.DB) (*auth.Service, *fakeMailer, *fakeEnqueuer) {
 	t.Helper()
 
 	tokens, err := auth.NewTokenIssuer("a-signing-secret-of-at-least-32-bytes", "lms-api-test")
@@ -154,8 +190,12 @@ func newServiceWithMailer(t *testing.T, db *database.DB) (*auth.Service, *fakeMa
 	}
 	repo := auth.NewPostgresRepository()
 	mail := &fakeMailer{}
+	jobs := &fakeEnqueuer{}
 
-	return auth.NewService(db, repo, repo, repo, tokens, authAuditor{audit.NewRecorder()}, mail, discardLogger()), mail
+	svc := auth.NewService(db, repo, repo, repo, tokens,
+		authAuditor{audit.NewRecorder()}, mail, jobs, discardLogger())
+
+	return svc, mail, jobs
 }
 
 func uniqueEmail() string { return "u" + uuid.NewString()[:8] + "@example.test" }
