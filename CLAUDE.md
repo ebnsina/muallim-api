@@ -15,14 +15,13 @@ Go 1.26 · Postgres 17 · Huma v2 (`humago` stdlib adapter, OpenAPI 3.1, RFC 945
 ## Commands
 
 ```bash
-go build ./...
-go vet ./...
-gofmt -l .                  # must print nothing
-go test ./... -race
-go run ./cmd/api            # HTTP server
-go run ./cmd/worker         # River job worker
-go run ./cmd/migrate up     # migrations
-docker compose up -d        # Postgres
+make db-create      # role + lms/lms_test databases on a local Postgres
+make migrate        # apply migrations to both
+make run            # HTTP server on :8080
+make check          # vet, format check, race tests against a real Postgres
+make test           # tests; database tests skip without LMS_TEST_DATABASE_URL
+make test-db        # every test, including the ones that need Postgres
+make spec           # write bin/openapi.json — the contract for lms-web
 ```
 
 ## Rules that are easy to violate
@@ -35,7 +34,15 @@ docker compose up -d        # Postgres
 
 **Handle every error path.** `_ = err` is a rejection. 404, 401, 403, 409, 422, 429, 500 all render deliberately as `application/problem+json`. A 5xx never leaks internals: log the wrapped error with a correlation ID, return the ID.
 
-**Every tenant-scoped query filters by `tenant_id`,** and an RLS policy backs it up. RLS is the net, not the primary control.
+**Every tenant-scoped query filters by `tenant_id`,** and an RLS policy backs it up. RLS is the net, not the primary control. Reach the database only through `db.WithTenant` / `db.WithTenantReadOnly`, which bind `app.tenant_id` transaction-locally — a session-level `SET` on a pooled connection is a cross-tenant leak. Repositories get a `pgx.Tx`, never the pool. The database role must not be a superuser, or RLS is silently bypassed.
+
+**Never query inside a loop over rows.** Batch children with `= ANY($1)` and stitch with a map. `catalog.CurriculumFor` is the reference: three queries for a course of any size. Every tree-loading endpoint gets a `database.Counter` test asserting an exact query count across growing fixtures — that is what makes an N+1 a build failure rather than a customer's problem.
+
+**Keyset pagination, never `OFFSET`.** Fetch `limit + 1` to detect a next page; never `COUNT(*)`. No list endpoint is unbounded.
+
+**Every hot-path query needs an index covering both filter and sort.** Verify with `EXPLAIN (ANALYZE, COSTS OFF)` at realistic row counts. A `Sort` node or `Seq Scan` on a request path is a defect.
+
+**Cache only what is read every request and changes rarely** — today, tenant resolution. Single-flight the misses, cache negatives briefly, invalidate on write. Read endpoints carry `ETag` and answer `If-None-Match` with 304; `public` caching only for responses with no user-specific data.
 
 **Money is `bigint` minor units + `currency char(3)`.** Never a float.
 

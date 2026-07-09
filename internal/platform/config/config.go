@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -32,6 +33,26 @@ type Config struct {
 	ShutdownTimeout time.Duration
 
 	DatabaseURL string
+
+	// Pool sizing. Postgres costs roughly 10 MB of backend memory per connection
+	// and degrades past a few hundred, so more is not better: a small pool with a
+	// queue outperforms a large one that thrashes the server.
+	DBMaxConns int32
+	DBMinConns int32
+
+	// DBStatementTimeout bounds any single query at the server. A query that has
+	// run for this long is a bug or a missing index, and cancelling it protects
+	// every other request from waiting behind it.
+	DBStatementTimeout time.Duration
+
+	// DBSlowQueryThreshold is the duration above which a query is logged at warn,
+	// so an unindexed scan announces itself before a customer does.
+	DBSlowQueryThreshold time.Duration
+
+	// TenantCacheTTL bounds how long a host resolution may be stale. It also
+	// bounds how long a suspended tenant keeps serving, so it is minutes, not
+	// hours.
+	TenantCacheTTL time.Duration
 
 	// CORSOrigins are the exact browser origins allowed to call this API. lms-web
 	// is always a different origin, so this is never empty in practice.
@@ -59,6 +80,12 @@ func Load() (Config, error) {
 		ShutdownTimeout: duration("LMS_SHUTDOWN_TIMEOUT", 20*time.Second),
 		DatabaseURL:     env("LMS_DATABASE_URL", ""),
 		CORSOrigins:     list(env("LMS_CORS_ORIGINS", "http://localhost:5173")),
+
+		DBMaxConns:           int32(number("LMS_DB_MAX_CONNS", 10)),
+		DBMinConns:           int32(number("LMS_DB_MIN_CONNS", 2)),
+		DBStatementTimeout:   duration("LMS_DB_STATEMENT_TIMEOUT", 5*time.Second),
+		DBSlowQueryThreshold: duration("LMS_DB_SLOW_QUERY_THRESHOLD", 200*time.Millisecond),
+		TenantCacheTTL:       duration("LMS_TENANT_CACHE_TTL", 5*time.Minute),
 	}
 
 	level, err := logLevel(env("LMS_LOG_LEVEL", "info"))
@@ -120,6 +147,18 @@ func env(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func number(key string, fallback int) int {
+	v, ok := os.LookupEnv(key)
+	if !ok || v == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return fallback
+	}
+	return n
 }
 
 func duration(key string, fallback time.Duration) time.Duration {

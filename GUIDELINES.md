@@ -66,7 +66,7 @@ Go interfaces belong to the caller, not the implementation. Do not export a `Sto
 - **No package-level mutable state.** No `init()` doing work. No global DB handle, logger, or config. Pass dependencies explicitly; construct them in `cmd/`.
 - **Constructors validate.** `New*` returns `(T, error)` and refuses to build an unusable value. A constructed object is always ready to use.
 - **Zero value or error.** No half-initialised structs.
-- **Table-driven tests**, `t.Parallel()` where safe, real Postgres via testcontainers for repository tests. Mocking a database tests the mock.
+- **Table-driven tests**, `t.Parallel()` where safe. Repository tests run against a real Postgres via `LMS_TEST_DATABASE_URL` (`make test-db`), and skip when it is unset. Mocking a database tests the mock: neither row-level security nor a query plan has an opinion about a fake. Each test seeds its own tenant, which keeps parallel tests isolated and exercises that isolation at the same time.
 
 ### Comments
 
@@ -144,9 +144,65 @@ Respect `ctx.Done()`. A cancelled request must not leave a transaction open or a
 - **Enqueue jobs inside the transaction** that produced them (`client.InsertTx`). River is Postgres-backed precisely so that a job and the row that caused it commit together, or neither does. This eliminates an entire class of "the row exists but the email never sent" bug.
 - **Idempotency for external events.** Gateway webhooks are deduplicated on a unique index over `(gateway, external_id)`. Assume every webhook arrives at least twice, out of order.
 
+### Tenant binding
+
+Tenant-scoped work goes through `db.WithTenant` or `db.WithTenantReadOnly`, always. Both open a transaction and bind `app.tenant_id` with `set_config(..., true)`, which is transaction-local — a session-level `SET` on a pooled connection is a cross-tenant data leak waiting for the right interleaving. Repositories receive a `pgx.Tx` and never touch the pool, so no query can skip the binding.
+
+A missing tenant is `uuid.Nil`, and `WithTenant` refuses it. Forgetting a tenant therefore fails loudly instead of reading someone else's rows. `WithoutTenant` exists for the `tenants` table alone; every call site is a place to look twice.
+
+Reads use `WithTenantReadOnly`. Postgres then refuses any write inside the transaction, which turns "this list endpoint accidentally mutates state" from something a reviewer must notice into a database error.
+
 ---
 
-## 6. Background work
+## 6. Performance
+
+Performance is the competitive claim. LearnDash and Tutor are documented as slow — a large site has measured 120 seconds to list quizzes and 35 seconds to save one. Every rule below exists so we never earn that reputation.
+
+### The N+1 problem
+
+**Never issue a query inside a loop over rows.** Load the parents, collect their ids, and fetch all children in one query with `= ANY($1)`; stitch them together in Go with a map. `catalog.CurriculumFor` is the reference implementation: three queries for a course of any size.
+
+This is not enforced by good intentions. `database.Counter` counts the queries issued under a context, and repository tests assert an exact number across fixtures of increasing size:
+
+```go
+counter := &database.Counter{}
+ctx := database.WithCounter(t.Context(), counter)
+_, _ = svc.Curriculum(ctx, tenantID, slug)
+if counter.Count() != 3 { t.Errorf(...) }   // fails the moment a loop appears
+```
+
+A loop over twenty topics makes the count grow with the fixture and the test fails — at the size where it is cheap to notice. Any new endpoint that loads a tree gets one of these tests. `BEGIN`, `COMMIT`, and the tenant binding are excluded from the tally, so the number reads as the round trips a reviewer would expect.
+
+### Pagination
+
+**Keyset, never `OFFSET`.** `OFFSET 20000` makes Postgres read and discard twenty thousand rows, so the last page of a large catalog costs far more than the first, and a row inserted mid-scroll shifts every subsequent page. A keyset seeks straight to the position with the same index that satisfies the sort. Measured on 50,000 courses: the keyset page reads 21 rows, the `OFFSET` equivalent reads 20,021.
+
+The cursor is opaque and base64-encoded so clients cannot depend on the sort key. Fetch `limit + 1` rows to answer "is there more" — never `COUNT(*)`, which scans every matching row on every request. **No list endpoint is unbounded**, ever; `MaxPageSize` is enforced and an out-of-range limit is a 422, not a silent truncation.
+
+### Indexes
+
+Every query a request path issues must be served by an index that covers **both the filter and the sort**, so the plan is an index scan with no sort node. Verify with `EXPLAIN (ANALYZE, COSTS OFF)` against realistic row counts — a sequential scan over 200 rows looks fine and is a time bomb. A `Sort` node or a `Seq Scan` on a hot path is a defect.
+
+### Caching
+
+Cache the smallest thing that is read on every request and changes rarely. Today that is exactly one thing: tenant resolution by host. Measured over 20 requests, the cache turns 20 tenant lookups into 1.
+
+- `cache.Cache` collapses concurrent misses with single-flight. Without it a cold cache under load issues one identical query per in-flight request — a stampede, arriving exactly when the database can least afford it.
+- **Negative results are cached too**, briefly. Otherwise a host nobody registered reaches the database on every request, which is a free denial-of-service primitive for anyone who can point DNS at us.
+- **Invalidate on write, in the success branch of the transaction.** A cache that outlives its truth keeps a suspended tenant serving.
+- Anything that must be consistent across replicas belongs in Postgres, not here.
+
+At the HTTP layer, read endpoints carry an `ETag` and answer a matching `If-None-Match` with `304`. That saves bandwidth and client parsing, not database work — the handler has already run — so hot reads also carry a `Cache-Control` `max-age` so a fresh client does not revalidate at all. `public` is only ever correct for a response containing no user-specific data; anything reflecting who is asking is `private`.
+
+### Bounds
+
+`statement_timeout` is set on every connection: a query still running after five seconds is a bug or a missing index, and cancelling it protects every other request from queueing behind it. Queries slower than `LMS_DB_SLOW_QUERY_THRESHOLD` are logged at warn **with their statement text** — a slow-query log that omits the query cannot answer the only question it exists to answer. Arguments are never logged; that is where user data lives.
+
+The pool is small on purpose. Postgres costs roughly 10 MB of backend memory per connection and degrades past a few hundred: a small pool with a queue beats a large one that thrashes the server.
+
+---
+
+## 7. Background work
 
 Grading, transcoding, email, transcription, analytics rollups, and report generation are **jobs, not request handlers**. If an operation can exceed ~200ms or calls a third party, it belongs in River.
 
@@ -156,7 +212,7 @@ Jobs must be **idempotent** — they will be retried. Make the work safe to repe
 
 ---
 
-## 7. HTTP & the OpenAPI contract
+## 8. HTTP & the OpenAPI contract
 
 The generated OpenAPI 3.1 document **is** the contract with `lms-web` and every future client. Treat it as a public interface.
 
@@ -168,7 +224,7 @@ The generated OpenAPI 3.1 document **is** the contract with `lms-web` and every 
 
 ---
 
-## 8. Security
+## 9. Security
 
 - Argon2id for passwords. Never bcrypt, never SHA-anything.
 - Access tokens are short-lived JWTs; refresh tokens are opaque, stored, and rotated on use.
@@ -180,13 +236,13 @@ The generated OpenAPI 3.1 document **is** the contract with `lms-web` and every 
 
 ---
 
-## 9. Observability
+## 10. Observability
 
 `log/slog`, structured, JSON in production. Every log line inside a request carries `request_id` and `tenant_id`. Never log a password, token, or full card detail. Log at the boundary where you handle an error — not at every level you pass it through, which produces the same error five times and helps no one.
 
 ---
 
-## 10. Git & commits
+## 11. Git & commits
 
 ```bash
 git config user.name  "ebnsina"
@@ -211,7 +267,7 @@ One logical change per commit. If the body needs to explain *why*, write it — 
 
 ---
 
-## 11. Before you push
+## 12. Before you push
 
 ```bash
 go build ./...

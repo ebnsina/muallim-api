@@ -1,12 +1,14 @@
 // Command api serves the LMS HTTP API.
 //
 // With -dump-spec it writes the generated OpenAPI 3.1 document to stdout and
-// exits without binding a port. That document is the contract with lms-web and
-// every other client; `make spec` writes it to disk for their code generators.
+// exits without binding a port or touching the database. That document is the
+// contract with lms-web and every other client; `make spec` writes it to disk for
+// their code generators.
 package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -14,10 +16,14 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/ebnsina/lms-api/internal/catalog"
 	"github.com/ebnsina/lms-api/internal/httpapi"
+	"github.com/ebnsina/lms-api/internal/platform/cache"
 	"github.com/ebnsina/lms-api/internal/platform/config"
+	"github.com/ebnsina/lms-api/internal/platform/database"
 	"github.com/ebnsina/lms-api/internal/platform/logging"
 	"github.com/ebnsina/lms-api/internal/platform/server"
+	"github.com/ebnsina/lms-api/internal/tenant"
 )
 
 func main() {
@@ -44,13 +50,11 @@ func run() error {
 	}
 	log := logging.New(logOut, cfg.LogLevel, cfg.IsProduction())
 
-	handler, api := httpapi.New(httpapi.Options{
-		Version:     cfg.Version,
-		Logger:      log,
-		CORSOrigins: cfg.CORSOrigins,
-	})
-
 	if *dumpSpec {
+		// No services and no database: the routes are registered so they appear in
+		// the document, and no handler runs.
+		_, api := httpapi.New(httpapi.Options{Version: cfg.Version, Logger: log})
+
 		spec, err := api.OpenAPI().MarshalJSON()
 		if err != nil {
 			return fmt.Errorf("marshal openapi spec: %w", err)
@@ -61,14 +65,48 @@ func run() error {
 		return nil
 	}
 
-	log.Info("starting",
-		"env", cfg.Env,
-		"version", cfg.Version,
-	)
-
 	// Cancelled on SIGINT/SIGTERM, which is what begins the graceful drain.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	log.Info("starting", "env", cfg.Env, "version", cfg.Version)
+
+	if cfg.DatabaseURL == "" {
+		return errors.New("LMS_DATABASE_URL is required to serve requests; use -dump-spec to emit the contract without a database")
+	}
+
+	db, err := database.New(ctx, database.Options{
+		URL:                cfg.DatabaseURL,
+		MaxConns:           cfg.DBMaxConns,
+		MinConns:           cfg.DBMinConns,
+		StatementTimeout:   cfg.DBStatementTimeout,
+		SlowQueryThreshold: cfg.DBSlowQueryThreshold,
+	}, log)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	// Wiring lives here and nowhere else. Domain packages receive their
+	// dependencies; they never construct them, and they never reach for a global.
+	tenants := tenant.NewService(
+		tenant.NewPostgresRepository(db),
+		cache.New[tenant.Tenant](cache.Options{
+			TTL:         cfg.TenantCacheTTL,
+			NegativeTTL: cfg.TenantCacheTTL / 4,
+			MaxEntries:  4096,
+		}),
+	)
+	courses := catalog.NewService(db, catalog.NewPostgresRepository())
+
+	handler, _ := httpapi.New(httpapi.Options{
+		Version:     cfg.Version,
+		Logger:      log,
+		CORSOrigins: cfg.CORSOrigins,
+		Tenants:     tenants,
+		Catalog:     courses,
+		DB:          db,
+	})
 
 	return server.Run(ctx, handler, server.Options{
 		Addr:            cfg.Addr,

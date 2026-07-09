@@ -28,9 +28,10 @@ func TestRoutes(t *testing.T) {
 	}{
 		{"liveness probe", http.MethodGet, "/v1/healthz", http.StatusOK, "application/json"},
 		{"unknown route", http.MethodGet, "/does-not-exist", http.StatusNotFound, ContentTypeProblem},
-		{"unknown nested route", http.MethodGet, "/v1/courses/nope", http.StatusNotFound, ContentTypeProblem},
+		{"unknown nested route", http.MethodGet, "/v1/nowhere/nope", http.StatusNotFound, ContentTypeProblem},
 		{"wrong method on known route", http.MethodDelete, "/v1/healthz", http.StatusMethodNotAllowed, ""},
 		{"published contract", http.MethodGet, "/openapi.json", http.StatusOK, ""},
+		{"readiness without a database", http.MethodGet, "/v1/readyz", http.StatusServiceUnavailable, ContentTypeProblem},
 	}
 
 	for _, tt := range tests {

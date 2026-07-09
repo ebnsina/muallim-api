@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 )
@@ -33,6 +34,52 @@ func registerHealth(api huma.API, version string) {
 		out := &HealthOutput{}
 		out.Body.Status = "ok"
 		out.Body.Version = version
+		return out, nil
+	})
+}
+
+// ReadinessOutput reports whether the process can serve traffic.
+type ReadinessOutput struct {
+	Body struct {
+		Status   string `json:"status" enum:"ready" doc:"Readiness indicator"`
+		Database string `json:"database" enum:"up" doc:"Database reachability"`
+	}
+}
+
+// registerReadiness mounts the readiness probe.
+//
+// Unlike liveness, this one checks Postgres: a replica that cannot reach the
+// database should be removed from the load balancer, but must not be killed —
+// restarting it will not bring the database back, and a restart loop across
+// every replica turns a brief database blip into a total outage.
+//
+// It returns 503 rather than 500, because the correct client behaviour is to
+// retry elsewhere, not to report a bug.
+func registerReadiness(api huma.API, db Pinger) {
+	huma.Register(api, huma.Operation{
+		OperationID: "get-readiness",
+		Method:      http.MethodGet,
+		Path:        "/v1/readyz",
+		Summary:     "Readiness probe",
+		Description: "Reports whether the process and its dependencies can serve traffic.",
+		Tags:        []string{"System"},
+	}, func(ctx context.Context, _ *struct{}) (*ReadinessOutput, error) {
+		if db == nil {
+			return nil, huma.Error503ServiceUnavailable("Database is not configured.")
+		}
+
+		// Bounded: a probe that hangs is a probe that never removes a sick replica
+		// from rotation.
+		pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+
+		if err := db.Ping(pingCtx); err != nil {
+			return nil, huma.Error503ServiceUnavailable("Database is unreachable.")
+		}
+
+		out := &ReadinessOutput{}
+		out.Body.Status = "ready"
+		out.Body.Database = "up"
 		return out, nil
 	})
 }
