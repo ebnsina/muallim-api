@@ -1,0 +1,28 @@
+# Internal planning + scratch data — never committed
+docs/
+data/
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Build output
+/bin/
+/tmp/
+lms-api
+*.exe
+
+# Go
+*.test
+*.out
+coverage.*
+vendor/
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
