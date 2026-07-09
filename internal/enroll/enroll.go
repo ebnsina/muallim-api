@@ -28,6 +28,10 @@ const (
 	ActionEnrolled       = "enrolment.created"
 	ActionEnrolmentEnded = "enrolment.cancelled"
 	ActionCourseFinished = "course.completed"
+
+	// ActionCourseReopened records a completion being retracted. A finished course
+	// that becomes unfinished is a fact somebody will one day need to explain.
+	ActionCourseReopened = "course.reopened"
 )
 
 // Enrolment statuses.

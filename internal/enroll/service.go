@@ -20,9 +20,14 @@ type Repository interface {
 	CancelEnrolment(ctx context.Context, tx pgx.Tx, tenantID, courseID, userID uuid.UUID) error
 	ListEnrolments(ctx context.Context, tx pgx.Tx, tenantID, userID uuid.UUID, limit int) ([]EnrolmentWithCourse, error)
 	CompleteEnrolment(ctx context.Context, tx pgx.Tx, tenantID, courseID, userID uuid.UUID) (bool, error)
+	ReopenEnrolment(ctx context.Context, tx pgx.Tx, tenantID, courseID, userID uuid.UUID) (bool, error)
 	CountEnrolments(ctx context.Context, tx pgx.Tx, tenantID, courseID uuid.UUID) (int, error)
 
 	LessonForReader(ctx context.Context, tx pgx.Tx, tenantID, lessonID, userID uuid.UUID) (LessonView, error)
+
+	// MissingPrerequisites is read here and written by catalog. Two packages, one
+	// table, no import between them.
+	MissingPrerequisites(ctx context.Context, tx pgx.Tx, tenantID, courseID, userID uuid.UUID) ([]MissingCourse, error)
 	MarkLesson(ctx context.Context, tx pgx.Tx, tenantID, userID, lessonID, courseID uuid.UUID, complete bool) error
 	RecomputeProgress(ctx context.Context, tx pgx.Tx, tenantID, userID, courseID uuid.UUID) (Progress, error)
 	ProgressFor(ctx context.Context, tx pgx.Tx, tenantID, userID, courseID uuid.UUID) (Progress, error)
@@ -45,6 +50,17 @@ type Service struct {
 // NewService returns a Service.
 func NewService(db *database.DB, repo Repository, recorder AuditRecorder) *Service {
 	return &Service{db: db, repo: repo, audit: recorder, now: time.Now}
+}
+
+// hasLiveEnrolment reports whether the learner is already in the course.
+//
+// A database error is reported as "no enrolment", which is the conservative
+// answer: the caller's next step is a prerequisite check, and a check that runs
+// when it need not have is harmless. A caller that skipped it on a failed read
+// would let a learner past a gate because the database hiccuped.
+func (s *Service) hasLiveEnrolment(ctx context.Context, tx pgx.Tx, tenantID, courseID, userID uuid.UUID) bool {
+	existing, err := s.repo.Enrolment(ctx, tx, tenantID, courseID, userID)
+	return err == nil && existing.Live(s.now())
 }
 
 // coursePublished is catalog's published status. Restated rather than imported:
@@ -73,6 +89,27 @@ func (s *Service) Enrol(ctx context.Context, tenantID uuid.UUID, slug string, ac
 		// Saying anything else tells a stranger that a draft exists.
 		if status != coursePublished {
 			return ErrNotFound
+		}
+
+		// Prerequisites gate self-enrolment only. Grant is a deliberate override by
+		// somebody holding user:manage: an administrator placing a learner on a
+		// course has already decided the learner belongs there.
+		//
+		// Checked before the enrolment row is touched, so a refusal leaves nothing
+		// behind — and after the published check, so an unfinished prerequisite never
+		// reveals that a draft exists.
+		//
+		// A learner who already holds a live enrolment is not checked at all. They
+		// are in the course; a prerequisite added afterwards must not turn their next
+		// click into a 403 and their progress into something they cannot reach.
+		if source == SourceSelf && !s.hasLiveEnrolment(ctx, tx, tenantID, courseID, actor.UserID) {
+			missing, err := s.repo.MissingPrerequisites(ctx, tx, tenantID, courseID, actor.UserID)
+			if err != nil {
+				return err
+			}
+			if len(missing) > 0 {
+				return &UnmetPrerequisites{Missing: missing}
+			}
 		}
 
 		created := false
@@ -245,8 +282,25 @@ func (s *Service) CompleteLesson(ctx context.Context, tenantID, lessonID uuid.UU
 			return err
 		}
 
+		// The enrolment's status is a roll-up of the same rows, so it is recomputed
+		// here too — in both directions. Reopening a lesson un-finishes the course,
+		// and an enrolment left saying "completed" while its progress says 80% is a
+		// row that answers differently depending on which field you read. It is also
+		// what a prerequisite reads.
 		if !progress.Complete() {
-			return nil
+			reopened, err := s.repo.ReopenEnrolment(ctx, tx, tenantID, courseID, actor.UserID)
+			if err != nil {
+				return err
+			}
+			if !reopened {
+				return nil
+			}
+
+			return s.audit.Record(ctx, tx, tenantID, AuditEntry{
+				ActorID: &actor.UserID, Action: ActionCourseReopened,
+				TargetType: "course", TargetID: courseID.String(),
+				IP: actor.IP, UserAgent: actor.UserAgent,
+			})
 		}
 
 		finished, err := s.repo.CompleteEnrolment(ctx, tx, tenantID, courseID, actor.UserID)

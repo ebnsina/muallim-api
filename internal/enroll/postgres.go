@@ -58,6 +58,10 @@ const upsertEnrolmentSQL = `
 	ON CONFLICT (tenant_id, course_id, user_id) DO UPDATE
 	SET status     = CASE WHEN enrolments.status IN ('expired', 'cancelled')
 	                      THEN 'active' ELSE enrolments.status END,
+	    -- Reactivating a lapsed enrolment must not leave the timestamp of a
+	    -- completion behind. status and completed_at state one fact.
+	    completed_at = CASE WHEN enrolments.status IN ('expired', 'cancelled')
+	                        THEN NULL ELSE enrolments.completed_at END,
 	    source     = EXCLUDED.source,
 	    expires_at = EXCLUDED.expires_at,
 	    updated_at = now()
@@ -263,10 +267,27 @@ func (r *PostgresRepository) ProgressFor(ctx context.Context, tx pgx.Tx, tenantI
 func (r *PostgresRepository) CompleteEnrolment(ctx context.Context, tx pgx.Tx, tenantID, courseID, userID uuid.UUID) (bool, error) {
 	tag, err := tx.Exec(ctx,
 		`UPDATE enrolments SET status = 'completed', completed_at = now(), updated_at = now()
-		 WHERE tenant_id = $1 AND course_id = $2 AND user_id = $3 AND completed_at IS NULL`,
+		 WHERE tenant_id = $1 AND course_id = $2 AND user_id = $3 AND status <> 'completed'`,
 		tenantID, courseID, userID)
 	if err != nil {
 		return false, fmt.Errorf("enroll: complete enrolment: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+// ReopenEnrolment takes a completed enrolment back to active, reporting whether
+// it changed anything.
+//
+// completed_at is cleared with the status. The two are one fact stated twice, and
+// a row where the status says active while the timestamp says finished is a row
+// that will be read whichever way the reader happens to look.
+func (r *PostgresRepository) ReopenEnrolment(ctx context.Context, tx pgx.Tx, tenantID, courseID, userID uuid.UUID) (bool, error) {
+	tag, err := tx.Exec(ctx,
+		`UPDATE enrolments SET status = 'active', completed_at = NULL, updated_at = now()
+		 WHERE tenant_id = $1 AND course_id = $2 AND user_id = $3 AND status = 'completed'`,
+		tenantID, courseID, userID)
+	if err != nil {
+		return false, fmt.Errorf("enroll: reopen enrolment: %w", err)
 	}
 	return tag.RowsAffected() == 1, nil
 }
