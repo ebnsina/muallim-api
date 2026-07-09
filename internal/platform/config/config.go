@@ -93,6 +93,12 @@ type Config struct {
 	// MailFrom is the envelope sender, e.g. "LMS <no-reply@example.com>".
 	MailFrom string
 
+	// MailFile, when set, appends every message to a file instead of sending it,
+	// so an end-to-end test can read the link a message carries. It writes
+	// single-use credentials to disk in plaintext; config refuses it outside
+	// development.
+	MailFile string
+
 	// WorkerMaxWorkers bounds how many jobs the worker process runs at once.
 	WorkerMaxWorkers int
 
@@ -143,6 +149,7 @@ func Load() (Config, error) {
 		SMTPUsername: env("LMS_SMTP_USERNAME", ""),
 		SMTPPassword: env("LMS_SMTP_PASSWORD", ""),
 		MailFrom:     env("LMS_MAIL_FROM", "LMS <no-reply@localhost>"),
+		MailFile:     env("LMS_MAIL_FILE", ""),
 
 		WorkerMaxWorkers: number("LMS_WORKER_MAX_WORKERS", 10),
 	}
@@ -204,8 +211,14 @@ func (c Config) validate() error {
 	// Without SMTP the process logs messages rather than sending them, and those
 	// messages carry reset tokens. That is a development affordance, and a
 	// credential-disclosure bug anywhere a log is shipped somewhere.
-	if c.SMTPHost == "" && c.Env != EnvDevelopment {
+	if c.SMTPHost == "" && c.MailFile == "" && c.Env != EnvDevelopment {
 		errs = append(errs, errors.New("config: LMS_SMTP_HOST is required outside development; without it, reset tokens are written to the log"))
+	}
+
+	// The file sink writes single-use credentials to disk in plaintext. It exists
+	// for end-to-end tests, and refusing it here is what keeps it there.
+	if c.MailFile != "" && c.Env != EnvDevelopment {
+		errs = append(errs, errors.New("config: LMS_MAIL_FILE writes credentials to disk and is refused outside development"))
 	}
 	if c.SMTPHost != "" && c.MailFrom == "" {
 		errs = append(errs, errors.New("config: LMS_MAIL_FROM is required when LMS_SMTP_HOST is set"))

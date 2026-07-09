@@ -104,9 +104,16 @@ func run() error {
 	return nil
 }
 
-// newSender picks a mail driver. Config has already refused an unset SMTP host
-// outside development, so the logging driver here is only ever a laptop.
+// newSender picks a mail driver. Config has already refused both the file sink
+// and an unset SMTP host outside development, so neither branch below is
+// reachable from a deployed environment.
 func newSender(cfg config.Config, log *slog.Logger) (comms.Sender, error) {
+	if cfg.MailFile != "" {
+		log.Warn("LMS_MAIL_FILE is set; email will be written to disk in plaintext, not sent",
+			slog.String("path", cfg.MailFile))
+		return mailer.NewFile(cfg.MailFile)
+	}
+
 	if !cfg.MailerConfigured() {
 		log.Warn("no SMTP host configured; email will be logged, not sent")
 		return mailer.NewLog(log), nil
