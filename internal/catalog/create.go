@@ -102,14 +102,14 @@ func (s *Service) CreateCourse(ctx context.Context, tenantID uuid.UUID, n NewCou
 const createCourseSQL = `
 	INSERT INTO courses (tenant_id, slug, title, summary, difficulty, status)
 	VALUES ($1, $2, $3, $4, $5, 'draft')
-	RETURNING id, slug, title, summary, difficulty, status, published_at, created_at, updated_at`
+	RETURNING id, slug, title, summary, difficulty, status, published_at, drip_mode, created_at, updated_at`
 
 // CreateCourse inserts a course and returns it.
 func (r *PostgresRepository) CreateCourse(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, n NewCourse) (Course, error) {
 	var c Course
 	err := tx.QueryRow(ctx, createCourseSQL, tenantID, n.Slug, n.Title, n.Summary, n.Difficulty).Scan(
 		&c.ID, &c.Slug, &c.Title, &c.Summary, &c.Difficulty,
-		&c.Status, &c.PublishedAt, &c.CreatedAt, &c.UpdatedAt)
+		&c.Status, &c.PublishedAt, &c.DripMode, &c.CreatedAt, &c.UpdatedAt)
 
 	if err != nil {
 		if isUniqueViolation(err) {

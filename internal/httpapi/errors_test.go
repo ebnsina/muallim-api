@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -62,6 +63,7 @@ func TestEveryDomainSentinelMapsToADeliberateStatus(t *testing.T) {
 		{"already published", catalog.ErrAlreadyPublished, http.StatusConflict},
 		{"prerequisite cycle", catalog.ErrPrerequisiteCycle, http.StatusUnprocessableEntity},
 		{"prerequisite exists", catalog.ErrPrerequisiteExists, http.StatusConflict},
+		{"invalid drip mode", catalog.ErrInvalidDripMode, http.StatusUnprocessableEntity},
 	}
 
 	for _, tt := range tests {
@@ -72,6 +74,7 @@ func TestEveryDomainSentinelMapsToADeliberateStatus(t *testing.T) {
 				catalog.ErrInvalidSlug, catalog.ErrSlugTaken, catalog.ErrInvalidLesson,
 				catalog.ErrIncompleteOrder, catalog.ErrEmptyCourse, catalog.ErrAlreadyPublished,
 				catalog.ErrPrerequisiteCycle, catalog.ErrPrerequisiteExists,
+				catalog.ErrInvalidDripMode,
 			} {
 				if errors.Is(tt.err, catalogErr) {
 					mapper = catalogError
@@ -135,6 +138,9 @@ func TestEnrolmentSentinelsMapToADeliberateStatus(t *testing.T) {
 		// Also 403, and for the same reason: the course is visible, and the answer
 		// is "finish those first" rather than "no such course".
 		enroll.ErrPrerequisitesUnmet: http.StatusForbidden,
+
+		// And a dripped lesson the learner can already see in the curriculum.
+		enroll.ErrLessonLocked: http.StatusForbidden,
 	}
 
 	for err, want := range tests {
@@ -185,6 +191,30 @@ func TestUnmetPrerequisitesNamesTheCourses(t *testing.T) {
 	})
 	if !strings.Contains(single.Error(), "Finish Go Basics before") {
 		t.Errorf("single-course message reads badly: %q", single.Error())
+	}
+}
+
+// A locked lesson says when it opens, and admits when it cannot say.
+func TestLockedLessonMessage(t *testing.T) {
+	t.Parallel()
+
+	opens := time.Date(2026, 8, 14, 9, 0, 0, 0, time.UTC)
+	dated := enrolError(&enroll.LessonLocked{AvailableAt: &opens})
+	if got := statusOf(dated); got != http.StatusForbidden {
+		t.Errorf("dated lock mapped to %d, want 403", got)
+	}
+	if !strings.Contains(dated.Error(), "14 August 2026") {
+		t.Errorf("message does not name the date: %q", dated.Error())
+	}
+
+	// Sequential drip opens on an event. Inventing a date would be worse than
+	// admitting there is none.
+	undated := enrolError(&enroll.LessonLocked{})
+	if got := statusOf(undated); got != http.StatusForbidden {
+		t.Errorf("undated lock mapped to %d, want 403", got)
+	}
+	if !strings.Contains(undated.Error(), "Finish the previous lesson") {
+		t.Errorf("undated message reads badly: %q", undated.Error())
 	}
 }
 

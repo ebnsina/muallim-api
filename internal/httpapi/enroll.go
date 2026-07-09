@@ -94,6 +94,11 @@ type LessonContentView struct {
 	IsPreview       bool       `json:"is_preview"`
 	Position        int        `json:"position"`
 	CompletedAt     *time.Time `json:"completed_at,omitempty"`
+
+	// AvailableAt is when this reader's copy of a dripped lesson opened, or opens.
+	// Absent when the course does not drip, and in sequential mode, where a lesson
+	// opens on an event rather than a clock.
+	AvailableAt *time.Time `json:"available_at,omitempty"`
 }
 
 func registerEnrolment(api huma.API, svc *enroll.Service) {
@@ -254,6 +259,7 @@ func registerEnrolment(api huma.API, svc *enroll.Service) {
 			IsPreview:       lesson.IsPreview,
 			Position:        lesson.Position,
 			CompletedAt:     lesson.CompletedAt,
+			AvailableAt:     lesson.AvailableAt,
 		}
 		out.Body.Access = access.String()
 		return out, nil
@@ -359,6 +365,14 @@ func enrolError(err error) error {
 		return huma.Error403Forbidden(prerequisiteMessage(unmet.Missing))
 	}
 
+	// 403, not 404. The learner is enrolled and can see this lesson in the
+	// curriculum; telling them it does not exist is a lie they disprove by
+	// scrolling.
+	var locked *enroll.LessonLocked
+	if errors.As(err, &locked) {
+		return huma.Error403Forbidden(lockedMessage(locked.AvailableAt))
+	}
+
 	switch {
 	case errors.Is(err, enroll.ErrNotFound):
 		return huma.Error404NotFound("Not found.")
@@ -374,6 +388,11 @@ func enrolError(err error) error {
 	case errors.Is(err, enroll.ErrCourseNotOpen):
 		return huma.Error409Conflict("That course is not open for enrolment.")
 
+	case errors.Is(err, enroll.ErrLessonLocked):
+		// Reached when a caller loses the detail on the way here. The status is the
+		// same; the sentence is merely less useful.
+		return huma.Error403Forbidden("This lesson has not been released yet.")
+
 	case errors.Is(err, enroll.ErrPrerequisitesUnmet):
 		// Reached only when a caller loses the detail on the way here. The status is
 		// the same either way; a client that shows the generic sentence is merely
@@ -386,6 +405,17 @@ func enrolError(err error) error {
 	default:
 		return err
 	}
+}
+
+// lockedMessage says when a dripped lesson opens, when anybody can know.
+//
+// Sequential drip has no date: the lesson opens when the learner finishes the one
+// before it, and inventing a date would be worse than admitting there is none.
+func lockedMessage(at *time.Time) string {
+	if at == nil {
+		return "Finish the previous lesson to unlock this one."
+	}
+	return "This lesson unlocks on " + at.UTC().Format("2 January 2006") + "."
 }
 
 // prerequisiteMessage names the courses standing in the learner's way.

@@ -37,7 +37,7 @@ func (r *PostgresRepository) RemovePrerequisite(ctx context.Context, tx pgx.Tx, 
 }
 
 const prerequisitesSQL = `
-	SELECT c.id, c.slug, c.title, c.summary, c.difficulty, c.status, c.published_at, c.created_at, c.updated_at
+	SELECT c.id, c.slug, c.title, c.summary, c.difficulty, c.status, c.published_at, c.drip_mode, c.created_at, c.updated_at
 	FROM course_prerequisites p
 	JOIN courses c ON c.id = p.requires_course_id AND c.tenant_id = p.tenant_id
 	WHERE p.tenant_id = $1 AND p.course_id = $2
@@ -54,7 +54,7 @@ func (r *PostgresRepository) Prerequisites(ctx context.Context, tx pgx.Tx, tenan
 	courses, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Course, error) {
 		var c Course
 		err := row.Scan(&c.ID, &c.Slug, &c.Title, &c.Summary, &c.Difficulty,
-			&c.Status, &c.PublishedAt, &c.CreatedAt, &c.UpdatedAt)
+			&c.Status, &c.PublishedAt, &c.DripMode, &c.CreatedAt, &c.UpdatedAt)
 		return c, err
 	})
 	if err != nil {

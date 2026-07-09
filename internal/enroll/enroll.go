@@ -34,6 +34,28 @@ const (
 	ActionCourseReopened = "course.reopened"
 )
 
+// Drip modes. A course releases its lessons all at once, on a fixed date, a
+// number of days after each learner enrols, or one at a time as the learner
+// finishes the one before.
+const (
+	DripNone           = "none"
+	DripScheduled      = "scheduled"
+	DripAfterEnrolment = "after_enrolment"
+	DripSequential     = "sequential"
+)
+
+// ValidDripMode reports whether mode is one this system knows. An unknown mode
+// is refused rather than treated as "none": a course that silently stops dripping
+// is a course that publishes its content early.
+func ValidDripMode(mode string) bool {
+	switch mode {
+	case DripNone, DripScheduled, DripAfterEnrolment, DripSequential:
+		return true
+	default:
+		return false
+	}
+}
+
 // Enrolment statuses.
 const (
 	StatusActive    = "active"
@@ -118,6 +140,12 @@ type LessonContent struct {
 	IsPreview       bool
 	Position        int
 
+	// AvailableAt is when a dripped lesson opens for this reader: a fixed instant
+	// in scheduled mode, their own enrolment date plus the delay in
+	// after_enrolment mode, and nil in sequential mode — where the lesson opens on
+	// an event, not a clock.
+	AvailableAt *time.Time
+
 	// CompletedAt is this reader's own progress, nil when they have not finished
 	// it or are not signed in.
 	CompletedAt *time.Time
@@ -140,6 +168,13 @@ const (
 
 	// AccessAuthor is somebody who may edit the course, reading their own draft.
 	AccessAuthor
+
+	// AccessLocked is an enrolled learner whose lesson has not been released yet.
+	//
+	// It grants nothing, like AccessDenied, and means something different: the
+	// learner belongs here and the lesson exists, so they are told to come back
+	// rather than told the lesson does not exist.
+	AccessLocked
 )
 
 func (a Access) String() string {
@@ -150,13 +185,26 @@ func (a Access) String() string {
 		return "enrolled"
 	case AccessAuthor:
 		return "author"
+	case AccessLocked:
+		return "locked"
 	default:
 		return "denied"
 	}
 }
 
 // Granted reports whether the lesson may be read.
-func (a Access) Granted() bool { return a != AccessDenied }
+//
+// A locked lesson is not readable. It is listed against AccessDenied explicitly
+// rather than by inequality, so that adding a fifth level is a compile-time
+// decision about whether it opens the door.
+func (a Access) Granted() bool {
+	switch a {
+	case AccessPreview, AccessEnrolled, AccessAuthor:
+		return true
+	default:
+		return false
+	}
+}
 
 // Reader identifies who is asking to read a lesson.
 //

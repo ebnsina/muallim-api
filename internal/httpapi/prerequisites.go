@@ -57,6 +57,39 @@ func registerPrerequisites(api huma.API, svc *catalog.Service) {
 	})
 
 	huma.Register(api, huma.Operation{
+		OperationID: "set-drip-mode",
+		Method:      http.MethodPut,
+		Path:        "/v1/courses/{slug}/drip",
+		Summary:     "Choose how the course releases its lessons",
+		Description: "Requires course:write. `none` releases everything at once. `scheduled` opens each " +
+			"lesson at its own instant, the same for everybody. `after_enrolment` opens each lesson a " +
+			"number of days after each learner's own enrolment. `sequential` opens a lesson when the " +
+			"learner has finished every lesson before it. Per-lesson dates are kept when the mode " +
+			"changes, and are simply not read.",
+		Tags:     []string{"Authoring"},
+		Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, in *struct {
+		Slug string `path:"slug" maxLength:"200"`
+		Body struct {
+			Mode string `json:"mode" enum:"none,scheduled,after_enrolment,sequential"`
+		}
+	}) (*CourseOutput, error) {
+		_, author, err := authorFor(ctx, auth.PermCourseWrite)
+		if err != nil {
+			return nil, err
+		}
+
+		course, err := svc.SetDripMode(ctx, tenant.ID(ctx), in.Slug, in.Body.Mode, author)
+		if err != nil {
+			return nil, catalogError(err)
+		}
+
+		out := &CourseOutput{}
+		out.Body.Course = courseSummary(course)
+		return out, nil
+	})
+
+	huma.Register(api, huma.Operation{
 		OperationID: "add-prerequisite",
 		Method:      http.MethodPost,
 		Path:        "/v1/courses/{slug}/prerequisites",

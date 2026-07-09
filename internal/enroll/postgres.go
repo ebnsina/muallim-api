@@ -129,13 +129,37 @@ func (r *PostgresRepository) CancelEnrolment(ctx context.Context, tx pgx.Tx, ten
 //
 // The LEFT JOINs mean a stranger reading a preview costs exactly what an enrolled
 // learner costs.
+// The drip columns ride along. The correlated subquery that counts unfinished
+// earlier lessons runs only in sequential mode — the CASE short-circuits, so a
+// course that does not drip pays nothing for the feature, and one that drips by
+// date pays nothing for the mode it is not in.
+//
+// `(pt.position, pl.position, pl.id) < (t.position, l.position, l.id)` is a row
+// comparison, and it is exactly the curriculum's own order: topics by position,
+// lessons by position within a topic, id to break a tie that a deferred
+// constraint allows mid-reorder.
 const lessonForReaderSQL = `
 	SELECT l.id, l.topic_id, t.course_id,
 	       l.title, l.content_type, l.content, l.video_source, l.video_url,
 	       l.duration_seconds, l.is_preview, l.position,
-	       c.status,
-	       e.status, e.expires_at,
-	       lp.completed_at
+	       l.available_at, l.available_after_days,
+	       c.status, c.drip_mode,
+	       e.status, e.expires_at, e.enrolled_at,
+	       lp.completed_at,
+	       CASE WHEN c.drip_mode = 'sequential' THEN (
+	           SELECT count(*)
+	           FROM lessons pl
+	           JOIN topics pt ON pt.id = pl.topic_id AND pt.tenant_id = pl.tenant_id
+	           LEFT JOIN lesson_progress plp
+	                  ON plp.tenant_id = pl.tenant_id
+	                 AND plp.lesson_id = pl.id
+	                 AND plp.user_id = $3
+	                 AND plp.completed_at IS NOT NULL
+	           WHERE pl.tenant_id = l.tenant_id
+	             AND pt.course_id = c.id
+	             AND (pt.position, pl.position, pl.id) < (t.position, l.position, l.id)
+	             AND plp.id IS NULL
+	       ) ELSE 0 END AS prior_incomplete
 	FROM lessons l
 	JOIN topics  t ON t.id = l.topic_id AND t.tenant_id = l.tenant_id
 	JOIN courses c ON c.id = t.course_id AND c.tenant_id = l.tenant_id
@@ -153,6 +177,22 @@ type LessonView struct {
 	CourseStatus     string
 	EnrolmentStatus  *string
 	EnrolmentExpires *time.Time
+
+	// DripMode is the course's, because it decides which of the per-lesson columns
+	// below means anything.
+	DripMode string
+
+	// AvailableAfterDays is the lesson's delay, read only in after_enrolment mode.
+	AvailableAfterDays *int
+
+	// EnrolledAt is this reader's own enrolment date, which after_enrolment mode
+	// counts from. Nil for a reader who is not enrolled.
+	EnrolledAt *time.Time
+
+	// PriorIncomplete counts the lessons before this one, in curriculum order,
+	// that the reader has not finished. Sequential mode opens a lesson when it
+	// reaches zero. Computed only in that mode; zero otherwise.
+	PriorIncomplete int
 }
 
 // LessonForReader loads a lesson together with the reader's enrolment and
@@ -167,9 +207,11 @@ func (r *PostgresRepository) LessonForReader(ctx context.Context, tx pgx.Tx, ten
 		&v.Lesson.Title, &v.Lesson.ContentType, &v.Lesson.Content,
 		&v.Lesson.VideoSource, &v.Lesson.VideoURL,
 		&v.Lesson.DurationSeconds, &v.Lesson.IsPreview, &v.Lesson.Position,
-		&v.CourseStatus,
-		&v.EnrolmentStatus, &v.EnrolmentExpires,
-		&v.Lesson.CompletedAt)
+		&v.Lesson.AvailableAt, &v.AvailableAfterDays,
+		&v.CourseStatus, &v.DripMode,
+		&v.EnrolmentStatus, &v.EnrolmentExpires, &v.EnrolledAt,
+		&v.Lesson.CompletedAt,
+		&v.PriorIncomplete)
 
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

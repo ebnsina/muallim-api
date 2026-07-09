@@ -26,7 +26,7 @@ func NewPostgresRepository() *PostgresRepository { return &PostgresRepository{} 
 // It fetches limit+1 rows: the extra row answers "is there a next page" without
 // a COUNT(*), which would scan every matching row on every request.
 const listPublishedCoursesSQL = `
-	SELECT id, slug, title, summary, difficulty, status, published_at, created_at, updated_at
+	SELECT id, slug, title, summary, difficulty, status, published_at, drip_mode, created_at, updated_at
 	FROM courses
 	WHERE tenant_id = $1
 	  AND status = 'published'
@@ -42,7 +42,7 @@ const listPublishedCoursesSQL = `
 // anonymous catalog request would pay for a feature only authors use. Each
 // statement gets an index that covers its filter and its sort.
 const listAllCoursesSQL = `
-	SELECT id, slug, title, summary, difficulty, status, published_at, created_at, updated_at
+	SELECT id, slug, title, summary, difficulty, status, published_at, drip_mode, created_at, updated_at
 	FROM courses
 	WHERE tenant_id = $1
 	  AND ($2::timestamptz IS NULL OR (created_at, id) < ($2, $3))
@@ -81,7 +81,7 @@ func (r *PostgresRepository) ListCourses(ctx context.Context, tx pgx.Tx, tenantI
 	courses, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Course, error) {
 		var c Course
 		err := row.Scan(&c.ID, &c.Slug, &c.Title, &c.Summary, &c.Difficulty,
-			&c.Status, &c.PublishedAt, &c.CreatedAt, &c.UpdatedAt)
+			&c.Status, &c.PublishedAt, &c.DripMode, &c.CreatedAt, &c.UpdatedAt)
 		return c, err
 	})
 	if err != nil {
@@ -96,7 +96,7 @@ func (r *PostgresRepository) ListCourses(ctx context.Context, tx pgx.Tx, tenantI
 // loaded and then discarded has already been loaded, and the first refactor that
 // forgets the discard turns an unreleased course into a public one.
 const courseBySlugSQL = `
-	SELECT id, slug, title, summary, difficulty, status, published_at, created_at, updated_at
+	SELECT id, slug, title, summary, difficulty, status, published_at, drip_mode, created_at, updated_at
 	FROM courses
 	WHERE tenant_id = $1 AND lower(slug) = lower($2)
 	  AND (status = 'published' OR $3)`
@@ -110,7 +110,7 @@ func (r *PostgresRepository) CourseBySlug(ctx context.Context, tx pgx.Tx, tenant
 	var c Course
 	err := tx.QueryRow(ctx, courseBySlugSQL, tenantID, slug, includeDrafts).Scan(
 		&c.ID, &c.Slug, &c.Title, &c.Summary, &c.Difficulty,
-		&c.Status, &c.PublishedAt, &c.CreatedAt, &c.UpdatedAt)
+		&c.Status, &c.PublishedAt, &c.DripMode, &c.CreatedAt, &c.UpdatedAt)
 
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

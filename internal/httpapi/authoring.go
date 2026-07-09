@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/google/uuid"
@@ -220,6 +221,11 @@ func registerAuthoring(api huma.API, svc *catalog.Service) {
 			VideoURL        *string `json:"video_url,omitempty" maxLength:"2000"`
 			DurationSeconds *int    `json:"duration_seconds,omitempty" minimum:"0" maximum:"86400"`
 			IsPreview       *bool   `json:"is_preview,omitempty"`
+
+			// The drip schedule. Which one matters is decided by the course's mode,
+			// not by which of them is set here.
+			AvailableAt        *time.Time `json:"available_at,omitempty" doc:"Scheduled mode: the instant this lesson opens, for everybody"`
+			AvailableAfterDays *int       `json:"available_after_days,omitempty" minimum:"0" maximum:"3650" doc:"After-enrolment mode: days after each learner's own enrolment"`
 		}
 	}) (*LessonOutput, error) {
 		p, author, err := authorFor(ctx, auth.PermCourseWrite)
@@ -239,6 +245,9 @@ func registerAuthoring(api huma.API, svc *catalog.Service) {
 			VideoURL:        in.Body.VideoURL,
 			DurationSeconds: in.Body.DurationSeconds,
 			IsPreview:       in.Body.IsPreview,
+
+			AvailableAt:        in.Body.AvailableAt,
+			AvailableAfterDays: in.Body.AvailableAfterDays,
 		}, author)
 		if err != nil {
 			return nil, catalogError(err)

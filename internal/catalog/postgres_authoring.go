@@ -147,18 +147,20 @@ func (r *PostgresRepository) UpdateLesson(ctx context.Context, tx pgx.Tx, tenant
 	var l Lesson
 	err := tx.QueryRow(ctx,
 		`UPDATE lessons SET
-		     title            = coalesce($3, title),
-		     content_type     = coalesce($4, content_type),
-		     content          = coalesce($5, content),
-		     video_source     = coalesce($6, video_source),
-		     video_url        = coalesce($7, video_url),
-		     duration_seconds = coalesce($8, duration_seconds),
-		     is_preview       = coalesce($9, is_preview),
-		     updated_at       = now()
+		     title                = coalesce($3, title),
+		     content_type         = coalesce($4, content_type),
+		     content              = coalesce($5, content),
+		     video_source         = coalesce($6, video_source),
+		     video_url            = coalesce($7, video_url),
+		     duration_seconds     = coalesce($8, duration_seconds),
+		     is_preview           = coalesce($9, is_preview),
+		     available_at         = coalesce($10, available_at),
+		     available_after_days = coalesce($11, available_after_days),
+		     updated_at           = now()
 		 WHERE tenant_id = $1 AND id = $2
 		 RETURNING id, topic_id, title, content_type, duration_seconds, is_preview, position`,
 		tenantID, lessonID, p.Title, p.ContentType, p.Content, p.VideoSource, p.VideoURL,
-		p.DurationSeconds, p.IsPreview).
+		p.DurationSeconds, p.IsPreview, p.AvailableAt, p.AvailableAfterDays).
 		Scan(&l.ID, &l.TopicID, &l.Title, &l.ContentType, &l.DurationSeconds, &l.IsPreview, &l.Position)
 
 	if err != nil {
@@ -260,10 +262,10 @@ func (r *PostgresRepository) TopicByID(ctx context.Context, tx pgx.Tx, tenantID,
 func (r *PostgresRepository) CourseByID(ctx context.Context, tx pgx.Tx, tenantID, courseID uuid.UUID) (Course, error) {
 	var c Course
 	err := tx.QueryRow(ctx,
-		`SELECT id, slug, title, summary, difficulty, status, published_at, created_at, updated_at
+		`SELECT id, slug, title, summary, difficulty, status, published_at, drip_mode, created_at, updated_at
 		 FROM courses WHERE tenant_id = $1 AND id = $2`, tenantID, courseID).
 		Scan(&c.ID, &c.Slug, &c.Title, &c.Summary, &c.Difficulty, &c.Status,
-			&c.PublishedAt, &c.CreatedAt, &c.UpdatedAt)
+			&c.PublishedAt, &c.DripMode, &c.CreatedAt, &c.UpdatedAt)
 
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -303,10 +305,10 @@ func (r *PostgresRepository) SetCourseStatus(ctx context.Context, tx pgx.Tx, ten
 		     published_at = CASE WHEN $3 = 'published' AND published_at IS NULL THEN $4 ELSE published_at END,
 		     updated_at   = now()
 		 WHERE tenant_id = $1 AND id = $2
-		 RETURNING id, slug, title, summary, difficulty, status, published_at, created_at, updated_at`,
+		 RETURNING id, slug, title, summary, difficulty, status, published_at, drip_mode, created_at, updated_at`,
 		tenantID, courseID, status, now).
 		Scan(&c.ID, &c.Slug, &c.Title, &c.Summary, &c.Difficulty, &c.Status,
-			&c.PublishedAt, &c.CreatedAt, &c.UpdatedAt)
+			&c.PublishedAt, &c.DripMode, &c.CreatedAt, &c.UpdatedAt)
 
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -320,4 +322,28 @@ func (r *PostgresRepository) SetCourseStatus(ctx context.Context, tx pgx.Tx, ten
 func isForeignKeyViolation(err error) bool {
 	var pgErr interface{ SQLState() string }
 	return errors.As(err, &pgErr) && pgErr.SQLState() == "23503"
+}
+
+// SetDripMode changes how a course releases its lessons.
+//
+// The per-lesson schedule columns are untouched: a mode that does not read them
+// makes them inert rather than wrong, and an author who switches away and back
+// finds their dates where they left them.
+func (r *PostgresRepository) SetDripMode(ctx context.Context, tx pgx.Tx, tenantID, courseID uuid.UUID, mode string) (Course, error) {
+	var c Course
+	err := tx.QueryRow(ctx,
+		`UPDATE courses SET drip_mode = $3, updated_at = now()
+		 WHERE tenant_id = $1 AND id = $2
+		 RETURNING id, slug, title, summary, difficulty, status, published_at, drip_mode, created_at, updated_at`,
+		tenantID, courseID, mode).
+		Scan(&c.ID, &c.Slug, &c.Title, &c.Summary, &c.Difficulty,
+			&c.Status, &c.PublishedAt, &c.DripMode, &c.CreatedAt, &c.UpdatedAt)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Course{}, ErrNotFound
+		}
+		return Course{}, fmt.Errorf("catalog: set drip mode: %w", err)
+	}
+	return c, nil
 }

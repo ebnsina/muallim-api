@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -70,6 +71,15 @@ type LessonPatch struct {
 	VideoURL        *string
 	DurationSeconds *int
 	IsPreview       *bool
+
+	// The drip schedule. Read only in the course's own mode: AvailableAt in
+	// `scheduled`, AvailableAfterDays in `after_enrolment`, neither in the others.
+	//
+	// A nil field leaves the column alone, like every other field here, so a
+	// schedule cannot be cleared through this patch — only replaced. Switching the
+	// course's mode makes it inert, which is the case authors actually have.
+	AvailableAt        *time.Time
+	AvailableAfterDays *int
 }
 
 // AuthoringRepository is the persistence contract for editing a curriculum.
@@ -88,6 +98,7 @@ type AuthoringRepository interface {
 	CourseByID(ctx context.Context, tx pgx.Tx, tenantID, courseID uuid.UUID) (Course, error)
 	CountLessons(ctx context.Context, tx pgx.Tx, tenantID, courseID uuid.UUID) (int, error)
 	SetCourseStatus(ctx context.Context, tx pgx.Tx, tenantID, courseID uuid.UUID, status string) (Course, error)
+	SetDripMode(ctx context.Context, tx pgx.Tx, tenantID, courseID uuid.UUID, mode string) (Course, error)
 }
 
 // AddTopic appends a topic to a course.

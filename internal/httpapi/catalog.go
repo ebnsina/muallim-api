@@ -39,6 +39,9 @@ type CourseSummary struct {
 	Difficulty  string     `json:"difficulty" enum:"beginner,intermediate,advanced,expert"`
 	Status      string     `json:"status" enum:"draft,published,archived"`
 	PublishedAt *time.Time `json:"published_at,omitempty"`
+
+	// DripMode decides how the course releases its lessons.
+	DripMode string `json:"drip_mode" enum:"none,scheduled,after_enrolment,sequential"`
 }
 
 // LessonView is a lesson within a curriculum.
@@ -279,6 +282,7 @@ func courseSummary(c catalog.Course) CourseSummary {
 		Difficulty:  c.Difficulty,
 		Status:      c.Status,
 		PublishedAt: c.PublishedAt,
+		DripMode:    c.DripMode,
 	}
 }
 
@@ -296,6 +300,9 @@ func catalogError(err error) error {
 
 	case errors.Is(err, catalog.ErrPrerequisiteExists):
 		return huma.Error409Conflict("That course is already a prerequisite.")
+
+	case errors.Is(err, catalog.ErrInvalidDripMode):
+		return huma.Error422UnprocessableEntity(err.Error())
 	case errors.Is(err, catalog.ErrInvalidPage):
 		return huma.Error422UnprocessableEntity("The cursor is not valid.")
 	case errors.Is(err, catalog.ErrInvalidLimit), errors.Is(err, catalog.ErrInvalidSlug):

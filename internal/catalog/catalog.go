@@ -40,8 +40,13 @@ type Course struct {
 	Difficulty  string
 	Status      string
 	PublishedAt *time.Time
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+
+	// DripMode decides how the course releases its lessons, and which of the
+	// per-lesson schedule columns mean anything.
+	DripMode string
+
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // Topic is an ordered section of a course.

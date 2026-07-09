@@ -196,7 +196,17 @@ func (s *Service) Lesson(ctx context.Context, tenantID, lessonID uuid.UUID, read
 			return err
 		}
 
-		access = decide(view, reader, s.now())
+		now := s.now()
+		access = decide(view, reader, now)
+
+		// Locked, not absent. The learner is enrolled and can already see this
+		// lesson in the curriculum, so telling them it does not exist would be a lie
+		// they can disprove by scrolling.
+		if access == AccessLocked {
+			_, at := unlockAt(view, now)
+			return &LessonLocked{AvailableAt: at}
+		}
+
 		if !access.Granted() {
 			// Not 403. A stranger asking for a lesson they may not read learns
 			// nothing about whether it exists.
@@ -204,6 +214,12 @@ func (s *Service) Lesson(ctx context.Context, tenantID, lessonID uuid.UUID, read
 		}
 
 		lesson = view.Lesson
+
+		// The date the reader is shown is the one their course's mode actually uses:
+		// this learner's own, in after_enrolment mode, computed rather than stored;
+		// and none at all when the course does not drip by date. The raw column is
+		// not it, and showing it would promise a date the server never enforces.
+		lesson.AvailableAt = schedule(view)
 		return nil
 	})
 	if err != nil {
@@ -217,7 +233,8 @@ func (s *Service) Lesson(ctx context.Context, tenantID, lessonID uuid.UUID, read
 //   - An author may read anything, including their own unpublished draft.
 //   - Nobody else may read anything in an unpublished course. Not even a lesson
 //     flagged as a preview: the course itself has not been released.
-//   - A live enrolment reads everything in the course.
+//   - A live enrolment reads everything the course has released to them. A lesson
+//     still dripping is AccessLocked: they belong here, and it is not open yet.
 //   - Otherwise, a preview lesson is a free sample and anyone may read it, signed
 //     in or not.
 //
@@ -239,6 +256,13 @@ func decide(view LessonView, reader Reader, now time.Time) Access {
 	if !reader.Anonymous() && view.EnrolmentStatus != nil {
 		enrolment := Enrolment{Status: *view.EnrolmentStatus, ExpiresAt: view.EnrolmentExpires}
 		if enrolment.Live(now) {
+			// Drip applies to enrolled learners and to nobody else. An author is
+			// already past this, and a stranger reading a preview is reading a sample
+			// the course chose to give away — locking that would mean the customer
+			// waits for what the passer-by is handed.
+			if locked, _ := unlockAt(view, now); locked {
+				return AccessLocked
+			}
 			return AccessEnrolled
 		}
 	}
@@ -268,7 +292,16 @@ func (s *Service) CompleteLesson(ctx context.Context, tenantID, lessonID uuid.UU
 		// without one, but reading a sample is not studying a course, and progress
 		// on a course nobody enrolled in is a row nothing can ever use.
 		reader := Reader{UserID: actor.UserID}
-		if decide(view, reader, s.now()) != AccessEnrolled {
+		now := s.now()
+		switch decide(view, reader, now) {
+		case AccessEnrolled:
+			// The only case that may mark progress.
+		case AccessLocked:
+			// An unreleased lesson cannot be completed, and saying "you are not
+			// enrolled" to somebody who is would send them to buy what they own.
+			_, at := unlockAt(view, now)
+			return &LessonLocked{AvailableAt: at}
+		default:
 			return ErrNotEnrolled
 		}
 
