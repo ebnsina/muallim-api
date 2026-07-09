@@ -45,8 +45,9 @@ func run() error {
 	log := logging.New(logOut, cfg.LogLevel, cfg.IsProduction())
 
 	handler, api := httpapi.New(httpapi.Options{
-		Version: cfg.Version,
-		Logger:  log,
+		Version:     cfg.Version,
+		Logger:      log,
+		CORSOrigins: cfg.CORSOrigins,
 	})
 
 	if *dumpSpec {

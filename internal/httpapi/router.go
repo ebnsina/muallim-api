@@ -17,6 +17,10 @@ import (
 type Options struct {
 	Version string
 	Logger  *slog.Logger
+
+	// CORSOrigins are the exact origins permitted to call this API from a browser.
+	// Empty means no cross-origin request is allowed.
+	CORSOrigins []string
 }
 
 // New builds the HTTP handler and the OpenAPI description of every route on it.
@@ -34,11 +38,15 @@ func New(opts Options) (http.Handler, huma.API) {
 	registerHealth(api, opts.Version)
 
 	// Order matters. requestID is outermost so every log line and every rendered
-	// problem document carries a correlation ID. problemResponse sits outside
-	// recoverPanic so the 500 the latter renders passes through untouched.
+	// problem document carries a correlation ID. cors sits outside problemResponse
+	// so that error responses carry the headers too — without them a browser
+	// blocks the response and the client sees an opaque network failure instead of
+	// the 404 we sent. problemResponse sits outside recoverPanic so the 500 the
+	// latter renders passes through untouched.
 	handler := chain(mux,
 		requestID,
 		accessLog(opts.Logger),
+		cors(opts.CORSOrigins),
 		problemResponse(opts.Logger),
 		recoverPanic(opts.Logger),
 	)

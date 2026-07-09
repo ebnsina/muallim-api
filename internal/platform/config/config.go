@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"slices"
 	"strings"
 	"time"
 )
@@ -32,6 +33,10 @@ type Config struct {
 
 	DatabaseURL string
 
+	// CORSOrigins are the exact browser origins allowed to call this API. lms-web
+	// is always a different origin, so this is never empty in practice.
+	CORSOrigins []string
+
 	LogLevel slog.Level
 }
 
@@ -53,6 +58,7 @@ func Load() (Config, error) {
 		IdleTimeout:     duration("LMS_IDLE_TIMEOUT", 120*time.Second),
 		ShutdownTimeout: duration("LMS_SHUTDOWN_TIMEOUT", 20*time.Second),
 		DatabaseURL:     env("LMS_DATABASE_URL", ""),
+		CORSOrigins:     list(env("LMS_CORS_ORIGINS", "http://localhost:5173")),
 	}
 
 	level, err := logLevel(env("LMS_LOG_LEVEL", "info"))
@@ -87,7 +93,26 @@ func (c Config) validate() error {
 		errs = append(errs, errors.New("config: LMS_DATABASE_URL is required outside development"))
 	}
 
+	// The API sends Access-Control-Allow-Credentials, and a browser rejects that
+	// alongside a wildcard origin. Failing here beats debugging it in a browser.
+	if slices.Contains(c.CORSOrigins, "*") {
+		errs = append(errs, errors.New(`config: LMS_CORS_ORIGINS cannot contain "*" because the API allows credentials; list exact origins`))
+	}
+
 	return errors.Join(errs...)
+}
+
+// list splits a comma-separated environment value, trimming blanks. An empty
+// value yields no entries rather than one empty string, so an unset variable
+// cannot accidentally allow the origin "".
+func list(s string) []string {
+	var out []string
+	for part := range strings.SplitSeq(s, ",") {
+		if v := strings.TrimSpace(part); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 func env(key, fallback string) string {
