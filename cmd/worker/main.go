@@ -13,16 +13,24 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
+	"github.com/ebnsina/lms-api/internal/auth"
 	"github.com/ebnsina/lms-api/internal/comms"
 	"github.com/ebnsina/lms-api/internal/platform/config"
+	"github.com/ebnsina/lms-api/internal/platform/database"
 	"github.com/ebnsina/lms-api/internal/platform/logging"
 	"github.com/ebnsina/lms-api/internal/platform/mailer"
 )
+
+// erasureInterval is how often orphaned users are swept. Daily: often enough
+// that somebody who asked to be forgotten is not waiting a week, rare enough
+// that a sweep never meets itself.
+const erasureInterval = 24 * time.Hour
 
 func main() {
 	if err := run(); err != nil {
@@ -68,14 +76,52 @@ func run() error {
 		return err
 	}
 
+	// A second pool, through platform/database, because the orphan sweep is domain
+	// work: it needs WithoutTenant, the statement timeout, and the slow-query log.
+	// River's own pool above is for River.
+	db, err := database.New(ctx, database.Options{
+		URL:                cfg.DatabaseURL,
+		MaxConns:           cfg.DBMaxConns,
+		MinConns:           cfg.DBMinConns,
+		StatementTimeout:   cfg.DBStatementTimeout,
+		SlowQueryThreshold: cfg.DBSlowQueryThreshold,
+	}, log)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	maintenance, err := auth.NewMaintenance(db, auth.NewPostgresRepository(), log)
+	if err != nil {
+		return err
+	}
+
+	orphans, err := NewEraseOrphansWorker(maintenance, log)
+	if err != nil {
+		return err
+	}
+
 	workers := river.NewWorkers()
 	river.AddWorker(workers, emails)
+	river.AddWorker(workers, orphans)
 
 	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Logger:  log,
 		Workers: workers,
 		Queues: map[string]river.QueueConfig{
 			river.QueueDefault: {MaxWorkers: cfg.WorkerMaxWorkers},
+		},
+
+		// Erasure is not urgent, and it is not optional. Daily is often enough that
+		// a person who asked to be forgotten does not wait a week, and rare enough
+		// that a sweep of a large platform never collides with itself. River elects
+		// one leader among the workers, so N replicas still run one sweep.
+		PeriodicJobs: []*river.PeriodicJob{
+			river.NewPeriodicJob(
+				river.PeriodicInterval(erasureInterval),
+				func() (river.JobArgs, *river.InsertOpts) { return EraseOrphansArgs{}, nil },
+				&river.PeriodicJobOpts{ID: EraseOrphansArgs{}.Kind()},
+			),
 		},
 	})
 	if err != nil {
