@@ -46,10 +46,14 @@ migrate-down: ## Roll back the last migration
 migrate-status: ## Show migration status
 	LMS_DATABASE_URL="$(DB_URL)" go run ./cmd/migrate status
 
-seed: ## Create the development workspace that resolves for host "localhost"
+seed: ## Create the workspace that resolves for host "localhost", in both databases
 	@psql -q "$(DB_URL)" -c "INSERT INTO tenants (subdomain, name) VALUES ('localhost', 'Acme Academy') \
 		ON CONFLICT (lower(subdomain)) DO NOTHING"
-	@echo "workspace 'localhost' is ready; lms-web on :5173 resolves to it"
+	@psql -q "$(TEST_DB_URL)" -c "INSERT INTO tenants (subdomain, name) VALUES ('localhost', 'Acme Academy') \
+		ON CONFLICT (lower(subdomain)) DO NOTHING"
+	@echo "workspace 'localhost' is ready in lms and lms_test"
+	@echo "  lms      — make run, make worker"
+	@echo "  lms_test — lms-web's end-to-end tests, which claim it on first run"
 
 db-create: ## Create the lms role and both databases on a local Postgres
 	@psql -q postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname='lms'" | grep -q 1 || \
