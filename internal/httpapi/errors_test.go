@@ -47,6 +47,7 @@ func TestEveryDomainSentinelMapsToADeliberateStatus(t *testing.T) {
 		{"email taken", auth.ErrEmailTaken, http.StatusConflict},
 		{"password too short", auth.ErrPasswordTooShort, http.StatusUnprocessableEntity},
 		{"password too long", auth.ErrPasswordTooLong, http.StatusUnprocessableEntity},
+		{"credential token invalid", auth.ErrTokenInvalid, http.StatusBadRequest},
 
 		// catalog
 		{"course not found", catalog.ErrNotFound, http.StatusNotFound},

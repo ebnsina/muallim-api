@@ -83,7 +83,11 @@ func registerMembers(api huma.API, svc *auth.Service) {
 			return nil, err
 		}
 
-		inv, token, err := svc.Invite(ctx, p, in.Body.Email, in.Body.Role, requestContextFrom(ctx))
+		// The workspace name goes in the email. The domain layer has no way to read
+		// it: tenant is a sibling domain package, and auth may not import one.
+		workspace, _ := tenant.FromContext(ctx)
+
+		inv, token, err := svc.Invite(ctx, p, in.Body.Email, in.Body.Role, workspace.Name, requestContextFrom(ctx))
 		if err != nil {
 			return nil, membersError(err)
 		}

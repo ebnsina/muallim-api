@@ -31,16 +31,17 @@ type MembershipRepository interface {
 	HasAnyMember(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) (bool, error)
 }
 
-// Invite creates an invitation and returns the raw token exactly once.
+// Invite creates an invitation, mails it, and returns the raw token exactly once.
 //
 // The token is never stored and never retrievable again — only its digest is
 // kept. A lost invitation is re-sent by creating a new one, which is the same
 // property that makes a stolen database useless for joining workspaces.
 //
-// Sending the email is not this function's job. It returns the token; a caller
-// hands it to whatever delivers it. Until a mailer exists, that caller is a human
-// with a link.
-func (s *Service) Invite(ctx context.Context, p Principal, email, role string, rc RequestContext) (Invitation, string, error) {
+// The token is returned as well as mailed, so a workspace whose mail server is
+// misconfigured can still onboard by hand. That is also why holding an invitation
+// link does not prove control of the address it was sent to, and why an account
+// created by accepting one is still asked to verify its email.
+func (s *Service) Invite(ctx context.Context, p Principal, email, role, workspace string, rc RequestContext) (Invitation, string, error) {
 	email = normaliseEmail(email)
 	if email == "" {
 		return Invitation{}, "", fmt.Errorf("%w: email is required", ErrInvitationInvalid)
@@ -75,6 +76,10 @@ func (s *Service) Invite(ctx context.Context, p Principal, email, role string, r
 		// membership in, and the invitation that would reveal it does not exist yet.
 		// AcceptInvitation catches it instead, where the account is visible.
 		if err := s.members.CreateInvitation(ctx, tx, inv, digest); err != nil {
+			return err
+		}
+
+		if err := s.mail.SendInvitation(ctx, tx, email, workspace, token, InvitationTTL); err != nil {
 			return err
 		}
 
@@ -184,6 +189,17 @@ func (s *Service) AcceptInvitation(ctx context.Context, tenantID uuid.UUID, toke
 		pair, err = s.startSession(ctx, tx, tenantID, user.ID, role, rc)
 		if err != nil {
 			return err
+		}
+
+		// A brand-new account still verifies its address. Holding the invitation link
+		// does not prove control of the inbox it was sent to, because Invite also
+		// hands the token back to the inviter. An account that already existed proved
+		// itself with its password a few lines above, and keeps whatever verification
+		// state it had.
+		if !found {
+			if err := s.issueVerification(ctx, tx, tenantID, user, rc); err != nil {
+				return err
+			}
 		}
 
 		return s.audit.Record(ctx, tx, tenantID, AuditEntry{

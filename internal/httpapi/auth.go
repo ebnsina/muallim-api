@@ -158,6 +158,85 @@ func registerAuth(api huma.API, svc *auth.Service) {
 	})
 
 	huma.Register(api, huma.Operation{
+		OperationID: "request-password-reset",
+		Method:      http.MethodPost,
+		Path:        "/v1/auth/password/forgot",
+		Summary:     "Mail a password reset link",
+		Description: "Always succeeds, whether or not the address belongs to a member of this workspace. " +
+			"An endpoint that answers \"no such account\" is an enumeration oracle.",
+		Tags:          []string{"Auth"},
+		DefaultStatus: http.StatusAccepted,
+	}, func(ctx context.Context, in *struct {
+		Body struct {
+			Email string `json:"email" format:"email" maxLength:"320"`
+		}
+	}) (*struct{}, error) {
+		if err := svc.RequestPasswordReset(ctx, tenant.ID(ctx), in.Body.Email, requestContextFrom(ctx)); err != nil {
+			return nil, authError(err)
+		}
+		return nil, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "reset-password",
+		Method:        http.MethodPost,
+		Path:          "/v1/auth/password/reset",
+		Summary:       "Spend a reset token and set a new password",
+		Description:   "Revokes every session in this workspace. The token works once.",
+		Tags:          []string{"Auth"},
+		DefaultStatus: http.StatusNoContent,
+	}, func(ctx context.Context, in *struct {
+		Body struct {
+			Token    string `json:"token" maxLength:"128"`
+			Password string `json:"password" minLength:"12" maxLength:"256" doc:"At least 12 characters. No composition rules."`
+		}
+	}) (*struct{}, error) {
+		if err := svc.ResetPassword(ctx, tenant.ID(ctx), in.Body.Token, in.Body.Password, requestContextFrom(ctx)); err != nil {
+			return nil, authError(err)
+		}
+		return nil, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "verify-email",
+		Method:        http.MethodPost,
+		Path:          "/v1/auth/email/verify",
+		Summary:       "Confirm an email address",
+		Description:   "Exchanges the token from a verification email. The token works once.",
+		Tags:          []string{"Auth"},
+		DefaultStatus: http.StatusNoContent,
+	}, func(ctx context.Context, in *struct {
+		Body struct {
+			Token string `json:"token" maxLength:"128"`
+		}
+	}) (*struct{}, error) {
+		if err := svc.VerifyEmail(ctx, tenant.ID(ctx), in.Body.Token, requestContextFrom(ctx)); err != nil {
+			return nil, authError(err)
+		}
+		return nil, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "resend-verification-email",
+		Method:        http.MethodPost,
+		Path:          "/v1/auth/email/verify/resend",
+		Summary:       "Mail a fresh verification link",
+		Description:   "A no-op for an address already confirmed. Any earlier link stops working.",
+		Tags:          []string{"Auth"},
+		DefaultStatus: http.StatusNoContent,
+		Security:      []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, _ *struct{}) (*struct{}, error) {
+		p, err := requirePrincipal(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if err := svc.ResendVerification(ctx, p, requestContextFrom(ctx)); err != nil {
+			return nil, authError(err)
+		}
+		return nil, nil
+	})
+
+	huma.Register(api, huma.Operation{
 		OperationID: "get-me",
 		Method:      http.MethodGet,
 		Path:        "/v1/me",
@@ -235,6 +314,11 @@ func authError(err error) error {
 
 	case errors.Is(err, auth.ErrForbidden):
 		return huma.Error403Forbidden("Your role does not permit this action.")
+
+	case errors.Is(err, auth.ErrTokenInvalid):
+		// Not a 401: authenticating would not help, and there is nothing to retry.
+		// The one useful instruction is to ask for another link.
+		return huma.Error400BadRequest("This link is invalid or has expired. Request a new one.")
 
 	case errors.Is(err, auth.ErrPasswordTooShort), errors.Is(err, auth.ErrPasswordTooLong):
 		return huma.Error422UnprocessableEntity(err.Error())

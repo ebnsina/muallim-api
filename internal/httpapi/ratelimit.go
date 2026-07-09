@@ -10,16 +10,26 @@ import (
 )
 
 // throttledPrefixes are the paths worth limiting: everything that verifies a
-// credential.
+// credential, and everything that sends mail.
 //
 // Each Argon2id verification allocates 64 MiB by design. That is what makes an
 // offline attack expensive, and it is also what makes an unlimited login endpoint
 // a memory-exhaustion primitive for anyone with a shell and a loop.
+//
+// Mail costs money and lands in someone else's inbox. An unlimited endpoint that
+// mails a stranger on request is a spam cannon pointed at our own sending
+// reputation, whoever ends up paying for it.
 var throttledPrefixes = []string{
 	"/v1/auth/login",
 	"/v1/auth/register",
 	"/v1/auth/refresh",
 	"/v1/auth/invitations/accept",
+
+	// Covers both /password/forgot (sends mail) and /password/reset (hashes).
+	"/v1/auth/password",
+
+	// Covers /email/verify and /email/verify/resend (sends mail).
+	"/v1/auth/email/verify",
 }
 
 // throttle limits credential-verifying endpoints per client address per path.

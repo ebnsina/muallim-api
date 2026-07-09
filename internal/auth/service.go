@@ -56,16 +56,21 @@ type Service struct {
 	db      *database.DB
 	repo    Repository
 	members MembershipRepository
+	creds   CredentialRepository
 	tokens  *TokenIssuer
 	audit   AuditRecorder
+	mail    Mailer
 	log     *slog.Logger
 
 	now func() time.Time
 }
 
 // NewService returns a Service.
-func NewService(db *database.DB, repo Repository, members MembershipRepository, tokens *TokenIssuer, recorder AuditRecorder, log *slog.Logger) *Service {
-	return &Service{db: db, repo: repo, members: members, tokens: tokens, audit: recorder, log: log, now: time.Now}
+func NewService(db *database.DB, repo Repository, members MembershipRepository, creds CredentialRepository, tokens *TokenIssuer, recorder AuditRecorder, mail Mailer, log *slog.Logger) *Service {
+	return &Service{
+		db: db, repo: repo, members: members, creds: creds,
+		tokens: tokens, audit: recorder, mail: mail, log: log, now: time.Now,
+	}
 }
 
 // Register claims an unclaimed workspace, creating its owner.
@@ -125,6 +130,13 @@ func (s *Service) Register(ctx context.Context, tenantID uuid.UUID, c Credential
 
 		pair, err = s.startSession(ctx, tx, tenantID, user.ID, role, rc)
 		if err != nil {
+			return err
+		}
+
+		// Queued in this transaction: an account that exists always has a
+		// verification email on its way, and a registration that rolls back never
+		// mails a link to a user who does not exist.
+		if err := s.issueVerification(ctx, tx, tenantID, user, rc); err != nil {
 			return err
 		}
 

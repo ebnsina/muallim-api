@@ -7,7 +7,9 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -72,7 +74,78 @@ func (a authAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, 
 	})
 }
 
+// sentMail is one message the service asked to have delivered.
+type sentMail struct {
+	Kind      string // verification, password_reset, invitation
+	To        string
+	Subject   string // the recipient's name, or the workspace name
+	Token     string
+	ExpiresIn time.Duration
+}
+
+// fakeMailer records what would have been sent.
+//
+// It stands in for comms.Enqueuer, whose real job is to insert a River job on
+// the caller's transaction. That the insert is transactional is comms' property
+// and is tested there, against a real queue. What auth owes is that a token is
+// minted and handed over exactly when it should be, which is what this captures.
+type fakeMailer struct {
+	mu   sync.Mutex
+	sent []sentMail
+}
+
+func (m *fakeMailer) SendVerification(_ context.Context, _ pgx.Tx, to, name, token string, d time.Duration) error {
+	return m.record(sentMail{Kind: "verification", To: to, Subject: name, Token: token, ExpiresIn: d})
+}
+
+func (m *fakeMailer) SendPasswordReset(_ context.Context, _ pgx.Tx, to, name, token string, d time.Duration) error {
+	return m.record(sentMail{Kind: "password_reset", To: to, Subject: name, Token: token, ExpiresIn: d})
+}
+
+func (m *fakeMailer) SendInvitation(_ context.Context, _ pgx.Tx, to, workspace, token string, d time.Duration) error {
+	return m.record(sentMail{Kind: "invitation", To: to, Subject: workspace, Token: token, ExpiresIn: d})
+}
+
+func (m *fakeMailer) record(s sentMail) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sent = append(m.sent, s)
+	return nil
+}
+
+// lastOf returns the most recent message of a kind sent to an address.
+func (m *fakeMailer) lastOf(kind, to string) (sentMail, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for i := len(m.sent) - 1; i >= 0; i-- {
+		if m.sent[i].Kind == kind && m.sent[i].To == to {
+			return m.sent[i], true
+		}
+	}
+	return sentMail{}, false
+}
+
+func (m *fakeMailer) countOf(kind string) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var n int
+	for _, s := range m.sent {
+		if s.Kind == kind {
+			n++
+		}
+	}
+	return n
+}
+
 func newService(t *testing.T, db *database.DB) *auth.Service {
+	t.Helper()
+	svc, _ := newServiceWithMailer(t, db)
+	return svc
+}
+
+func newServiceWithMailer(t *testing.T, db *database.DB) (*auth.Service, *fakeMailer) {
 	t.Helper()
 
 	tokens, err := auth.NewTokenIssuer("a-signing-secret-of-at-least-32-bytes", "lms-api-test")
@@ -80,7 +153,9 @@ func newService(t *testing.T, db *database.DB) *auth.Service {
 		t.Fatal(err)
 	}
 	repo := auth.NewPostgresRepository()
-	return auth.NewService(db, repo, repo, tokens, authAuditor{audit.NewRecorder()}, discardLogger())
+	mail := &fakeMailer{}
+
+	return auth.NewService(db, repo, repo, repo, tokens, authAuditor{audit.NewRecorder()}, mail, discardLogger()), mail
 }
 
 func uniqueEmail() string { return "u" + uuid.NewString()[:8] + "@example.test" }

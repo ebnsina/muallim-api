@@ -38,7 +38,7 @@ func TestInviteAndAcceptCreatesANewAccount(t *testing.T) {
 	owner, _ := claim(t, svc, tenantID)
 
 	email := uniqueEmail()
-	inv, token, err := svc.Invite(t.Context(), owner, email, auth.RoleInstructor, auth.RequestContext{})
+	inv, token, err := svc.Invite(t.Context(), owner, email, auth.RoleInstructor, "Test Workspace", auth.RequestContext{})
 	if err != nil {
 		t.Fatalf("Invite: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestInvitationLetsAnExistingAccountJoinASecondWorkspace(t *testing.T) {
 
 	// Globex is claimed by somebody else, then invites Ada.
 	globexOwner, _ := claim(t, svc, globex)
-	_, token, err := svc.Invite(t.Context(), globexOwner, adaEmail, auth.RoleStudent, auth.RequestContext{})
+	_, token, err := svc.Invite(t.Context(), globexOwner, adaEmail, auth.RoleStudent, "Test Workspace", auth.RequestContext{})
 	if err != nil {
 		t.Fatalf("Invite: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestAcceptingWithAnExistingAccountRequiresItsPassword(t *testing.T) {
 	_, adaEmail := claim(t, svc, acme)
 	globexOwner, _ := claim(t, svc, globex)
 
-	_, token, err := svc.Invite(t.Context(), globexOwner, adaEmail, auth.RoleAdmin, auth.RequestContext{})
+	_, token, err := svc.Invite(t.Context(), globexOwner, adaEmail, auth.RoleAdmin, "Test Workspace", auth.RequestContext{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func TestInvitationIsSingleUse(t *testing.T) {
 	tenantID := seedTenant(t, db)
 	owner, _ := claim(t, svc, tenantID)
 
-	_, token, err := svc.Invite(t.Context(), owner, uniqueEmail(), auth.RoleStudent, auth.RequestContext{})
+	_, token, err := svc.Invite(t.Context(), owner, uniqueEmail(), auth.RoleStudent, "Test Workspace", auth.RequestContext{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ func TestRevokedInvitationCannotBeAccepted(t *testing.T) {
 	tenantID := seedTenant(t, db)
 	owner, _ := claim(t, svc, tenantID)
 
-	inv, token, err := svc.Invite(t.Context(), owner, uniqueEmail(), auth.RoleStudent, auth.RequestContext{})
+	inv, token, err := svc.Invite(t.Context(), owner, uniqueEmail(), auth.RoleStudent, "Test Workspace", auth.RequestContext{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +211,7 @@ func TestInvitationTokensAreNotGuessableOrCrossTenant(t *testing.T) {
 	owner, _ := claim(t, svc, acme)
 	_ = mustClaim(t, svc, globex)
 
-	_, token, err := svc.Invite(t.Context(), owner, uniqueEmail(), auth.RoleStudent, auth.RequestContext{})
+	_, token, err := svc.Invite(t.Context(), owner, uniqueEmail(), auth.RoleStudent, "Test Workspace", auth.RequestContext{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +242,7 @@ func TestOnlyAnOwnerMayInviteAnOwner(t *testing.T) {
 	owner, _ := claim(t, svc, tenantID)
 
 	// Promote somebody to admin.
-	_, token, err := svc.Invite(t.Context(), owner, uniqueEmail(), auth.RoleAdmin, auth.RequestContext{})
+	_, token, err := svc.Invite(t.Context(), owner, uniqueEmail(), auth.RoleAdmin, "Test Workspace", auth.RequestContext{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,11 +256,11 @@ func TestOnlyAnOwnerMayInviteAnOwner(t *testing.T) {
 	}
 
 	// An admin inviting an owner would be promoting themselves via an alias.
-	if _, _, err := svc.Invite(t.Context(), admin, uniqueEmail(), auth.RoleOwner, auth.RequestContext{}); !errors.Is(err, auth.ErrForbidden) {
+	if _, _, err := svc.Invite(t.Context(), admin, uniqueEmail(), auth.RoleOwner, "Test Workspace", auth.RequestContext{}); !errors.Is(err, auth.ErrForbidden) {
 		t.Errorf("err = %v, want ErrForbidden — an admin minted an owner", err)
 	}
 
-	if _, _, err := svc.Invite(t.Context(), owner, uniqueEmail(), auth.RoleOwner, auth.RequestContext{}); err != nil {
+	if _, _, err := svc.Invite(t.Context(), owner, uniqueEmail(), auth.RoleOwner, "Test Workspace", auth.RequestContext{}); err != nil {
 		t.Errorf("an owner could not invite an owner: %v", err)
 	}
 }
@@ -274,10 +274,10 @@ func TestDuplicatePendingInvitationIsRejected(t *testing.T) {
 	owner, _ := claim(t, svc, tenantID)
 
 	email := uniqueEmail()
-	if _, _, err := svc.Invite(t.Context(), owner, email, auth.RoleStudent, auth.RequestContext{}); err != nil {
+	if _, _, err := svc.Invite(t.Context(), owner, email, auth.RoleStudent, "Test Workspace", auth.RequestContext{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := svc.Invite(t.Context(), owner, email, auth.RoleStudent, auth.RequestContext{}); !errors.Is(err, auth.ErrInvitationPending) {
+	if _, _, err := svc.Invite(t.Context(), owner, email, auth.RoleStudent, "Test Workspace", auth.RequestContext{}); !errors.Is(err, auth.ErrInvitationPending) {
 		t.Errorf("err = %v, want ErrInvitationPending", err)
 	}
 }
@@ -290,7 +290,7 @@ func TestChangeMemberRoleGuards(t *testing.T) {
 	tenantID := seedTenant(t, db)
 	owner, _ := claim(t, svc, tenantID)
 
-	_, token, err := svc.Invite(t.Context(), owner, uniqueEmail(), auth.RoleStudent, auth.RequestContext{})
+	_, token, err := svc.Invite(t.Context(), owner, uniqueEmail(), auth.RoleStudent, "Test Workspace", auth.RequestContext{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -339,7 +339,7 @@ func TestRemoveMemberKeepsTheGlobalAccount(t *testing.T) {
 
 	// The student belongs to both workspaces.
 	studentEmail := uniqueEmail()
-	_, token, err := svc.Invite(t.Context(), acmeOwner, studentEmail, auth.RoleStudent, auth.RequestContext{})
+	_, token, err := svc.Invite(t.Context(), acmeOwner, studentEmail, auth.RoleStudent, "Test Workspace", auth.RequestContext{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,7 +348,7 @@ func TestRemoveMemberKeepsTheGlobalAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, token2, err := svc.Invite(t.Context(), globexOwner, studentEmail, auth.RoleStudent, auth.RequestContext{})
+	_, token2, err := svc.Invite(t.Context(), globexOwner, studentEmail, auth.RoleStudent, "Test Workspace", auth.RequestContext{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -384,7 +384,7 @@ func TestRemoveLastOwnerIsRefused(t *testing.T) {
 	owner, _ := claim(t, svc, tenantID)
 
 	// Bring in a second owner so the first can act on them.
-	_, token, err := svc.Invite(t.Context(), owner, uniqueEmail(), auth.RoleOwner, auth.RequestContext{})
+	_, token, err := svc.Invite(t.Context(), owner, uniqueEmail(), auth.RoleOwner, "Test Workspace", auth.RequestContext{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -404,7 +404,7 @@ func TestRemoveLastOwnerIsRefused(t *testing.T) {
 	// the interesting case is the last owner demoting themselves, which the
 	// self-modification guard already refuses. So instead: promote a student to
 	// owner, then have them demote the original.
-	_, token2, err := svc.Invite(t.Context(), owner, uniqueEmail(), auth.RoleOwner, auth.RequestContext{})
+	_, token2, err := svc.Invite(t.Context(), owner, uniqueEmail(), auth.RoleOwner, "Test Workspace", auth.RequestContext{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -437,7 +437,7 @@ func TestListMembersAndInvitations(t *testing.T) {
 	tenantID := seedTenant(t, db)
 	owner, ownerEmail := claim(t, svc, tenantID)
 
-	if _, _, err := svc.Invite(t.Context(), owner, uniqueEmail(), auth.RoleStudent, auth.RequestContext{}); err != nil {
+	if _, _, err := svc.Invite(t.Context(), owner, uniqueEmail(), auth.RoleStudent, "Test Workspace", auth.RequestContext{}); err != nil {
 		t.Fatal(err)
 	}
 

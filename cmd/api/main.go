@@ -17,9 +17,13 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/riverdriver/riverpgxv5"
+
 	"github.com/ebnsina/lms-api/internal/audit"
 	"github.com/ebnsina/lms-api/internal/auth"
 	"github.com/ebnsina/lms-api/internal/catalog"
+	"github.com/ebnsina/lms-api/internal/comms"
 	"github.com/ebnsina/lms-api/internal/enroll"
 	"github.com/ebnsina/lms-api/internal/httpapi"
 	"github.com/ebnsina/lms-api/internal/platform/cache"
@@ -117,8 +121,26 @@ func run() error {
 		return err
 	}
 
+	// An insert-only River client: the driver is handed no pool, so Start would
+	// refuse and Insert is disabled, but InsertTx works. This process enqueues jobs
+	// inside the transactions that produce them and never works one — that is
+	// cmd/worker's job, and giving the API a worker pool it must not use is how it
+	// eventually uses it.
+	jobs, err := river.NewClient(riverpgxv5.New(nil), &river.Config{Logger: log})
+	if err != nil {
+		return fmt.Errorf("create river client: %w", err)
+	}
+
+	outbox, err := comms.NewEnqueuer(jobs, cfg.WebBaseURL)
+	if err != nil {
+		return err
+	}
+	if !cfg.MailerConfigured() {
+		log.Warn("LMS_SMTP_HOST is unset; the worker will log messages instead of sending them, including single-use tokens")
+	}
+
 	authRepo := auth.NewPostgresRepository()
-	identities := auth.NewService(db, authRepo, authRepo, tokens, authAuditor{recorder}, log)
+	identities := auth.NewService(db, authRepo, authRepo, authRepo, tokens, authAuditor{recorder}, outbox, log)
 	catalogRepo := catalog.NewPostgresRepository()
 	courses := catalog.NewService(db, catalogRepo, catalogRepo, catalogAuditor{recorder})
 	learning := enroll.NewService(db, enroll.NewPostgresRepository(), enrolAuditor{recorder})
