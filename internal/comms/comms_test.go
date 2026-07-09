@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
@@ -52,12 +53,24 @@ func newEnqueuer(t *testing.T, baseURL string) *comms.Enqueuer {
 	return enq
 }
 
-// jobsIn counts the email jobs visible on tx, and returns the newest one's args.
-func jobsIn(t *testing.T, ctx context.Context, tx pgx.Tx) (int, comms.EmailArgs) {
+// recipient returns an address nobody else will use.
+//
+// river_job is not cleaned between runs, and the end-to-end suite shares this
+// database, so a query for "every email job" answers with everything anyone has
+// ever queued. A test that counts rows must count its own.
+func recipient(t *testing.T) string {
+	t.Helper()
+	return uuid.NewString() + "@example.test"
+}
+
+// jobsIn counts the email jobs addressed to `to` and visible on tx, and returns
+// the newest one's args.
+func jobsIn(t *testing.T, ctx context.Context, tx pgx.Tx, to string) (int, comms.EmailArgs) {
 	t.Helper()
 
 	rows, err := tx.Query(ctx,
-		`SELECT args FROM river_job WHERE kind = $1 ORDER BY id DESC`, comms.EmailArgs{}.Kind())
+		`SELECT args FROM river_job WHERE kind = $1 AND args->>'to' = $2 ORDER BY id DESC`,
+		comms.EmailArgs{}.Kind(), to)
 	if err != nil {
 		t.Fatalf("query jobs: %v", err)
 	}
@@ -93,6 +106,8 @@ func TestSendPasswordResetEnqueuesOnTheTransaction(t *testing.T) {
 	pool := testPool(t)
 	enq := newEnqueuer(t, "https://app.example.com")
 
+	to := recipient(t)
+
 	tx, err := pool.Begin(t.Context())
 	if err != nil {
 		t.Fatalf("begin: %v", err)
@@ -100,16 +115,16 @@ func TestSendPasswordResetEnqueuesOnTheTransaction(t *testing.T) {
 	defer func() { _ = tx.Rollback(t.Context()) }()
 
 	const token = "a-token-that-looks-opaque"
-	if err := enq.SendPasswordReset(t.Context(), tx, "ada@example.test", "Ada", token, time.Hour); err != nil {
+	if err := enq.SendPasswordReset(t.Context(), tx, to, "Ada", token, time.Hour); err != nil {
 		t.Fatalf("send: %v", err)
 	}
 
-	n, args := jobsIn(t, t.Context(), tx)
+	n, args := jobsIn(t, t.Context(), tx, to)
 	if n != 1 {
 		t.Fatalf("jobs enqueued = %d, want 1", n)
 	}
 
-	if args.To != "ada@example.test" {
+	if args.To != to {
 		t.Errorf("to = %q", args.To)
 	}
 	if args.Subject != "Reset your password" {
@@ -139,15 +154,23 @@ func TestEnqueuedJobDiesWithItsTransaction(t *testing.T) {
 	pool := testPool(t)
 	enq := newEnqueuer(t, "https://app.example.com")
 
+	to := recipient(t)
+
 	tx, err := pool.Begin(t.Context())
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
 
-	if err := enq.SendVerification(t.Context(), tx, "ada@example.test", "Ada", "tok", 24*time.Hour); err != nil {
+	// Rolled back even if an assertion below ends the test. Without this, a
+	// failure leaves the transaction open, the connection checked out, and
+	// pool.Close() waiting on it until the whole package times out — which is a
+	// far more confusing way to learn that one count was wrong.
+	defer func() { _ = tx.Rollback(context.Background()) }()
+
+	if err := enq.SendVerification(t.Context(), tx, to, "Ada", "tok", 24*time.Hour); err != nil {
 		t.Fatalf("send: %v", err)
 	}
-	if n, _ := jobsIn(t, t.Context(), tx); n != 1 {
+	if n, _ := jobsIn(t, t.Context(), tx, to); n != 1 {
 		t.Fatalf("jobs visible inside the transaction = %d, want 1", n)
 	}
 
@@ -162,7 +185,7 @@ func TestEnqueuedJobDiesWithItsTransaction(t *testing.T) {
 	}
 	defer func() { _ = after.Rollback(t.Context()) }()
 
-	if n, _ := jobsIn(t, t.Context(), after); n != 0 {
+	if n, _ := jobsIn(t, t.Context(), after, to); n != 0 {
 		t.Errorf("a rolled-back transaction left %d jobs behind, want 0", n)
 	}
 }
@@ -181,12 +204,14 @@ func TestSendInvitationEscapesTheWorkspaceName(t *testing.T) {
 	}
 	defer func() { _ = tx.Rollback(t.Context()) }()
 
+	to := recipient(t)
+
 	const evil = `Acme <script>alert(1)</script>`
-	if err := enq.SendInvitation(t.Context(), tx, "ada@example.test", evil, "tok", 7*24*time.Hour); err != nil {
+	if err := enq.SendInvitation(t.Context(), tx, to, evil, "tok", 7*24*time.Hour); err != nil {
 		t.Fatalf("send: %v", err)
 	}
 
-	_, args := jobsIn(t, t.Context(), tx)
+	_, args := jobsIn(t, t.Context(), tx, to)
 	if strings.Contains(args.HTML, "<script>") {
 		t.Errorf("workspace name reached the html unescaped:\n%s", args.HTML)
 	}
