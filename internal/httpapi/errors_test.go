@@ -53,15 +53,24 @@ func TestEveryDomainSentinelMapsToADeliberateStatus(t *testing.T) {
 		{"invalid limit", catalog.ErrInvalidLimit, http.StatusUnprocessableEntity},
 		{"invalid slug", catalog.ErrInvalidSlug, http.StatusUnprocessableEntity},
 		{"slug taken", catalog.ErrSlugTaken, http.StatusConflict},
+		{"invalid lesson", catalog.ErrInvalidLesson, http.StatusUnprocessableEntity},
+		{"incomplete order", catalog.ErrIncompleteOrder, http.StatusUnprocessableEntity},
+		{"empty course", catalog.ErrEmptyCourse, http.StatusConflict},
+		{"already published", catalog.ErrAlreadyPublished, http.StatusConflict},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mapper := authError
-			if errors.Is(tt.err, catalog.ErrNotFound) || errors.Is(tt.err, catalog.ErrInvalidPage) ||
-				errors.Is(tt.err, catalog.ErrInvalidLimit) || errors.Is(tt.err, catalog.ErrInvalidSlug) ||
-				errors.Is(tt.err, catalog.ErrSlugTaken) {
-				mapper = catalogError
+			for _, catalogErr := range []error{
+				catalog.ErrNotFound, catalog.ErrInvalidPage, catalog.ErrInvalidLimit,
+				catalog.ErrInvalidSlug, catalog.ErrSlugTaken, catalog.ErrInvalidLesson,
+				catalog.ErrIncompleteOrder, catalog.ErrEmptyCourse, catalog.ErrAlreadyPublished,
+			} {
+				if errors.Is(tt.err, catalogErr) {
+					mapper = catalogError
+					break
+				}
 			}
 
 			if got := statusOf(mapper(tt.err)); got != tt.want {

@@ -122,7 +122,8 @@ func (a testAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, 
 }
 
 func newService(db *database.DB) *catalog.Service {
-	return catalog.NewService(db, catalog.NewPostgresRepository(), testAuditor{audit.NewRecorder()})
+	repo := catalog.NewPostgresRepository()
+	return catalog.NewService(db, repo, repo, testAuditor{audit.NewRecorder()})
 }
 
 // The regression guard. Loading a curriculum must cost a fixed number of queries
@@ -157,7 +158,7 @@ func TestCurriculumHasNoNPlusOne(t *testing.T) {
 			counter := &database.Counter{}
 			ctx := database.WithCounter(t.Context(), counter)
 
-			curriculum, err := svc.Curriculum(ctx, tenantID, slug)
+			curriculum, err := svc.Curriculum(ctx, tenantID, slug, true)
 			if err != nil {
 				t.Fatalf("curriculum: %v", err)
 			}
@@ -194,7 +195,7 @@ func TestCurriculumSkipsLessonQueryWhenNoTopics(t *testing.T) {
 	counter := &database.Counter{}
 	ctx := database.WithCounter(t.Context(), counter)
 
-	if _, err := svc.Curriculum(ctx, tenantID, slug); err != nil {
+	if _, err := svc.Curriculum(ctx, tenantID, slug, true); err != nil {
 		t.Fatalf("curriculum: %v", err)
 	}
 
@@ -213,7 +214,7 @@ func TestCurriculumOrdersTopicsAndLessons(t *testing.T) {
 	slug := "ordered-" + uuid.NewString()[:8]
 	seedCourse(t, db, tenantID, slug, 3, 3)
 
-	curriculum, err := svc.Curriculum(t.Context(), tenantID, slug)
+	curriculum, err := svc.Curriculum(t.Context(), tenantID, slug, true)
 	if err != nil {
 		t.Fatalf("curriculum: %v", err)
 	}
@@ -240,7 +241,7 @@ func TestCurriculumNotFound(t *testing.T) {
 	db := testDB(t)
 	tenantID := seedTenant(t, db)
 
-	_, err := newService(db).Curriculum(t.Context(), tenantID, "no-such-course")
+	_, err := newService(db).Curriculum(t.Context(), tenantID, "no-such-course", true)
 	if err == nil {
 		t.Fatal("expected an error for a missing course")
 	}

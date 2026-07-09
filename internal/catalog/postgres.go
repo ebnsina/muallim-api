@@ -66,16 +66,25 @@ func (r *PostgresRepository) ListCourses(ctx context.Context, tx pgx.Tx, tenantI
 	return courses, nil
 }
 
+// courseBySlugSQL hides unpublished courses unless the caller may see drafts.
+//
+// The filter is in the query, not in a check after the fact. A draft that is
+// loaded and then discarded has already been loaded, and the first refactor that
+// forgets the discard turns an unreleased course into a public one.
 const courseBySlugSQL = `
 	SELECT id, slug, title, summary, difficulty, status, published_at, created_at, updated_at
 	FROM courses
-	WHERE tenant_id = $1 AND lower(slug) = lower($2)`
+	WHERE tenant_id = $1 AND lower(slug) = lower($2)
+	  AND (status = 'published' OR $3)`
 
 // CourseBySlug loads a single course. The unique index on (tenant_id, lower(slug))
 // makes this an index lookup.
-func (r *PostgresRepository) CourseBySlug(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, slug string) (Course, error) {
+//
+// includeDrafts must come from an authorisation decision, never from a request
+// parameter.
+func (r *PostgresRepository) CourseBySlug(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, slug string, includeDrafts bool) (Course, error) {
 	var c Course
-	err := tx.QueryRow(ctx, courseBySlugSQL, tenantID, slug).Scan(
+	err := tx.QueryRow(ctx, courseBySlugSQL, tenantID, slug, includeDrafts).Scan(
 		&c.ID, &c.Slug, &c.Title, &c.Summary, &c.Difficulty,
 		&c.Status, &c.PublishedAt, &c.CreatedAt, &c.UpdatedAt)
 

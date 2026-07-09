@@ -13,21 +13,22 @@ import (
 // Repository is the persistence contract, declared here by its consumer.
 type Repository interface {
 	ListCourses(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, p ListParams) ([]Course, error)
-	CourseBySlug(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, slug string) (Course, error)
+	CourseBySlug(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, slug string, includeDrafts bool) (Course, error)
 	CurriculumFor(ctx context.Context, tx pgx.Tx, tenantID, courseID uuid.UUID) ([]Topic, error)
 	CreateCourse(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, n NewCourse) (Course, error)
 }
 
 // Service holds the business rules and owns transaction boundaries.
 type Service struct {
-	db    *database.DB
-	repo  Repository
-	audit AuditRecorder
+	db        *database.DB
+	repo      Repository
+	authoring AuthoringRepository
+	audit     AuditRecorder
 }
 
 // NewService returns a Service.
-func NewService(db *database.DB, repo Repository, recorder AuditRecorder) *Service {
-	return &Service{db: db, repo: repo, audit: recorder}
+func NewService(db *database.DB, repo Repository, authoring AuthoringRepository, recorder AuditRecorder) *Service {
+	return &Service{db: db, repo: repo, authoring: authoring, audit: recorder}
 }
 
 // ListCourses returns one page of a tenant's courses.
@@ -73,11 +74,16 @@ func (s *Service) ListCourses(ctx context.Context, tenantID uuid.UUID, p ListPar
 // Three queries, always: one for the course, one for its topics, one for every
 // lesson of those topics. The count does not grow with the size of the course.
 // A test asserts this, so an innocent-looking loop cannot reintroduce an N+1.
-func (s *Service) Curriculum(ctx context.Context, tenantID uuid.UUID, slug string) (Curriculum, error) {
+//
+// includeDrafts is an authorisation decision made by the caller. A reader without
+// it gets ErrNotFound for an unpublished course — the same answer as for a course
+// that does not exist, because "this exists but you may not see it" is a fact
+// about the workspace's plans that strangers have no business learning.
+func (s *Service) Curriculum(ctx context.Context, tenantID uuid.UUID, slug string, includeDrafts bool) (Curriculum, error) {
 	var out Curriculum
 
 	err := s.db.WithTenantReadOnly(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
-		course, err := s.repo.CourseBySlug(ctx, tx, tenantID, slug)
+		course, err := s.repo.CourseBySlug(ctx, tx, tenantID, slug, includeDrafts)
 		if err != nil {
 			return err
 		}

@@ -262,6 +262,22 @@ The same rule reaches further than login. **Registration claims an unclaimed wor
 
 **Joining an existing workspace is by invitation**, and accepting one for an address that already has a global account requires that account's existing password. An invitation proves the workspace wants the address. It does not prove the person holding the link owns it — and without that check, an intercepted invitation is an account takeover.
 
+### Visibility is a query filter, not an afterthought
+
+A draft that is loaded and then discarded has already been loaded, and the first refactor that forgets the discard turns an unreleased course into a public one. Filter in SQL — `AND (status = 'published' OR $3)` — and pass the flag down from an **authorisation decision**, never from a request parameter.
+
+A reader who may not see a resource gets `ErrNotFound`, the same answer as for a resource that does not exist. "This exists but you may not see it" is a fact strangers have no business learning.
+
+And unpublished content must never be `public`-cacheable. A `Cache-Control: public` draft is a draft a CDN stores and hands to strangers, whatever the API said. Decide the directive from the **resource's status**, not from who asked, so an author fetching a published course still gets the fast shared path.
+
+### Ordering
+
+Positions are dense and zero-based within a parent. A gap is harmless until the first time somebody treats position as an index, and then it is an off-by-one nobody can reproduce — so deletes close up in the same statement that removes the row.
+
+A reorder rewrites every position in **one statement**, via `unnest($1::uuid[]) WITH ORDINALITY`. Never one `UPDATE` per row. The sibling unique constraint on `(tenant_id, parent_id, position)` is `DEFERRABLE INITIALLY DEFERRED` precisely because any real reorder passes through states where two rows share a position.
+
+The submitted order must name **every sibling exactly once**. A short list silently leaves the unnamed ones where they were; a list naming a foreign id silently does nothing to it. Both are refused, and the transaction rolls back, rather than half-applied.
+
 ### Every domain sentinel needs a deliberate status
 
 A sentinel with no case in its mapper falls through the default branch and renders as *"An unexpected error occurred"* with a 500. Users have been told that instead of "this workspace is invitation-only". `errors_test.go` asserts the mapping for every sentinel, wrapped and unwrapped; a new sentinel gets a line there in the same commit that introduces it.

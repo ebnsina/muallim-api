@@ -23,6 +23,13 @@ import (
 // `private`.
 const catalogCacheControl = "public, max-age=60, stale-while-revalidate=300"
 
+// draftCacheControl is what an author's view of an unpublished course must carry.
+//
+// A draft served with `public` caching is a draft a CDN will store and hand to
+// strangers. `private, no-store` keeps it out of every cache between us and the
+// author's browser.
+const draftCacheControl = "private, no-store"
+
 // CourseSummary is a course as it appears in a list.
 type CourseSummary struct {
 	ID          string     `json:"id" format:"uuid"`
@@ -120,12 +127,27 @@ func registerCatalog(api huma.API, svc *catalog.Service) {
 	}, func(ctx context.Context, in *struct {
 		Slug string `path:"slug" maxLength:"200" doc:"Course slug, unique within the tenant"`
 	}) (*CurriculumOutput, error) {
-		curriculum, err := svc.Curriculum(ctx, tenant.ID(ctx), in.Slug)
+		// Only somebody who may edit courses may see one that is not published.
+		// Everyone else gets ErrNotFound — the same answer as for a course that does
+		// not exist, because "this exists but you may not see it" is a fact about
+		// the workspace's plans that strangers have no business learning.
+		p, isAuthor := principalFrom(ctx)
+		canSeeDrafts := isAuthor && p.Can(auth.PermCourseWrite)
+
+		curriculum, err := svc.Curriculum(ctx, tenant.ID(ctx), in.Slug, canSeeDrafts)
 		if err != nil {
 			return nil, catalogError(err)
 		}
 
-		out := &CurriculumOutput{CacheControl: catalogCacheControl}
+		// A draft must never be cached by anything shared. Deciding this from the
+		// course's own status, rather than from who asked, means an author fetching a
+		// published course still gets the fast public path.
+		cacheControl := catalogCacheControl
+		if curriculum.Course.Status != catalog.StatusPublished {
+			cacheControl = draftCacheControl
+		}
+
+		out := &CurriculumOutput{CacheControl: cacheControl}
 		out.Body.Course = courseSummary(curriculum.Course)
 		out.Body.Topics = make([]TopicView, 0, len(curriculum.Topics))
 		for _, t := range curriculum.Topics {
@@ -233,6 +255,18 @@ func catalogError(err error) error {
 		return huma.Error422UnprocessableEntity(err.Error())
 	case errors.Is(err, catalog.ErrSlugTaken):
 		return huma.Error409Conflict("A course with that slug already exists in this workspace.")
+
+	case errors.Is(err, catalog.ErrInvalidLesson):
+		return huma.Error422UnprocessableEntity(err.Error())
+
+	case errors.Is(err, catalog.ErrIncompleteOrder):
+		return huma.Error422UnprocessableEntity(err.Error())
+
+	case errors.Is(err, catalog.ErrEmptyCourse):
+		return huma.Error409Conflict("A course needs at least one lesson before it can be published.")
+
+	case errors.Is(err, catalog.ErrAlreadyPublished):
+		return huma.Error409Conflict("That course is already published.")
 	default:
 		// Anything unexpected: the wrapped cause is logged with a correlation ID by
 		// the recovery and access-log middleware; the client learns nothing more.

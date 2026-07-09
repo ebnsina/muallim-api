@@ -58,6 +58,10 @@ make spec           # write bin/openapi.json — the contract for lms-web
 
 **RLS policies see other tables through those tables' own RLS.** A `NOT EXISTS (… tenant_id <> app_current_tenant())` clause is vacuously true — it grants what it appears to forbid. Cross-tenant invariants go in application code via `WithoutTenant`. And a `FORCE ROW LEVEL SECURITY` table denies every command it has no policy for, silently, by matching zero rows.
 
+**Visibility is a query filter.** Unpublished content is excluded in SQL, from an authorisation decision, never from a request parameter. A reader who may not see it gets 404, not 403. Unpublished content is never `public`-cacheable — decide the directive from the resource's status, not from who asked.
+
+**Ordering: dense positions, one-statement reorders.** Deletes close the gap in the same statement. Reorders use `unnest($1::uuid[]) WITH ORDINALITY`, never one UPDATE per row, and the sibling unique constraint is `DEFERRABLE` so a reversal is legal mid-statement. A submitted order must name every sibling exactly once, or it is refused rather than half-applied.
+
 **Money is `bigint` minor units + `currency char(3)`.** Never a float.
 
 **Enqueue jobs in the transaction that produced them** (`client.InsertTx`). That is the whole reason River is Postgres-backed.

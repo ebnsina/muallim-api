@@ -118,7 +118,8 @@ func run() error {
 
 	authRepo := auth.NewPostgresRepository()
 	identities := auth.NewService(db, authRepo, authRepo, tokens, authAuditor{recorder}, log)
-	courses := catalog.NewService(db, catalog.NewPostgresRepository(), catalogAuditor{recorder})
+	catalogRepo := catalog.NewPostgresRepository()
+	courses := catalog.NewService(db, catalogRepo, catalogRepo, catalogAuditor{recorder})
 
 	handler, _ := httpapi.New(httpapi.Options{
 		Version:     cfg.Version,

@@ -77,6 +77,7 @@ func New(opts Options) (http.Handler, huma.API) {
 	registerMembers(api, opts.Auth)
 	registerCatalog(api, opts.Catalog)
 	registerCatalogWrites(api, opts.Catalog)
+	registerAuthoring(api, opts.Catalog)
 
 	// Order matters, outermost first.
 	//

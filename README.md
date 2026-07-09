@@ -50,6 +50,14 @@ Roles map to permissions (`course:write`, `tenant:manage`), and unknown roles an
 
 Every consequential action is written to an append-only `audit_log`, in the same transaction as the change it describes.
 
+## Authoring
+
+Courses are drafted, filled with topics and lessons, and then published — `course:write` and `course:publish` are separate permissions, because drafting and releasing are different acts. A course with no lessons cannot be published.
+
+An unpublished course is invisible to anyone without authoring rights: they receive a 404, the same answer as for a course that does not exist. It is also never `public`-cacheable, so no CDN can store a draft and hand it to a stranger.
+
+Positions are dense within a parent. A delete closes its gap in the same statement, and a reorder rewrites every position in one `UPDATE` — the sibling unique constraint is deferred so a full reversal is legal mid-statement. A submitted order must name every sibling exactly once, or it is refused rather than half-applied.
+
 ## Performance
 
 The competitive claim is that this is fast, so the guarantees are tested rather than hoped for.
