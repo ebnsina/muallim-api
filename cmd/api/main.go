@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"flag"
 	"fmt"
@@ -16,6 +17,8 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/ebnsina/lms-api/internal/audit"
+	"github.com/ebnsina/lms-api/internal/auth"
 	"github.com/ebnsina/lms-api/internal/catalog"
 	"github.com/ebnsina/lms-api/internal/httpapi"
 	"github.com/ebnsina/lms-api/internal/platform/cache"
@@ -97,7 +100,23 @@ func run() error {
 			MaxEntries:  4096,
 		}),
 	)
-	courses := catalog.NewService(db, catalog.NewPostgresRepository())
+	recorder := audit.NewRecorder()
+
+	secret := cfg.JWTSecret
+	if secret == "" {
+		// Development only; config refuses an empty secret anywhere else. Sessions
+		// do not survive a restart, which is a nuisance, not a vulnerability.
+		secret = rand.Text() + rand.Text()
+		log.Warn("LMS_JWT_SECRET is unset; generated an ephemeral signing key. Sessions will not survive a restart.")
+	}
+
+	tokens, err := auth.NewTokenIssuer(secret, cfg.JWTIssuer)
+	if err != nil {
+		return err
+	}
+
+	identities := auth.NewService(db, auth.NewPostgresRepository(), tokens, authAuditor{recorder}, log)
+	courses := catalog.NewService(db, catalog.NewPostgresRepository(), catalogAuditor{recorder})
 
 	handler, _ := httpapi.New(httpapi.Options{
 		Version:     cfg.Version,
@@ -105,6 +124,7 @@ func run() error {
 		CORSOrigins: cfg.CORSOrigins,
 		Tenants:     tenants,
 		Catalog:     courses,
+		Auth:        identities,
 		DB:          db,
 	})
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/ebnsina/lms-api/internal/auth"
 	"github.com/ebnsina/lms-api/internal/catalog"
 	"github.com/ebnsina/lms-api/internal/tenant"
 )
@@ -152,6 +153,62 @@ func registerCatalog(api huma.API, svc *catalog.Service) {
 	})
 }
 
+// CreateCourseOutput is a newly drafted course.
+type CreateCourseOutput struct {
+	Body struct {
+		Course CourseSummary `json:"course"`
+	}
+}
+
+func registerCatalogWrites(api huma.API, svc *catalog.Service) {
+	huma.Register(api, huma.Operation{
+		OperationID: "create-course",
+		Method:      http.MethodPost,
+		Path:        "/v1/courses",
+		Summary:     "Draft a new course",
+		Description: "Requires the course:write permission. The course is created as a draft; " +
+			"publishing is a separately authorised act.",
+		Tags:          []string{"Catalog"},
+		DefaultStatus: http.StatusCreated,
+		Security:      []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, in *struct {
+		Body struct {
+			Slug  string `json:"slug" minLength:"1" maxLength:"200" pattern:"^[a-z0-9]+(?:-[a-z0-9]+)*$" doc:"Lowercase letters, digits, hyphens. Unique within the workspace."`
+			Title string `json:"title" minLength:"1" maxLength:"300"`
+
+			// Optional. Huma treats a field as required unless the json tag says
+			// otherwise, and a required `summary` would make schema validation reject
+			// a request before authorisation ever ran — answering 422 where the caller
+			// deserves 401.
+			Summary    string `json:"summary,omitempty" maxLength:"2000"`
+			Difficulty string `json:"difficulty,omitempty" enum:"beginner,intermediate,advanced,expert" default:"beginner"`
+		}
+	}) (*CreateCourseOutput, error) {
+		// Authorisation happens here, where the operation's requirement is known.
+		// Middleware established who the caller is; only this line knows that
+		// drafting a course needs course:write.
+		p, err := requirePermission(ctx, auth.PermCourseWrite)
+		if err != nil {
+			return nil, err
+		}
+
+		rc := requestContextFrom(ctx)
+		course, err := svc.CreateCourse(ctx, p.TenantID, catalog.NewCourse{
+			Slug:       in.Body.Slug,
+			Title:      in.Body.Title,
+			Summary:    in.Body.Summary,
+			Difficulty: in.Body.Difficulty,
+		}, catalog.Author{UserID: p.UserID, IP: rc.IP, UserAgent: rc.UserAgent})
+		if err != nil {
+			return nil, catalogError(err)
+		}
+
+		out := &CreateCourseOutput{}
+		out.Body.Course = courseSummary(course)
+		return out, nil
+	})
+}
+
 func courseSummary(c catalog.Course) CourseSummary {
 	return CourseSummary{
 		ID:          c.ID.String(),
@@ -172,8 +229,10 @@ func catalogError(err error) error {
 		return huma.Error404NotFound("Course not found.")
 	case errors.Is(err, catalog.ErrInvalidPage):
 		return huma.Error422UnprocessableEntity("The cursor is not valid.")
-	case errors.Is(err, catalog.ErrInvalidLimit):
+	case errors.Is(err, catalog.ErrInvalidLimit), errors.Is(err, catalog.ErrInvalidSlug):
 		return huma.Error422UnprocessableEntity(err.Error())
+	case errors.Is(err, catalog.ErrSlugTaken):
+		return huma.Error409Conflict("A course with that slug already exists in this workspace.")
 	default:
 		// Anything unexpected: the wrapped cause is logged with a correlation ID by
 		// the recovery and access-log middleware; the client learns nothing more.

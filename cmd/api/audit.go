@@ -1,0 +1,52 @@
+package main
+
+import (
+	"context"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+
+	"github.com/ebnsina/lms-api/internal/audit"
+	"github.com/ebnsina/lms-api/internal/auth"
+	"github.com/ebnsina/lms-api/internal/catalog"
+)
+
+// The dependency rule forbids a domain package from importing a sibling, so auth
+// and catalog each declare the audit interface they need, in their own types.
+// These adapters are the seam, and they live in cmd/ because wiring is what cmd/
+// is for.
+//
+// The cost is two five-line translations. The benefit is that catalog can be
+// extracted, tested, or replaced without dragging auth or audit along with it.
+
+type authAuditor struct{ recorder *audit.Recorder }
+
+var _ auth.AuditRecorder = authAuditor{}
+
+func (a authAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, e auth.AuditEntry) error {
+	return a.recorder.Record(ctx, tx, tenantID, audit.Entry{
+		ActorID:    e.ActorID,
+		Action:     e.Action,
+		TargetType: e.TargetType,
+		TargetID:   e.TargetID,
+		IP:         e.IP,
+		UserAgent:  e.UserAgent,
+		Metadata:   e.Metadata,
+	})
+}
+
+type catalogAuditor struct{ recorder *audit.Recorder }
+
+var _ catalog.AuditRecorder = catalogAuditor{}
+
+func (a catalogAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, e catalog.AuditEntry) error {
+	return a.recorder.Record(ctx, tx, tenantID, audit.Entry{
+		ActorID:    e.ActorID,
+		Action:     e.Action,
+		TargetType: e.TargetType,
+		TargetID:   e.TargetID,
+		IP:         e.IP,
+		UserAgent:  e.UserAgent,
+		Metadata:   e.Metadata,
+	})
+}

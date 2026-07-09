@@ -16,7 +16,12 @@ var (
 	ErrNotFound     = errors.New("catalog: not found")
 	ErrInvalidPage  = errors.New("catalog: invalid page cursor")
 	ErrInvalidLimit = errors.New("catalog: invalid page size")
+	ErrSlugTaken    = errors.New("catalog: slug is already used in this workspace")
+	ErrInvalidSlug  = errors.New("catalog: slug must be lowercase letters, digits, and hyphens")
 )
+
+// ActionCourseCreated is the audit action this package emits.
+const ActionCourseCreated = "course.created"
 
 // Course statuses.
 const (

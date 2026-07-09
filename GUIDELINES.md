@@ -226,13 +226,47 @@ The generated OpenAPI 3.1 document **is** the contract with `lms-web` and every 
 
 ## 9. Security
 
-- Argon2id for passwords. Never bcrypt, never SHA-anything.
-- Access tokens are short-lived JWTs; refresh tokens are opaque, stored, and rotated on use.
-- Authorisation is checked in `Service`, not in middleware alone. Middleware establishes *who you are*; the service decides *what you may do*.
-- No secret in code, in a log line, or in an error message. Config comes from the environment; `.env` is gitignored and `.env.example` documents the keys.
+- **Argon2id** for passwords, RFC 9106 §4's second parameter set (`t=3, m=64 MiB, p=4`). Never bcrypt, never SHA-anything. Each verification costs 64 MiB by design, which is also why login must be rate-limited.
+- **Length beats composition.** A 12-character minimum and no mandatory character classes, per NIST SP 800-63B. Composition rules only teach users to write `Password1!` on a sticky note.
+- **No secret in code, in a log line, or in an error message.** Config comes from the environment; `.env` is gitignored and `.env.example` documents the keys. A signing secret shorter than 32 bytes is refused at startup.
 - Parameterised queries only. String-concatenated SQL is a rejection.
 - Rate-limit authentication and anything that sends mail or costs money.
-- **Audit logging from day one.** FERPA and GDPR both require it, and adding it retroactively means backfilling history you never recorded.
+
+### Tokens
+
+Access tokens are short-lived JWTs, verified by signature alone with no database lookup — that is what makes them fast, and why they are short: they cannot be revoked. The signing method is **pinned**; a token whose header says `"alg":"none"` must never verify. The `iss` claim is checked, so a sibling environment's token does not authenticate here. The **tenant is inside the signature**, so a token minted for one workspace cannot authenticate its bearer on another.
+
+Refresh tokens are opaque, 256 bits of entropy, and **only their SHA-256 digest is stored** — a database dump must not be a month of live sessions. SHA-256 rather than Argon2, because there is no dictionary to attack in a uniformly random 256-bit value, and a slow hash would only make every refresh slow.
+
+**Refresh tokens rotate on every use, and reuse revokes the family.** A token that arrives twice reached someone it should not have; we cannot tell the thief from the victim, so both are logged out. Distinguish *rotated away* (has a successor — theft) from *merely revoked* (logout, or swept with its family — just invalid). The client is told "your session expired" in both cases: telling the bearer of a stolen token that we detected the theft tells the thief.
+
+### Authentication and authorisation are different
+
+Middleware establishes **who you are**. The handler and the service decide **what you may do**. A middleware that also authorises means each new route is protected only if somebody remembers to list it there.
+
+`401` means log in; `403` means do not bother. Confusing them wastes a client's time.
+
+Permissions name capabilities (`course:write`), never roles, so changing who may do a thing does not mean changing the code that does it. An unknown role and an unknown permission both **deny** — a typo at a call site must fail closed.
+
+### Never confirm an account exists
+
+A missing account, a wrong password, and a suspended membership are one error, `ErrInvalidCredentials`, and they cost the same time: the unknown-account path hashes against a dummy digest. Without that, response latency answers "does this address have an account here?" — and on a school's tenant, that is a roster.
+
+### The audit log
+
+**From day one.** FERPA and GDPR both require it, and it cannot be added retroactively: you cannot backfill history you never recorded. It is append-only at the database level; the table's policies grant `SELECT` and `INSERT` and nothing else, so no `UPDATE` or `DELETE` reaches a row.
+
+An audit entry commits **in the transaction of the thing it describes**, or the two will eventually disagree. This has a consequence that is easy to get backwards: when the audited event is a *rejection* — a failed login, a detected token reuse — the transaction callback must return `nil` and the rejection must be carried out of the closure in a variable. Returning the error rolls the transaction back, and takes the audit record with it. That is precisely the record you were obliged to keep.
+
+Never log a password into the audit trail, not even a failed one. Users mistype the password for a different account into yours.
+
+Do not trust `X-Forwarded-For`. It is trivially forged, and in an audit log an attacker-chosen address is worse than no address. Parse it only at a proxy you control, for hops you trust.
+
+### Row-level security cannot see what the tenant cannot see
+
+A policy's subquery reads other tables **through their own RLS**. A clause like `NOT EXISTS (SELECT 1 FROM memberships WHERE tenant_id <> app_current_tenant())` is therefore vacuously true — it grants exactly what it appears to forbid, while looking enforced. Cross-tenant invariants belong in application code, which can read across tenants deliberately via `WithoutTenant`.
+
+A table with `FORCE ROW LEVEL SECURITY` **denies every command it has no policy for**, silently, by matching zero rows. If a table needs to support deletion, it needs a `DELETE` policy; discovering this by way of an unerasable user record is the expensive way round.
 
 ---
 

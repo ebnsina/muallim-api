@@ -15,17 +15,19 @@ type Repository interface {
 	ListCourses(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, p ListParams) ([]Course, error)
 	CourseBySlug(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, slug string) (Course, error)
 	CurriculumFor(ctx context.Context, tx pgx.Tx, tenantID, courseID uuid.UUID) ([]Topic, error)
+	CreateCourse(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, n NewCourse) (Course, error)
 }
 
 // Service holds the business rules and owns transaction boundaries.
 type Service struct {
-	db   *database.DB
-	repo Repository
+	db    *database.DB
+	repo  Repository
+	audit AuditRecorder
 }
 
 // NewService returns a Service.
-func NewService(db *database.DB, repo Repository) *Service {
-	return &Service{db: db, repo: repo}
+func NewService(db *database.DB, repo Repository, recorder AuditRecorder) *Service {
+	return &Service{db: db, repo: repo, audit: recorder}
 }
 
 // ListCourses returns one page of a tenant's courses.

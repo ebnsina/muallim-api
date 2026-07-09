@@ -13,6 +13,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
 
+	"github.com/ebnsina/lms-api/internal/auth"
 	"github.com/ebnsina/lms-api/internal/catalog"
 	"github.com/ebnsina/lms-api/internal/tenant"
 )
@@ -37,6 +38,7 @@ type Options struct {
 	// the handler serves a request.
 	Tenants *tenant.Service
 	Catalog *catalog.Service
+	Auth    *auth.Service
 	DB      Pinger
 }
 
@@ -50,32 +52,53 @@ func New(opts Options) (http.Handler, huma.API) {
 
 	cfg := huma.DefaultConfig("LMS API", opts.Version)
 	cfg.Info.Description = "Multi-tenant learning management system."
+
+	// Declaring the scheme puts an Authorize button on the docs page and marks
+	// every `Security:` operation as protected in the generated client.
+	cfg.Components.SecuritySchemes = map[string]*huma.SecurityScheme{
+		"bearer": {
+			Type:         "http",
+			Scheme:       "bearer",
+			BearerFormat: "JWT",
+			Description:  "A short-lived access token from /v1/auth/login.",
+		},
+	}
+
 	api := humago.New(mux, cfg)
 
 	registerHealth(api, opts.Version)
 	registerReadiness(api, opts.DB)
+	registerAuth(api, opts.Auth)
 	registerCatalog(api, opts.Catalog)
+	registerCatalogWrites(api, opts.Catalog)
 
 	// Order matters, outermost first.
 	//
-	//   requestID       every log line and problem document carries a correlation ID
-	//   accessLog       observes the final status, after every rewrite below
-	//   cors            error responses need the headers too, or a browser hides them
-	//   etag            hashes the body a handler produced, before it is committed
-	//   resolveTenant   binds the tenant that domain services read from context
-	//   problemResponse rewrites any non-problem 4xx/5xx into RFC 9457
-	//   recoverPanic    innermost, so a panic in a handler is caught and rendered
+	//   requestID          every log line and problem document carries a correlation ID
+	//   accessLog          observes the final status, after every rewrite below
+	//   cors               error responses need the headers too, or a browser hides them
+	//   etag               hashes the body a handler produced, before it is committed
+	//   withRequestContext client address and user agent, for the audit trail
+	//   resolveTenant      binds the tenant that domain services read from context
+	//   authenticate       verifies a bearer token; must run after resolveTenant so it
+	//                      can reject a token minted for a different workspace
+	//   problemResponse    rewrites any non-problem 4xx/5xx into RFC 9457
+	//   recoverPanic       innermost, so a panic in a handler is caught and rendered
 	mw := []middleware{
 		requestID,
 		accessLog(opts.Logger),
 		cors(opts.CORSOrigins),
 		etag(opts.Logger),
+		withRequestContext,
 	}
 
 	// Omitted when there is no tenant service — building the handler to emit the
 	// OpenAPI document, or a transport test that exercises no tenant-scoped route.
 	if opts.Tenants != nil {
 		mw = append(mw, resolveTenant(opts.Tenants, opts.Logger))
+	}
+	if opts.Auth != nil {
+		mw = append(mw, authenticate(opts.Auth, opts.Logger))
 	}
 
 	mw = append(mw, problemResponse(opts.Logger), recoverPanic(opts.Logger))

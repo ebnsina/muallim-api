@@ -44,6 +44,16 @@ make spec           # write bin/openapi.json — the contract for lms-web
 
 **Cache only what is read every request and changes rarely** — today, tenant resolution. Single-flight the misses, cache negatives briefly, invalidate on write. Read endpoints carry `ETag` and answer `If-None-Match` with 304; `public` caching only for responses with no user-specific data.
 
+**Authentication and authorisation are different things.** Middleware establishes who you are; the handler decides what you may do (`requirePermission`). A middleware that authorises means each new route is protected only if someone remembers to list it. 401 = log in, 403 = don't bother. Unknown roles and unknown permissions both deny.
+
+**An audit entry commits in the transaction of the thing it describes.** When the audited event is a *rejection* — failed login, detected token reuse — the transaction callback must return `nil` and the rejection is carried out in a variable. Returning the error rolls back the audit record you were obliged to keep.
+
+**Never confirm an account exists.** Missing account, wrong password, and suspended membership are one error, in constant time (the unknown path hashes against a dummy digest).
+
+**Refresh tokens rotate; reuse revokes the family.** Distinguish *rotated away* (has a successor — theft) from *merely revoked* (logout or family sweep — just invalid). Both look like "session expired" to the client.
+
+**RLS policies see other tables through those tables' own RLS.** A `NOT EXISTS (… tenant_id <> app_current_tenant())` clause is vacuously true — it grants what it appears to forbid. Cross-tenant invariants go in application code via `WithoutTenant`. And a `FORCE ROW LEVEL SECURITY` table denies every command it has no policy for, silently, by matching zero rows.
+
 **Money is `bigint` minor units + `currency char(3)`.** Never a float.
 
 **Enqueue jobs in the transaction that produced them** (`client.InsertTx`). That is the whole reason River is Postgres-backed.

@@ -54,12 +54,24 @@ type Config struct {
 	// hours.
 	TenantCacheTTL time.Duration
 
+	// JWTSecret signs access tokens. A short key makes signatures forgeable
+	// offline, which makes every other control irrelevant, so it is bounded here.
+	JWTSecret string
+
+	// JWTIssuer is the `iss` claim, verified on every token. It stops a token
+	// minted by a sibling environment from authenticating here.
+	JWTIssuer string
+
 	// CORSOrigins are the exact browser origins allowed to call this API. lms-web
 	// is always a different origin, so this is never empty in practice.
 	CORSOrigins []string
 
 	LogLevel slog.Level
 }
+
+// MinJWTSecretLength is the shortest signing key we will accept. Below this, an
+// attacker recovers the key offline and mints their own tokens.
+const MinJWTSecretLength = 32
 
 // IsProduction reports whether the process runs in a deployed, customer-facing
 // environment. Callers use it to decide how much detail is safe to expose.
@@ -86,6 +98,9 @@ func Load() (Config, error) {
 		DBStatementTimeout:   duration("LMS_DB_STATEMENT_TIMEOUT", 5*time.Second),
 		DBSlowQueryThreshold: duration("LMS_DB_SLOW_QUERY_THRESHOLD", 200*time.Millisecond),
 		TenantCacheTTL:       duration("LMS_TENANT_CACHE_TTL", 5*time.Minute),
+
+		JWTSecret: env("LMS_JWT_SECRET", ""),
+		JWTIssuer: env("LMS_JWT_ISSUER", "lms-api"),
 	}
 
 	level, err := logLevel(env("LMS_LOG_LEVEL", "info"))
@@ -124,6 +139,16 @@ func (c Config) validate() error {
 	// alongside a wildcard origin. Failing here beats debugging it in a browser.
 	if slices.Contains(c.CORSOrigins, "*") {
 		errs = append(errs, errors.New(`config: LMS_CORS_ORIGINS cannot contain "*" because the API allows credentials; list exact origins`))
+	}
+
+	// A signing secret is not optional anywhere it will actually sign anything.
+	// Refusing a short one at startup beats discovering it in a forged token.
+	if c.JWTSecret != "" && len(c.JWTSecret) < MinJWTSecretLength {
+		errs = append(errs, fmt.Errorf("config: LMS_JWT_SECRET must be at least %d bytes, got %d",
+			MinJWTSecretLength, len(c.JWTSecret)))
+	}
+	if c.JWTSecret == "" && c.Env != EnvDevelopment {
+		errs = append(errs, errors.New("config: LMS_JWT_SECRET is required outside development"))
 	}
 
 	return errors.Join(errs...)

@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/ebnsina/lms-api/internal/audit"
 	"github.com/ebnsina/lms-api/internal/catalog"
 	"github.com/ebnsina/lms-api/internal/platform/database"
 )
@@ -107,8 +108,21 @@ func seedCourse(t *testing.T, db *database.DB, tenantID uuid.UUID, slug string, 
 	return courseID
 }
 
+// testAuditor adapts the real audit.Recorder to catalog's interface, exactly as
+// cmd/ does. A stub here would leave the audit insert — and its append-only
+// policy — untested.
+type testAuditor struct{ recorder *audit.Recorder }
+
+func (a testAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, e catalog.AuditEntry) error {
+	return a.recorder.Record(ctx, tx, tenantID, audit.Entry{
+		ActorID: e.ActorID, Action: e.Action,
+		TargetType: e.TargetType, TargetID: e.TargetID,
+		IP: e.IP, UserAgent: e.UserAgent, Metadata: e.Metadata,
+	})
+}
+
 func newService(db *database.DB) *catalog.Service {
-	return catalog.NewService(db, catalog.NewPostgresRepository())
+	return catalog.NewService(db, catalog.NewPostgresRepository(), testAuditor{audit.NewRecorder()})
 }
 
 // The regression guard. Loading a curriculum must cost a fixed number of queries

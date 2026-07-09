@@ -32,6 +32,18 @@ A tenant is resolved from the request's `Host` — a subdomain, or a custom doma
 
 Isolation is enforced twice. Application code always filters by `tenant_id`, and every tenant-scoped table carries a Postgres row-level security policy with `FORCE ROW LEVEL SECURITY`, which applies to the table owner too. The binding is transaction-local, so a pooled connection cannot carry one tenant's setting into the next request. With no tenant bound, every policy evaluates false and the query returns nothing: the failure mode is an empty page, never a leak.
 
+## Identity and access
+
+A user is global — one account across every workspace — and a *membership* binds them to a workspace with a role. The first member of a workspace becomes its owner; everyone after is a student until promoted.
+
+Passwords are Argon2id (RFC 9106 §4, second parameter set). Login is constant-time whether or not the account exists, because response latency must not answer "does this address have an account here?"
+
+Access tokens are short-lived JWTs with the tenant inside the signature, so a token minted for one workspace cannot authenticate its bearer on another. Refresh tokens are opaque, stored only as a SHA-256 digest, and **rotate on every use**. Presenting a token that was already rotated away is evidence of theft: the whole session family is revoked, and the client is told only that its session expired.
+
+Roles map to permissions (`course:write`, `tenant:manage`), and unknown roles and unknown permissions both deny — a typo fails closed. Authentication happens in middleware; **authorisation happens in the handler**, so a new route is never accidentally public.
+
+Every consequential action is written to an append-only `audit_log`, in the same transaction as the change it describes.
+
 ## Performance
 
 The competitive claim is that this is fast, so the guarantees are tested rather than hoped for.
@@ -69,6 +81,8 @@ cmd/api                 HTTP server. `-dump-spec` prints the OpenAPI document.
 cmd/migrate             goose migration runner
 internal/platform       config, logging, server, database, cache — no domain knowledge
 internal/tenant         host resolution, cached; context propagation
+internal/auth           identity, sessions, RBAC
+internal/audit          append-only audit trail
 internal/catalog        courses, topics, lessons
 internal/httpapi        transport: routes, middleware, RFC 9457 problem documents
 migrations/             embedded goose SQL
