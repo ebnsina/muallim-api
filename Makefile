@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help run test test-db lint fmt build spec check migrate migrate-down migrate-status db-up db-down db-create
+.PHONY: help run worker test test-db lint fmt build spec check migrate migrate-down migrate-status db-up db-down db-create
 
 DB_URL      ?= postgres://lms:lms@localhost:5432/lms?sslmode=disable
 TEST_DB_URL ?= postgres://lms:lms@localhost:5432/lms_test?sslmode=disable
@@ -9,6 +9,9 @@ help: ## List available targets
 
 run: ## Start the API server
 	LMS_DATABASE_URL="$(DB_URL)" go run ./cmd/api
+
+worker: ## Start the background job worker
+	LMS_DATABASE_URL="$(DB_URL)" go run ./cmd/worker
 
 build: ## Compile all binaries into bin/
 	go build -o bin/ ./cmd/...

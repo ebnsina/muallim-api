@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"slices"
 	"strconv"
@@ -72,6 +73,26 @@ type Config struct {
 	// is always a different origin, so this is never empty in practice.
 	CORSOrigins []string
 
+	// WebBaseURL is the origin of the web client. Every link this system mails —
+	// verify an address, reset a password, accept an invitation — points at a page
+	// there, not at this API.
+	WebBaseURL string
+
+	// SMTP delivers mail. With no host configured the process logs messages
+	// instead of sending them, which is a development convenience and a disclosure
+	// bug anywhere else: the body of every message we send contains a single-use
+	// credential.
+	SMTPHost     string
+	SMTPPort     int
+	SMTPUsername string
+	SMTPPassword string
+
+	// MailFrom is the envelope sender, e.g. "LMS <no-reply@example.com>".
+	MailFrom string
+
+	// WorkerMaxWorkers bounds how many jobs the worker process runs at once.
+	WorkerMaxWorkers int
+
 	LogLevel slog.Level
 }
 
@@ -110,6 +131,15 @@ func Load() (Config, error) {
 
 		AuthRateBurst: number("LMS_AUTH_RATE_BURST", 10),
 		AuthRateEvery: duration("LMS_AUTH_RATE_EVERY", 6*time.Second),
+
+		WebBaseURL:   env("LMS_WEB_BASE_URL", "http://localhost:5173"),
+		SMTPHost:     env("LMS_SMTP_HOST", ""),
+		SMTPPort:     number("LMS_SMTP_PORT", 587),
+		SMTPUsername: env("LMS_SMTP_USERNAME", ""),
+		SMTPPassword: env("LMS_SMTP_PASSWORD", ""),
+		MailFrom:     env("LMS_MAIL_FROM", "LMS <no-reply@localhost>"),
+
+		WorkerMaxWorkers: number("LMS_WORKER_MAX_WORKERS", 10),
 	}
 
 	level, err := logLevel(env("LMS_LOG_LEVEL", "info"))
@@ -160,8 +190,27 @@ func (c Config) validate() error {
 		errs = append(errs, errors.New("config: LMS_JWT_SECRET is required outside development"))
 	}
 
+	// Every mailed link points at the web client. A relative or malformed base URL
+	// produces a link nobody can click, discovered by a user who cannot sign in.
+	if u, err := url.Parse(c.WebBaseURL); err != nil || u.Scheme == "" || u.Host == "" {
+		errs = append(errs, fmt.Errorf("config: LMS_WEB_BASE_URL %q must be absolute, e.g. https://app.example.com", c.WebBaseURL))
+	}
+
+	// Without SMTP the process logs messages rather than sending them, and those
+	// messages carry reset tokens. That is a development affordance, and a
+	// credential-disclosure bug anywhere a log is shipped somewhere.
+	if c.SMTPHost == "" && c.Env != EnvDevelopment {
+		errs = append(errs, errors.New("config: LMS_SMTP_HOST is required outside development; without it, reset tokens are written to the log"))
+	}
+	if c.SMTPHost != "" && c.MailFrom == "" {
+		errs = append(errs, errors.New("config: LMS_MAIL_FROM is required when LMS_SMTP_HOST is set"))
+	}
+
 	return errors.Join(errs...)
 }
+
+// MailerConfigured reports whether mail can actually be delivered.
+func (c Config) MailerConfigured() bool { return c.SMTPHost != "" }
 
 // list splits a comma-separated environment value, trimming blanks. An empty
 // value yields no entries rather than one empty string, so an unset variable
