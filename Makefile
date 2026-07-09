@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help run worker test test-db lint fmt build spec check migrate migrate-down migrate-status db-up db-down db-create
+.PHONY: help run worker test test-db lint fmt build spec check migrate migrate-down migrate-status seed db-up db-down db-create
 
 DB_URL      ?= postgres://lms:lms@localhost:5432/lms?sslmode=disable
 TEST_DB_URL ?= postgres://lms:lms@localhost:5432/lms_test?sslmode=disable
@@ -45,6 +45,11 @@ migrate-down: ## Roll back the last migration
 
 migrate-status: ## Show migration status
 	LMS_DATABASE_URL="$(DB_URL)" go run ./cmd/migrate status
+
+seed: ## Create the development workspace that resolves for host "localhost"
+	@psql -q "$(DB_URL)" -c "INSERT INTO tenants (subdomain, name) VALUES ('localhost', 'Acme Academy') \
+		ON CONFLICT (lower(subdomain)) DO NOTHING"
+	@echo "workspace 'localhost' is ready; lms-web on :5173 resolves to it"
 
 db-create: ## Create the lms role and both databases on a local Postgres
 	@psql -q postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname='lms'" | grep -q 1 || \
