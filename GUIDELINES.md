@@ -248,9 +248,23 @@ Middleware establishes **who you are**. The handler and the service decide **wha
 
 Permissions name capabilities (`course:write`), never roles, so changing who may do a thing does not mean changing the code that does it. An unknown role and an unknown permission both **deny** — a typo at a call site must fail closed.
 
+### Rate-limit anything that verifies a credential
+
+Each Argon2id verification allocates 64 MiB by design. An unlimited login endpoint is therefore a memory-exhaustion primitive for anyone with a shell and a loop, quite apart from being an offline-attack accelerator. `throttle` limits per client address **per path**, so exhausting the login budget does not also lock a legitimate user out of refreshing a session they already hold. It runs before any hash is computed, which is the entire point.
+
+Key on the peer address, never on `X-Forwarded-For`: a forged header buys an attacker a fresh budget on every request.
+
 ### Never confirm an account exists
 
 A missing account, a wrong password, and a suspended membership are one error, `ErrInvalidCredentials`, and they cost the same time: the unknown-account path hashes against a dummy digest. Without that, response latency answers "does this address have an account here?" — and on a school's tenant, that is a roster.
+
+The same rule reaches further than login. **Registration claims an unclaimed workspace and nothing else**; once a workspace has a member, every registration attempt is refused identically, whether or not the address exists. An open registration endpoint that answers "that email is taken" is an enumeration oracle for the whole platform.
+
+**Joining an existing workspace is by invitation**, and accepting one for an address that already has a global account requires that account's existing password. An invitation proves the workspace wants the address. It does not prove the person holding the link owns it — and without that check, an intercepted invitation is an account takeover.
+
+### Every domain sentinel needs a deliberate status
+
+A sentinel with no case in its mapper falls through the default branch and renders as *"An unexpected error occurred"* with a 500. Users have been told that instead of "this workspace is invitation-only". `errors_test.go` asserts the mapping for every sentinel, wrapped and unwrapped; a new sentinel gets a line there in the same commit that introduces it.
 
 ### The audit log
 

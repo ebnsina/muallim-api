@@ -34,7 +34,13 @@ Isolation is enforced twice. Application code always filters by `tenant_id`, and
 
 ## Identity and access
 
-A user is global — one account across every workspace — and a *membership* binds them to a workspace with a role. The first member of a workspace becomes its owner; everyone after is a student until promoted.
+A user is global — one account across every workspace — and a *membership* binds them to a workspace with a role.
+
+Registration **claims an unclaimed workspace**, and its claimant owns it. After that, joining is by invitation. That is not a restriction for its own sake: an address may already hold a global account from another workspace, and registration cannot link to it. It also means a claimed workspace answers every registration attempt identically, so the endpoint cannot be used to discover which addresses exist.
+
+Accepting an invitation for an address that already has an account requires **that account's existing password**. The invitation proves the workspace wants the address; it does not prove the requester owns it.
+
+Credential endpoints are rate-limited per address per path. Each Argon2id verification allocates 64 MiB by design, which is also what makes an unlimited login endpoint a memory-exhaustion primitive.
 
 Passwords are Argon2id (RFC 9106 §4, second parameter set). Login is constant-time whether or not the account exists, because response latency must not answer "does this address have an account here?"
 
@@ -79,9 +85,9 @@ make build          # binaries into bin/
 ```
 cmd/api                 HTTP server. `-dump-spec` prints the OpenAPI document.
 cmd/migrate             goose migration runner
-internal/platform       config, logging, server, database, cache — no domain knowledge
+internal/platform       config, logging, server, database, cache, ratelimit
 internal/tenant         host resolution, cached; context propagation
-internal/auth           identity, sessions, RBAC
+internal/auth           identity, sessions, RBAC, invitations, membership
 internal/audit          append-only audit trail
 internal/catalog        courses, topics, lessons
 internal/httpapi        transport: routes, middleware, RFC 9457 problem documents

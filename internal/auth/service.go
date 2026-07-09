@@ -53,26 +53,29 @@ type AuditEntry struct {
 
 // Service holds the authentication and authorisation rules.
 type Service struct {
-	db     *database.DB
-	repo   Repository
-	tokens *TokenIssuer
-	audit  AuditRecorder
-	log    *slog.Logger
+	db      *database.DB
+	repo    Repository
+	members MembershipRepository
+	tokens  *TokenIssuer
+	audit   AuditRecorder
+	log     *slog.Logger
 
 	now func() time.Time
 }
 
 // NewService returns a Service.
-func NewService(db *database.DB, repo Repository, tokens *TokenIssuer, recorder AuditRecorder, log *slog.Logger) *Service {
-	return &Service{db: db, repo: repo, tokens: tokens, audit: recorder, log: log, now: time.Now}
+func NewService(db *database.DB, repo Repository, members MembershipRepository, tokens *TokenIssuer, recorder AuditRecorder, log *slog.Logger) *Service {
+	return &Service{db: db, repo: repo, members: members, tokens: tokens, audit: recorder, log: log, now: time.Now}
 }
 
-// Register creates a user and their membership on the bound tenant, then logs
-// them in.
+// Register claims an unclaimed workspace, creating its owner.
 //
-// The first member of a tenant becomes its owner; everyone else is a student
-// until promoted. That rule lives here rather than in a migration because it is
-// a business decision, not a schema one.
+// It works only while the workspace has no members. After that, joining is by
+// invitation, for two reasons. A person may already hold a global account from
+// another workspace, and registration cannot link to it: the unique index on
+// users.email rejects a second account, and the users SELECT policy hides the
+// first. And an open registration endpoint that answers "that email is taken"
+// tells any stranger whether an address exists somewhere on the platform.
 func (s *Service) Register(ctx context.Context, tenantID uuid.UUID, c Credentials, name string, rc RequestContext) (TokenPair, User, string, error) {
 	email := normaliseEmail(c.Email)
 	if email == "" {
@@ -91,16 +94,27 @@ func (s *Service) Register(ctx context.Context, tenantID uuid.UUID, c Credential
 	)
 
 	err = s.db.WithTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		// Serialise concurrent bootstrap attempts, so two simultaneous registrations
+		// cannot both observe an empty workspace and both create an owner.
+		if err := s.members.LockMemberships(ctx, tx, tenantID); err != nil {
+			return err
+		}
+
+		claimed, err := s.members.HasAnyMember(ctx, tx, tenantID)
+		if err != nil {
+			return err
+		}
+		if claimed {
+			return ErrRegistrationClosed
+		}
+
 		user = User{ID: uuid.New(), Email: email, Name: name}
 
 		if err := s.repo.CreateUser(ctx, tx, user, hash); err != nil {
 			return err
 		}
 
-		role, err := s.roleForNewMember(ctx, tx, tenantID)
-		if err != nil {
-			return err
-		}
+		role := RoleOwner // the first member of an unclaimed workspace owns it
 		granted = role
 
 		if err := s.repo.CreateMembership(ctx, tx, Membership{
@@ -126,21 +140,6 @@ func (s *Service) Register(ctx context.Context, tenantID uuid.UUID, c Credential
 		return TokenPair{}, User{}, "", err
 	}
 	return pair, user, granted, nil
-}
-
-// roleForNewMember returns owner for the first member of a tenant, student
-// otherwise.
-func (s *Service) roleForNewMember(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) (string, error) {
-	var exists bool
-	err := tx.QueryRow(ctx,
-		`SELECT EXISTS (SELECT 1 FROM memberships WHERE tenant_id = $1)`, tenantID).Scan(&exists)
-	if err != nil {
-		return "", fmt.Errorf("auth: count memberships: %w", err)
-	}
-	if exists {
-		return RoleStudent, nil
-	}
-	return RoleOwner, nil
 }
 
 // Login exchanges credentials for a token pair.

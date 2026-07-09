@@ -25,6 +25,7 @@ import (
 	"github.com/ebnsina/lms-api/internal/platform/config"
 	"github.com/ebnsina/lms-api/internal/platform/database"
 	"github.com/ebnsina/lms-api/internal/platform/logging"
+	"github.com/ebnsina/lms-api/internal/platform/ratelimit"
 	"github.com/ebnsina/lms-api/internal/platform/server"
 	"github.com/ebnsina/lms-api/internal/tenant"
 )
@@ -115,7 +116,8 @@ func run() error {
 		return err
 	}
 
-	identities := auth.NewService(db, auth.NewPostgresRepository(), tokens, authAuditor{recorder}, log)
+	authRepo := auth.NewPostgresRepository()
+	identities := auth.NewService(db, authRepo, authRepo, tokens, authAuditor{recorder}, log)
 	courses := catalog.NewService(db, catalog.NewPostgresRepository(), catalogAuditor{recorder})
 
 	handler, _ := httpapi.New(httpapi.Options{
@@ -126,6 +128,10 @@ func run() error {
 		Catalog:     courses,
 		Auth:        identities,
 		DB:          db,
+		AuthLimiter: ratelimit.New(ratelimit.Options{
+			Burst: cfg.AuthRateBurst,
+			Every: cfg.AuthRateEvery,
+		}),
 	})
 
 	return server.Run(ctx, handler, server.Options{

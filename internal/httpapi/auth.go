@@ -211,6 +211,17 @@ func authError(err error) error {
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		return huma.Error401Unauthorized("Those credentials are not valid.")
 
+	case errors.Is(err, auth.ErrUnauthenticated):
+		// The middleware normally answers this before a handler runs. Mapped anyway:
+		// a sentinel with no mapping renders as "an unexpected error occurred",
+		// which is a poor way to say "please log in".
+		return huma.Error401Unauthorized("Authentication is required.")
+
+	case errors.Is(err, auth.ErrRegistrationClosed):
+		// Returned for every address once a workspace is claimed, existing or not,
+		// so registration cannot be used to discover which addresses exist.
+		return huma.Error403Forbidden("This workspace is invitation-only.")
+
 	case errors.Is(err, auth.ErrEmailTaken):
 		return huma.Error409Conflict("That email is already registered. Sign in instead.")
 

@@ -62,6 +62,12 @@ type Config struct {
 	// minted by a sibling environment from authenticating here.
 	JWTIssuer string
 
+	// AuthRateBurst and AuthRateEvery bound credential-verifying endpoints per
+	// client address per path. Each Argon2id verification allocates 64 MiB, so an
+	// unlimited login endpoint is a memory-exhaustion primitive.
+	AuthRateBurst int
+	AuthRateEvery time.Duration
+
 	// CORSOrigins are the exact browser origins allowed to call this API. lms-web
 	// is always a different origin, so this is never empty in practice.
 	CORSOrigins []string
@@ -101,6 +107,9 @@ func Load() (Config, error) {
 
 		JWTSecret: env("LMS_JWT_SECRET", ""),
 		JWTIssuer: env("LMS_JWT_ISSUER", "lms-api"),
+
+		AuthRateBurst: number("LMS_AUTH_RATE_BURST", 10),
+		AuthRateEvery: duration("LMS_AUTH_RATE_EVERY", 6*time.Second),
 	}
 
 	level, err := logLevel(env("LMS_LOG_LEVEL", "info"))

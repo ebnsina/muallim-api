@@ -15,6 +15,7 @@ import (
 
 	"github.com/ebnsina/lms-api/internal/auth"
 	"github.com/ebnsina/lms-api/internal/catalog"
+	"github.com/ebnsina/lms-api/internal/platform/ratelimit"
 	"github.com/ebnsina/lms-api/internal/tenant"
 )
 
@@ -40,6 +41,10 @@ type Options struct {
 	Catalog *catalog.Service
 	Auth    *auth.Service
 	DB      Pinger
+
+	// AuthLimiter throttles credential-verifying endpoints. Nil disables it, which
+	// is what a transport test that hammers login wants.
+	AuthLimiter *ratelimit.Limiter
 }
 
 // New builds the HTTP handler and the OpenAPI description of every route on it.
@@ -69,6 +74,7 @@ func New(opts Options) (http.Handler, huma.API) {
 	registerHealth(api, opts.Version)
 	registerReadiness(api, opts.DB)
 	registerAuth(api, opts.Auth)
+	registerMembers(api, opts.Auth)
 	registerCatalog(api, opts.Catalog)
 	registerCatalogWrites(api, opts.Catalog)
 
@@ -77,6 +83,7 @@ func New(opts Options) (http.Handler, huma.API) {
 	//   requestID          every log line and problem document carries a correlation ID
 	//   accessLog          observes the final status, after every rewrite below
 	//   cors               error responses need the headers too, or a browser hides them
+	//   throttle           rejects before any Argon2 hash is computed, which is the point
 	//   etag               hashes the body a handler produced, before it is committed
 	//   withRequestContext client address and user agent, for the audit trail
 	//   resolveTenant      binds the tenant that domain services read from context
@@ -88,9 +95,13 @@ func New(opts Options) (http.Handler, huma.API) {
 		requestID,
 		accessLog(opts.Logger),
 		cors(opts.CORSOrigins),
-		etag(opts.Logger),
-		withRequestContext,
 	}
+
+	if opts.AuthLimiter != nil {
+		mw = append(mw, throttle(opts.AuthLimiter, opts.Logger))
+	}
+
+	mw = append(mw, etag(opts.Logger), withRequestContext)
 
 	// Omitted when there is no tenant service — building the handler to emit the
 	// OpenAPI document, or a transport test that exercises no tenant-scoped route.

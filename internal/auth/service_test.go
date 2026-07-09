@@ -79,12 +79,14 @@ func newService(t *testing.T, db *database.DB) *auth.Service {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return auth.NewService(db, auth.NewPostgresRepository(), tokens, authAuditor{audit.NewRecorder()}, discardLogger())
+	repo := auth.NewPostgresRepository()
+	return auth.NewService(db, repo, repo, tokens, authAuditor{audit.NewRecorder()}, discardLogger())
 }
 
 func uniqueEmail() string { return "u" + uuid.NewString()[:8] + "@example.test" }
 
-func TestRegisterMakesTheFirstMemberAnOwner(t *testing.T) {
+// Registration claims an unclaimed workspace. The claimant owns it.
+func TestRegisterClaimsAnUnclaimedWorkspace(t *testing.T) {
 	t.Parallel()
 
 	db := testDB(t)
@@ -97,36 +99,31 @@ func TestRegisterMakesTheFirstMemberAnOwner(t *testing.T) {
 		t.Fatalf("Register: %v", err)
 	}
 	if role != auth.RoleOwner {
-		t.Errorf("first member got role %q, want owner", role)
-	}
-
-	_, _, role, err = svc.Register(t.Context(), tenantID,
-		auth.Credentials{Email: uniqueEmail(), Password: password}, "Second", auth.RequestContext{})
-	if err != nil {
-		t.Fatalf("Register: %v", err)
-	}
-	if role != auth.RoleStudent {
-		t.Errorf("second member got role %q, want student", role)
+		t.Errorf("the claimant got role %q, want owner", role)
 	}
 }
 
-func TestRegisterRejectsDuplicateEmail(t *testing.T) {
+// Once a workspace has a member, joining is by invitation. An open registration
+// endpoint that answers "that email is taken" tells any stranger whether an
+// address exists somewhere on the platform.
+func TestRegisterIsClosedOnceTheWorkspaceIsClaimed(t *testing.T) {
 	t.Parallel()
 
 	db := testDB(t)
 	svc := newService(t, db)
 	tenantID := seedTenant(t, db)
-	email := uniqueEmail()
 
 	if _, _, _, err := svc.Register(t.Context(), tenantID,
-		auth.Credentials{Email: email, Password: password}, "A", auth.RequestContext{}); err != nil {
+		auth.Credentials{Email: uniqueEmail(), Password: password}, "First", auth.RequestContext{}); err != nil {
 		t.Fatal(err)
 	}
 
+	// A brand-new address is refused with the same error as a taken one, so the
+	// endpoint reveals nothing about which addresses exist.
 	_, _, _, err := svc.Register(t.Context(), tenantID,
-		auth.Credentials{Email: email, Password: password}, "B", auth.RequestContext{})
-	if !errors.Is(err, auth.ErrEmailTaken) {
-		t.Errorf("err = %v, want ErrEmailTaken", err)
+		auth.Credentials{Email: uniqueEmail(), Password: password}, "Second", auth.RequestContext{})
+	if !errors.Is(err, auth.ErrRegistrationClosed) {
+		t.Errorf("err = %v, want ErrRegistrationClosed", err)
 	}
 }
 

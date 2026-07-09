@@ -48,7 +48,11 @@ make spec           # write bin/openapi.json — the contract for lms-web
 
 **An audit entry commits in the transaction of the thing it describes.** When the audited event is a *rejection* — failed login, detected token reuse — the transaction callback must return `nil` and the rejection is carried out in a variable. Returning the error rolls back the audit record you were obliged to keep.
 
-**Never confirm an account exists.** Missing account, wrong password, and suspended membership are one error, in constant time (the unknown path hashes against a dummy digest).
+**Never confirm an account exists.** Missing account, wrong password, and suspended membership are one error, in constant time (the unknown path hashes against a dummy digest). Registration claims an *unclaimed* workspace and nothing else — afterwards every attempt is refused identically, so it cannot be used to discover addresses. Joining is by invitation, and accepting one for an existing account requires that account's password: the invitation proves the workspace wants the address, not that the requester owns it.
+
+**Rate-limit anything that verifies a credential.** Each Argon2id hash allocates 64 MiB; an unlimited login endpoint is a memory-exhaustion primitive. Key on the peer address per path, never on `X-Forwarded-For`.
+
+**Every domain sentinel needs a case in its mapper**, or it renders as a 500 "unexpected error". `errors_test.go` asserts this for every sentinel, wrapped and unwrapped — add a line there in the same commit that adds a sentinel.
 
 **Refresh tokens rotate; reuse revokes the family.** Distinguish *rotated away* (has a successor — theft) from *merely revoked* (logout or family sweep — just invalid). Both look like "session expired" to the client.
 
