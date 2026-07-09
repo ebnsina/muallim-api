@@ -323,6 +323,53 @@ func TestResetWithAWeakPasswordDoesNotSpendTheToken(t *testing.T) {
 	}
 }
 
+// The invitation link reaches the invited address and nowhere else — the
+// transport layer discards the token — so accepting it proves control of that
+// inbox exactly as a verification email would. A new account arrives verified,
+// and is not asked to prove the same thing twice.
+func TestAcceptingAnInvitationVerifiesANewAccount(t *testing.T) {
+	t.Parallel()
+
+	db := testDB(t)
+	svc, mail := newServiceWithMailer(t, db)
+	tenantID := seedTenant(t, db)
+
+	ownerPair, _, _, err := svc.Register(t.Context(), tenantID,
+		auth.Credentials{Email: uniqueEmail(), Password: password}, "Owner", auth.RequestContext{})
+	if err != nil {
+		t.Fatalf("register owner: %v", err)
+	}
+	owner, err := svc.Verify(ownerPair.AccessToken)
+	if err != nil {
+		t.Fatalf("verify owner token: %v", err)
+	}
+
+	invited := uniqueEmail()
+	_, token, err := svc.Invite(t.Context(), owner, invited, auth.RoleInstructor, "Acme", auth.RequestContext{})
+	if err != nil {
+		t.Fatalf("invite: %v", err)
+	}
+
+	// The invitation itself was mailed to the invitee.
+	if _, ok := mail.lastOf("invitation", invited); !ok {
+		t.Fatal("no invitation email was sent")
+	}
+
+	before := mail.countOf("verification")
+
+	_, user, _, err := svc.AcceptInvitation(t.Context(), tenantID, token, password, "Grace", auth.RequestContext{})
+	if err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+
+	if user.EmailVerifiedAt == nil {
+		t.Error("an invited account is not marked verified")
+	}
+	if got := mail.countOf("verification"); got != before {
+		t.Errorf("accepting an invitation sent %d verification emails, want 0", got-before)
+	}
+}
+
 // Resending is a no-op once the address is confirmed, and supersedes the
 // outstanding link otherwise.
 func TestResendVerification(t *testing.T) {

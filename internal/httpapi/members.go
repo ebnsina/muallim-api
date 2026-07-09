@@ -24,15 +24,16 @@ type InvitationView struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// CreateInvitationOutput carries the one and only sight of the token.
+// CreateInvitationOutput describes the invitation that was mailed.
+//
+// It deliberately does not carry the token. The link goes to the invited address
+// and nowhere else, which is what lets accepting it stand as proof that the
+// person holding it controls that inbox. Returning the token here would hand the
+// inviter a credential for an address they do not own.
 type CreateInvitationOutput struct {
 	CacheControl string `header:"Cache-Control"`
 	Body         struct {
 		Invitation InvitationView `json:"invitation"`
-
-		// Token is shown exactly once. Only its digest is stored, so it cannot be
-		// retrieved again; a lost invitation is re-sent by creating a new one.
-		Token string `json:"token" doc:"Shown once. Deliver to the invitee; they exchange it at /v1/auth/invitations/accept."`
 	}
 }
 
@@ -68,7 +69,7 @@ func registerMembers(api huma.API, svc *auth.Service) {
 		Method:        http.MethodPost,
 		Path:          "/v1/invitations",
 		Summary:       "Invite someone to this workspace",
-		Description:   "Requires user:manage. Only an owner may invite an owner. The token is returned once and never again.",
+		Description:   "Requires user:manage. Only an owner may invite an owner. The link is emailed to the invited address and is never returned here.",
 		Tags:          []string{"Members"},
 		DefaultStatus: http.StatusCreated,
 		Security:      []map[string][]string{{"bearer": {}}},
@@ -87,14 +88,15 @@ func registerMembers(api huma.API, svc *auth.Service) {
 		// it: tenant is a sibling domain package, and auth may not import one.
 		workspace, _ := tenant.FromContext(ctx)
 
-		inv, token, err := svc.Invite(ctx, p, in.Body.Email, in.Body.Role, workspace.Name, requestContextFrom(ctx))
+		// The token is discarded here, on purpose. It reaches the invitee by email and
+		// by no other route, which is what makes the link evidence of who they are.
+		inv, _, err := svc.Invite(ctx, p, in.Body.Email, in.Body.Role, workspace.Name, requestContextFrom(ctx))
 		if err != nil {
 			return nil, membersError(err)
 		}
 
 		out := &CreateInvitationOutput{CacheControl: noStore}
 		out.Body.Invitation = invitationView(inv)
-		out.Body.Token = token
 		return out, nil
 	})
 
