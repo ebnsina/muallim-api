@@ -69,8 +69,11 @@ type Config struct {
 	AuthRateBurst int
 	AuthRateEvery time.Duration
 
-	// CORSOrigins are the exact browser origins allowed to call this API. lms-web
-	// is always a different origin, so this is never empty in practice.
+	// CORSOrigins are the exact browser origins allowed to call this API directly.
+	//
+	// Usually none. lms-web is served at acme.lms.com and reaches this API at
+	// acme.lms.com/api, which is same-origin: no preflight, no headers to grant.
+	// An entry here exists for some other browser client on another origin.
 	CORSOrigins []string
 
 	// WebBaseURL is the origin of the web client. Every link this system mails —
@@ -118,7 +121,9 @@ func Load() (Config, error) {
 		IdleTimeout:     duration("LMS_IDLE_TIMEOUT", 120*time.Second),
 		ShutdownTimeout: duration("LMS_SHUTDOWN_TIMEOUT", 20*time.Second),
 		DatabaseURL:     env("LMS_DATABASE_URL", ""),
-		CORSOrigins:     list(env("LMS_CORS_ORIGINS", "http://localhost:5173")),
+		// Empty by default. lms-web reaches this API same-origin through the edge,
+		// so no browser origin needs granting; one that does is a deliberate act.
+		CORSOrigins: list(env("LMS_CORS_ORIGINS", "")),
 
 		DBMaxConns:           int32(number("LMS_DB_MAX_CONNS", 10)),
 		DBMinConns:           int32(number("LMS_DB_MIN_CONNS", 2)),
