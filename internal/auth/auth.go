@@ -53,9 +53,14 @@ const (
 	PermCourseRead    = "course:read"
 	PermCourseWrite   = "course:write"
 	PermCoursePublish = "course:publish"
-	PermUserRead      = "user:read"
-	PermUserManage    = "user:manage"
-	PermTenantManage  = "tenant:manage"
+
+	// PermSubmissionGrade marks an essay or an assignment by hand. Deliberately
+	// separate from course:write: a teaching assistant marks work without being
+	// able to rewrite the course, and an author is not thereby a marker.
+	PermSubmissionGrade = "submission:grade"
+	PermUserRead        = "user:read"
+	PermUserManage      = "user:manage"
+	PermTenantManage    = "tenant:manage"
 )
 
 // rolePermissions is the entire authorisation model. It is a map rather than a
@@ -64,15 +69,18 @@ const (
 var rolePermissions = map[string]map[string]bool{
 	RoleOwner: {
 		PermCourseRead: true, PermCourseWrite: true, PermCoursePublish: true,
-		PermUserRead: true, PermUserManage: true, PermTenantManage: true,
+		PermSubmissionGrade: true,
+		PermUserRead:        true, PermUserManage: true, PermTenantManage: true,
 	},
 	RoleAdmin: {
 		PermCourseRead: true, PermCourseWrite: true, PermCoursePublish: true,
-		PermUserRead: true, PermUserManage: true,
+		PermSubmissionGrade: true,
+		PermUserRead:        true, PermUserManage: true,
 	},
 	RoleInstructor: {
 		PermCourseRead: true, PermCourseWrite: true, PermCoursePublish: true,
-		PermUserRead: true,
+		PermSubmissionGrade: true,
+		PermUserRead:        true,
 	},
 	RoleStudent: {
 		PermCourseRead: true,

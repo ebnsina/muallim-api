@@ -38,6 +38,13 @@ func TestRolePermissions(t *testing.T) {
 		{RoleStudent, PermUserRead, false},
 		{RoleStudent, PermUserManage, false},
 		{RoleStudent, PermTenantManage, false},
+
+		// Marking is its own permission. Every teaching role has it; a student
+		// grading their own essay would be a novel approach to assessment.
+		{RoleOwner, PermSubmissionGrade, true},
+		{RoleAdmin, PermSubmissionGrade, true},
+		{RoleInstructor, PermSubmissionGrade, true},
+		{RoleStudent, PermSubmissionGrade, false},
 	}
 
 	for _, tt := range tests {

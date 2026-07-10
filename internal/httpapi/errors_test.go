@@ -258,6 +258,12 @@ func TestAssessmentSentinelsMapToADeliberateStatus(t *testing.T) {
 		assess.ErrAttemptExpired:    http.StatusConflict,
 		assess.ErrEmptyQuiz:         http.StatusConflict,
 
+		assess.ErrNotAwaitingReview: http.StatusConflict,
+
+		// The machine graded it, and its verdict is not an instructor's to overturn.
+		assess.ErrNotManual:    http.StatusUnprocessableEntity,
+		assess.ErrInvalidGrade: http.StatusUnprocessableEntity,
+
 		assess.ErrInvalidQuiz:     http.StatusUnprocessableEntity,
 		assess.ErrInvalidQuestion: http.StatusUnprocessableEntity,
 		assess.ErrIncompleteOrder: http.StatusUnprocessableEntity,

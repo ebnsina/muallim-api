@@ -37,6 +37,14 @@ type Repository interface {
 	WriteGrades(ctx context.Context, tx pgx.Tx, tenantID, attemptID uuid.UUID, grades []AnswerGrade) error
 	FinishGrading(ctx context.Context, tx pgx.Tx, tenantID, attemptID uuid.UUID, status string, points, maxPoints int, passed *bool) (Attempt, error)
 	ReviewItems(ctx context.Context, tx pgx.Tx, tenantID, attemptID uuid.UUID) ([]ReviewItem, error)
+
+	// Marking by hand.
+	ListSubmissions(ctx context.Context, tx pgx.Tx, tenantID, quizID uuid.UUID, onlyAwaiting bool, limit int) ([]Submission, error)
+	MarkAnswer(ctx context.Context, tx pgx.Tx, tenantID, attemptID, questionID uuid.UUID, m Mark, correct bool) error
+
+	// RecomputeAttempt restates an attempt's score and status from its answers, in
+	// the transaction that changed them.
+	RecomputeAttempt(ctx context.Context, tx pgx.Tx, tenantID, attemptID uuid.UUID) (Attempt, error)
 }
 
 // AuditEntry is one line of the audit trail.

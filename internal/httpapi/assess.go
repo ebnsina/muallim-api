@@ -364,6 +364,7 @@ func registerAssessment(api huma.API, svc *assess.Service, learning *enroll.Serv
 	})
 
 	registerQuizAuthoring(api, svc)
+	registerMarking(api, svc)
 }
 
 func registerQuizAuthoring(api huma.API, svc *assess.Service) {
@@ -804,6 +805,17 @@ func assessError(err error) error {
 	case errors.Is(err, assess.ErrEmptyQuiz):
 		return huma.Error409Conflict("That quiz has no questions yet.")
 
+	case errors.Is(err, assess.ErrNotAwaitingReview):
+		return huma.Error409Conflict("That attempt is not awaiting review.")
+
+	case errors.Is(err, assess.ErrNotManual):
+		// 422: the request was understood and is impossible. The machine graded that
+		// question, and its verdict is not an instructor's to overturn here.
+		return huma.Error422UnprocessableEntity("That question is graded automatically.")
+
+	case errors.Is(err, assess.ErrInvalidGrade):
+		return huma.Error422UnprocessableEntity(err.Error())
+
 	case errors.Is(err, assess.ErrInvalidQuiz),
 		errors.Is(err, assess.ErrInvalidQuestion),
 		errors.Is(err, assess.ErrIncompleteOrder):
@@ -813,4 +825,195 @@ func assessError(err error) error {
 		// The wrapped cause is logged with a correlation id; the client learns no more.
 		return err
 	}
+}
+
+// SubmissionView is one learner's attempt, in a marker's queue.
+type SubmissionView struct {
+	// ID addresses this attempt for marking.
+	//
+	// It appears here and nowhere else. A learner reaches their own attempts by
+	// number, within a quiz, so no id of theirs is ever guessable; a marker works
+	// across learners and needs one, and holds submission:grade to get it.
+	ID string `json:"id" format:"uuid"`
+
+	Attempt AttemptView `json:"attempt"`
+
+	LearnerName  string `json:"learner_name"`
+	LearnerEmail string `json:"learner_email" format:"email"`
+
+	// Unmarked counts the answers still waiting for a person.
+	Unmarked int `json:"unmarked"`
+}
+
+// ListSubmissionsOutput is a marking queue.
+type ListSubmissionsOutput struct {
+	CacheControl string `header:"Cache-Control"`
+	Body         struct {
+		Submissions []SubmissionView `json:"submissions"`
+	}
+}
+
+// SubmissionOutput is one attempt as its marker sees it: the questions with their
+// answer key, and what the learner wrote.
+type SubmissionOutput struct {
+	CacheControl string `header:"Cache-Control"`
+	Body         struct {
+		Attempt   AttemptView            `json:"attempt"`
+		Questions []AuthoredQuestionView `json:"questions"`
+		Answers   []MarkedAnswerView     `json:"answers"`
+	}
+}
+
+// MarkedAnswerView is one answer, with whatever grade it has.
+type MarkedAnswerView struct {
+	QuestionID string          `json:"question_id" format:"uuid"`
+	Response   assess.Response `json:"response"`
+
+	Graded   bool   `json:"graded"`
+	Correct  bool   `json:"correct" doc:"On a hand-marked answer this means full marks."`
+	Points   int    `json:"points"`
+	Feedback string `json:"feedback,omitempty"`
+}
+
+func registerMarking(api huma.API, svc *assess.Service) {
+	huma.Register(api, huma.Operation{
+		OperationID: "list-submissions",
+		Method:      http.MethodGet,
+		Path:        "/v1/lessons/{id}/quiz/submissions",
+		Summary:     "List attempts at a quiz, for marking",
+		Description: "Attempts still being taken are not here: a marker has no business reading a " +
+			"half-written essay. Requires submission:grade.",
+		Tags:     []string{"Marking"},
+		Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, in *struct {
+		ID       string `path:"id" format:"uuid"`
+		Awaiting bool   `query:"awaiting" doc:"Only the attempts still waiting for a person."`
+		Limit    int    `query:"limit" minimum:"1" maximum:"50" default:"50"`
+	}) (*ListSubmissionsOutput, error) {
+		p, _, err := marker(ctx)
+		if err != nil {
+			return nil, err
+		}
+		lessonID, err := parseUUID(in.ID, "lesson")
+		if err != nil {
+			return nil, err
+		}
+
+		submissions, err := svc.Submissions(ctx, p.TenantID, lessonID, in.Awaiting, in.Limit)
+		if err != nil {
+			return nil, assessError(err)
+		}
+
+		out := &ListSubmissionsOutput{CacheControl: lessonCacheControl}
+		out.Body.Submissions = make([]SubmissionView, 0, len(submissions))
+		for _, s := range submissions {
+			out.Body.Submissions = append(out.Body.Submissions, SubmissionView{
+				ID:           s.Attempt.ID.String(),
+				Attempt:      attemptView(s.Attempt),
+				LearnerName:  s.LearnerName,
+				LearnerEmail: s.LearnerEmail,
+				Unmarked:     s.Unmarked,
+			})
+		}
+		return out, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "read-submission",
+		Method:      http.MethodGet,
+		Path:        "/v1/attempts/{id}",
+		Summary:     "Read one attempt for marking",
+		Description: "The questions with their answer key, and what the learner wrote. Requires " +
+			"submission:grade — this is the other endpoint in this API that returns a correct answer.",
+		Tags:     []string{"Marking"},
+		Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, in *struct {
+		ID string `path:"id" format:"uuid"`
+	}) (*SubmissionOutput, error) {
+		p, _, err := marker(ctx)
+		if err != nil {
+			return nil, err
+		}
+		attemptID, err := parseUUID(in.ID, "attempt")
+		if err != nil {
+			return nil, err
+		}
+
+		attempt, questions, answers, err := svc.Submission(ctx, p.TenantID, attemptID)
+		if err != nil {
+			return nil, assessError(err)
+		}
+
+		out := &SubmissionOutput{CacheControl: lessonCacheControl}
+		out.Body.Attempt = attemptView(attempt)
+		out.Body.Questions = make([]AuthoredQuestionView, 0, len(questions))
+		out.Body.Answers = make([]MarkedAnswerView, 0, len(questions))
+
+		for _, q := range questions {
+			out.Body.Questions = append(out.Body.Questions, authoredQuestionView(q))
+
+			answer := answers[q.ID]
+			out.Body.Answers = append(out.Body.Answers, MarkedAnswerView{
+				QuestionID: q.ID.String(), Response: answer.Response,
+				Graded: answer.Graded, Correct: answer.Correct,
+				Points: answer.Points, Feedback: answer.Feedback,
+			})
+		}
+		return out, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "mark-answer",
+		Method:      http.MethodPut,
+		Path:        "/v1/attempts/{id}/answers/{question_id}/mark",
+		Summary:     "Mark one open-ended answer",
+		Description: "Only an open-ended question, and only while the attempt is awaiting review. " +
+			"Marking the last one grades the attempt and settles whether it passed, in the same " +
+			"transaction. A machine-graded question cannot be overridden here.",
+		Tags:     []string{"Marking"},
+		Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, in *struct {
+		ID         string `path:"id" format:"uuid"`
+		QuestionID string `path:"question_id" format:"uuid"`
+		Body       struct {
+			Points   int    `json:"points" minimum:"0" maximum:"1000"`
+			Feedback string `json:"feedback,omitempty" maxLength:"4000"`
+		}
+	}) (*AttemptOutput, error) {
+		p, author, err := marker(ctx)
+		if err != nil {
+			return nil, err
+		}
+		attemptID, err := parseUUID(in.ID, "attempt")
+		if err != nil {
+			return nil, err
+		}
+		questionID, err := parseUUID(in.QuestionID, "question")
+		if err != nil {
+			return nil, err
+		}
+
+		attempt, err := svc.MarkAnswer(ctx, p.TenantID, attemptID, questionID,
+			assess.Mark{Points: in.Body.Points, Feedback: in.Body.Feedback}, author)
+		if err != nil {
+			return nil, assessError(err)
+		}
+
+		out := &AttemptOutput{CacheControl: lessonCacheControl}
+		out.Body.Attempt = attemptView(attempt)
+		return out, nil
+	})
+}
+
+// marker authorises a marking action and packages the audit detail.
+//
+// submission:grade, not course:write. A teaching assistant marks work without
+// being able to rewrite the course, and an author is not thereby a marker.
+func marker(ctx context.Context) (auth.Principal, assess.Author, error) {
+	p, err := requirePermission(ctx, auth.PermSubmissionGrade)
+	if err != nil {
+		return auth.Principal{}, assess.Author{}, err
+	}
+	rc := requestContextFrom(ctx)
+	return p, assess.Author{UserID: p.UserID, IP: rc.IP, UserAgent: rc.UserAgent}, nil
 }
