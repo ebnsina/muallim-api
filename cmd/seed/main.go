@@ -37,6 +37,7 @@ import (
 	"github.com/ebnsina/lms-api/internal/assess"
 	"github.com/ebnsina/lms-api/internal/auth"
 	"github.com/ebnsina/lms-api/internal/catalog"
+	"github.com/ebnsina/lms-api/internal/certify"
 	"github.com/ebnsina/lms-api/internal/enroll"
 	"github.com/ebnsina/lms-api/internal/platform/database"
 )
@@ -152,6 +153,7 @@ type counts struct {
 	tenants, users, courses, lessons, quizzes, questions int
 	assignments                                          int
 	enrolments, progress, attempts, answers              int
+	grades, certificates                                 int
 }
 
 func (c *counts) add(other counts) {
@@ -166,6 +168,8 @@ func (c *counts) add(other counts) {
 	c.progress += other.progress
 	c.attempts += other.attempts
 	c.answers += other.answers
+	c.grades += other.grades
+	c.certificates += other.certificates
 }
 
 func subdomain(index int) string {
@@ -301,7 +305,7 @@ func seedWorkspace(ctx context.Context, db *database.DB, cfg config, index int, 
 			}
 		}
 
-		learning, err := seedLearning(ctx, tx, tenantID, cfg, catalogue, people.students, people.demo, rng)
+		learning, err := seedLearning(ctx, tx, tenantID, cfg, catalogue, people.students, people.demo, people.names, rng)
 		if err != nil {
 			return fmt.Errorf("learning: %w", err)
 		}
@@ -309,6 +313,8 @@ func seedWorkspace(ctx context.Context, db *database.DB, cfg config, index int, 
 		got.progress = learning.progress
 		got.attempts = learning.attempts
 		got.answers = learning.answers
+		got.grades = learning.grades
+		got.certificates = learning.certificates
 
 		return nil
 	})
@@ -328,6 +334,10 @@ type people struct {
 	// their enrolments are dealt by hand rather than by a coin toss — a demo
 	// dashboard that is empty because the dice said so is a demo of nothing.
 	demo []uuid.UUID
+
+	// Every account's name, by id. A certificate copies the name in, and the
+	// seeder is the transaction that would have read it.
+	names map[uuid.UUID]string
 }
 
 func seedPeople(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, index int, hash string, howMany int) (people, error) {
@@ -380,10 +390,13 @@ func seedPeople(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, index int, h
 	memberships := make([][]any, 0, len(accounts))
 	verified := time.Now().Add(-30 * 24 * time.Hour)
 
+	p.names = make(map[uuid.UUID]string, len(accounts))
+
 	for _, a := range accounts {
 		users = append(users, []any{a.id, a.email, hash, a.name, verified})
 		memberships = append(memberships, []any{id("membership", tenantID, a.email), tenantID, a.id, a.role, "active"})
 
+		p.names[a.id] = a.name
 		p.everyone = append(p.everyone, a.id)
 		if named[a.email] {
 			p.demo = append(p.demo, a.id)
@@ -482,12 +495,16 @@ type seededQuestion struct {
 type seededCourse struct {
 	id      uuid.UUID
 	slug    string
+	title   string
 	lessons []uuid.UUID
 	quiz    *seededQuiz
 
-	// assignment says the course ends with work to hand in. There is no id here
-	// because nothing else in the seeder addresses it: see seedCatalogue.
-	assignment bool
+	// The assignment that ends the course, when it has one. Its id and worth feed
+	// the gradebook item; there are no submissions, so no grades against it.
+	assignment       bool
+	assignmentID     uuid.UUID
+	assignmentLesson uuid.UUID
+	assignmentPoints int
 }
 
 func seedCatalogue(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg config, rng *rand.Rand) ([]seededCourse, error) {
@@ -499,6 +516,7 @@ func seedCatalogue(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg confi
 		question    [][]any
 		options     [][]any
 		assignments [][]any
+		gradeItems  [][]any
 	)
 
 	seeded := make([]seededCourse, 0, cfg.courses)
@@ -520,7 +538,7 @@ func seedCatalogue(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg confi
 		}
 
 		slug := fmt.Sprintf("%s-%d", slugify(title), index)
-		course := seededCourse{id: id("course", tenantID, slug), slug: slug}
+		course := seededCourse{id: id("course", tenantID, slug), slug: slug, title: title}
 
 		// One course in six stays a draft. A catalogue where everything is published
 		// never exercises the query filter that hides the rest.
@@ -563,8 +581,10 @@ func seedCatalogue(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg confi
 		lastTopic := topics[len(topics)-1][0].(uuid.UUID)
 		tail := cfg.lessons
 
-		// Half the courses end with a quiz, on a lesson of their own.
-		if rng.Float64() < cfg.quizRate {
+		// Half the courses end with a quiz, on a lesson of their own — and the first
+		// always does, because the demo accounts finish it, and a finished course
+		// with no assessment is a gradebook with nothing in it.
+		if index == 0 || rng.Float64() < cfg.quizRate {
 			quizLesson := id("lesson", course.id, "quiz")
 
 			lessons = append(lessons, []any{
@@ -613,6 +633,15 @@ func seedCatalogue(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg confi
 			}
 
 			course.quiz = quiz
+
+			// The gradebook item for the quiz. One per assessment, worth what the
+			// assessment is worth, written when the assessment is — not when the first
+			// learner is graded, or a course with an unmarked quiz would claim it has
+			// nothing to grade.
+			gradeItems = append(gradeItems, []any{
+				id("grade_item", "quiz", quiz.id), tenantID, course.id, quizLesson,
+				"quiz", quiz.id, "End-of-course quiz", quiz.maxPoints,
+			})
 		}
 
 		/*
@@ -655,11 +684,24 @@ func seedCatalogue(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg confi
 				dueAt = now.Add(-3 * 24 * time.Hour)
 			}
 
+			assignmentID := id("assignment", course.id)
 			assignments = append(assignments, []any{
-				id("assignment", course.id), tenantID, handInLesson, title,
+				assignmentID, tenantID, handInLesson, title,
 				assignmentBrief, 100, 60, 3, int64(25 << 20), dueAt, true,
 			})
+
+			// A gradebook item, but no grades: submissions live in an object store this
+			// command cannot reach, so nobody has handed anything in. The item shows the
+			// assignment is out there to be marked, which is the truth.
+			gradeItems = append(gradeItems, []any{
+				id("grade_item", "assignment", assignmentID), tenantID, course.id, handInLesson,
+				"assignment", assignmentID, title, 100,
+			})
+
 			course.assignment = true
+			course.assignmentID = assignmentID
+			course.assignmentLesson = handInLesson
+			course.assignmentPoints = 100
 			assigned++
 		}
 
@@ -678,6 +720,7 @@ func seedCatalogue(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg confi
 		{"questions", []string{"id", "tenant_id", "quiz_id", "type", "prompt", "points", "position", "explanation", "case_sensitive", "accepted"}, question},
 		{"question_options", []string{"id", "tenant_id", "question_id", "content", "position", "is_correct", "match_id", "match_content"}, options},
 		{"assignments", []string{"id", "tenant_id", "lesson_id", "title", "instructions", "points", "passing_points", "max_files", "max_bytes", "due_at", "allow_late"}, assignments},
+		{"grade_items", []string{"id", "tenant_id", "course_id", "lesson_id", "source", "source_id", "title", "max_points"}, gradeItems},
 	}
 
 	for _, c := range copies {
@@ -693,17 +736,20 @@ func seedCatalogue(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg confi
 
 type learningCounts struct {
 	enrolments, progress, attempts, answers int
+	grades, certificates                    int
 }
 
-func seedLearning(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg config, catalogue []seededCourse, students, demo []uuid.UUID, rng *rand.Rand) (learningCounts, error) {
+func seedLearning(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg config, catalogue []seededCourse, students, demo []uuid.UUID, names map[uuid.UUID]string, rng *rand.Rand) (learningCounts, error) {
 	var got learningCounts
 
 	var (
-		enrolments [][]any
-		progress   [][]any
-		rollups    [][]any
-		attempts   [][]any
-		answers    [][]any
+		enrolments   [][]any
+		progress     [][]any
+		rollups      [][]any
+		attempts     [][]any
+		answers      [][]any
+		gradeEntries [][]any
+		certificates [][]any
 	)
 
 	now := time.Now()
@@ -752,6 +798,26 @@ func seedLearning(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg config
 				percent = done * 100 / len(course.lessons)
 			}
 			rollups = append(rollups, []any{tenantID, person, course.id, done, len(course.lessons), percent})
+
+			// A finished course earns a certificate and, if it has a quiz, a mark on
+			// it. The demo accounts do not sit quizzes elsewhere in the seed, so this is
+			// where `student@`'s own grades page gets something to show.
+			if status == enroll.StatusCompleted {
+				certificates = append(certificates,
+					certificateRow(tenantID, course, person, names[person], completedAt))
+				got.certificates++
+
+				if course.quiz != nil {
+					submitted := enrolledAt.Add(7 * 24 * time.Hour)
+					attempt, answerRows, points := gradedQuizAttempt(tenantID, course.quiz, person, submitted, false, true, rng)
+					attempts = append(attempts, attempt)
+					got.attempts++
+					answers = append(answers, answerRows...)
+					got.answers += len(answerRows)
+					gradeEntries = append(gradeEntries, gradeEntryRow(tenantID, course.quiz, person, points))
+					got.grades++
+				}
+			}
 		}
 	}
 
@@ -805,76 +871,34 @@ func seedLearning(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg config
 			}
 			rollups = append(rollups, []any{tenantID, student, course.id, done, len(course.lessons), percent})
 
+			// A certificate for whoever finished the course, in the same spirit as the
+			// completion it records.
+			if status == enroll.StatusCompleted {
+				certificates = append(certificates,
+					certificateRow(tenantID, course, student, names[student], completedAt))
+				got.certificates++
+			}
+
 			if course.quiz == nil || rng.Float64() >= cfg.attemptRate {
 				continue
 			}
 
-			attemptID := id("attempt", course.quiz.id, student)
 			submitted := enrolledAt.Add(time.Duration(rng.IntN(60)) * 24 * time.Hour)
 
 			// One attempt in four is still waiting for a person, so the marking queue
-			// is never empty. The rest are graded.
+			// is never empty. The rest are graded, and a graded attempt is a grade.
 			awaiting := rng.Float64() < 0.25
 
-			var points int
-			answerRows := make([][]any, 0, len(course.quiz.questions))
-
-			for _, item := range course.quiz.questions {
-				switch {
-				case item.kind == assess.TypeOpenEnded && awaiting:
-					answerRows = append(answerRows, []any{
-						id("answer", attemptID, item.id), tenantID, attemptID, item.id,
-						`{"text":"An answer of some length, written under time pressure."}`,
-						false, false, 0, "", nil,
-					})
-
-				case item.kind == assess.TypeOpenEnded:
-					awarded := rng.IntN(item.points + 1)
-					points += awarded
-					answerRows = append(answerRows, []any{
-						id("answer", attemptID, item.id), tenantID, attemptID, item.id,
-						`{"text":"An answer of some length, written under time pressure."}`,
-						true, awarded == item.points, awarded, "Good, though you never define the term.", submitted,
-					})
-
-				default:
-					// Two learners in three pick the right option.
-					right := rng.Float64() < 0.66
-					chosen := item.correct
-					if !right {
-						// An option belonging to nothing: a wrong answer. Derived under its
-						// own prefix, so it can never accidentally name a real option.
-						chosen = id("wrong", attemptID, item.id)
-					}
-					awarded := 0
-					if right {
-						awarded = item.points
-					}
-					points += awarded
-
-					answerRows = append(answerRows, []any{
-						id("answer", attemptID, item.id), tenantID, attemptID, item.id,
-						fmt.Sprintf(`{"choices":["%s"]}`, chosen),
-						true, right, awarded, "", submitted,
-					})
-				}
-			}
-
-			status = assess.StatusGraded
-			var graded, passed any = submitted, points*100 >= course.quiz.passing*course.quiz.maxPoints
-			if awaiting {
-				status, graded, passed = assess.StatusAwaitingReview, nil, nil
-			}
-
-			attempts = append(attempts, []any{
-				attemptID, tenantID, course.quiz.id, student, 1, status,
-				submitted.Add(-30 * time.Minute), submitted, graded, nil,
-				points, course.quiz.maxPoints, passed,
-			})
+			attempt, answerRows, points := gradedQuizAttempt(tenantID, course.quiz, student, submitted, awaiting, false, rng)
+			attempts = append(attempts, attempt)
 			got.attempts++
-
 			answers = append(answers, answerRows...)
 			got.answers += len(answerRows)
+
+			if !awaiting {
+				gradeEntries = append(gradeEntries, gradeEntryRow(tenantID, course.quiz, student, points))
+				got.grades++
+			}
 		}
 	}
 
@@ -888,6 +912,8 @@ func seedLearning(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg config
 		{"course_progress", []string{"tenant_id", "user_id", "course_id", "lessons_completed", "lessons_total", "percent"}, rollups},
 		{"quiz_attempts", []string{"id", "tenant_id", "quiz_id", "user_id", "number", "status", "started_at", "submitted_at", "graded_at", "expires_at", "points", "max_points", "passed"}, attempts},
 		{"attempt_answers", []string{"id", "tenant_id", "attempt_id", "question_id", "response", "graded", "correct", "points", "feedback", "graded_at"}, answers},
+		{"grade_entries", []string{"id", "tenant_id", "grade_item_id", "user_id", "points", "max_points"}, gradeEntries},
+		{"certificates", []string{"id", "tenant_id", "course_id", "user_id", "serial", "learner_name", "course_title", "issued_at", "title", "body", "signatory"}, certificates},
 	}
 
 	for _, c := range copies {
@@ -897,6 +923,119 @@ func seedLearning(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg config
 	}
 
 	return got, nil
+}
+
+// gradedQuizAttempt builds one attempt over a quiz, its answers, and the total.
+//
+// Extracted so the student loop and the demo loop share it rather than diverge:
+// two copies of the same grading are two chances to seed a score the gradebook
+// then disagrees with. `awaiting` leaves the essay unmarked, and the attempt in
+// the marking queue.
+func gradedQuizAttempt(tenantID uuid.UUID, quiz *seededQuiz, student uuid.UUID, submitted time.Time, awaiting, best bool, rng *rand.Rand) ([]any, [][]any, int) {
+	attemptID := id("attempt", quiz.id, student)
+	answerRows := make([][]any, 0, len(quiz.questions))
+	var points int
+
+	for _, item := range quiz.questions {
+		switch {
+		case item.kind == assess.TypeOpenEnded && awaiting:
+			answerRows = append(answerRows, []any{
+				id("answer", attemptID, item.id), tenantID, attemptID, item.id,
+				`{"text":"An answer of some length, written under time pressure."}`,
+				false, false, 0, "", nil,
+			})
+
+		case item.kind == assess.TypeOpenEnded:
+			awarded := rng.IntN(item.points + 1)
+			if best {
+				awarded = item.points
+			}
+			points += awarded
+			answerRows = append(answerRows, []any{
+				id("answer", attemptID, item.id), tenantID, attemptID, item.id,
+				`{"text":"An answer of some length, written under time pressure."}`,
+				true, awarded == item.points, awarded, "Good, though you never define the term.", submitted,
+			})
+
+		default:
+			// Two learners in three pick the right option — but a learner who went on to
+			// finish the course got this one right.
+			right := best || rng.Float64() < 0.66
+			chosen := item.correct
+			if !right {
+				// An option belonging to nothing: a wrong answer. Derived under its own
+				// prefix, so it can never accidentally name a real option.
+				chosen = id("wrong", attemptID, item.id)
+			}
+			awarded := 0
+			if right {
+				awarded = item.points
+			}
+			points += awarded
+
+			answerRows = append(answerRows, []any{
+				id("answer", attemptID, item.id), tenantID, attemptID, item.id,
+				fmt.Sprintf(`{"choices":["%s"]}`, chosen),
+				true, right, awarded, "", submitted,
+			})
+		}
+	}
+
+	status := assess.StatusGraded
+	var graded, passed any = submitted, points*100 >= quiz.passing*quiz.maxPoints
+	if awaiting {
+		status, graded, passed = assess.StatusAwaitingReview, nil, nil
+	}
+
+	attempt := []any{
+		attemptID, tenantID, quiz.id, student, 1, status,
+		submitted.Add(-30 * time.Minute), submitted, graded, nil,
+		points, quiz.maxPoints, passed,
+	}
+	return attempt, answerRows, points
+}
+
+// gradeEntryRow is one learner's mark on a quiz, for the gradebook. `max_points`
+// is copied from the quiz as it stands, the same as the application copies it.
+func gradeEntryRow(tenantID uuid.UUID, quiz *seededQuiz, student uuid.UUID, points int) []any {
+	return []any{
+		id("grade_entry", "quiz", quiz.id, student), tenantID,
+		id("grade_item", "quiz", quiz.id), student, points, quiz.maxPoints,
+	}
+}
+
+// certificateRow is the certificate a finished course issues.
+//
+// The learner's name and the course title are copied in, exactly as the domain
+// copies them: a certificate is a record of an event, and the event does not
+// change when a name or a title later does. The serial is derived from the row's
+// identity, so a reseed issues the same number and a bookmarked certificate URL
+// survives.
+func certificateRow(tenantID uuid.UUID, course seededCourse, student uuid.UUID, name string, issuedAt any) []any {
+	certID := id("certificate", course.id, student)
+	serial := seedSerial(certID)
+	template := certify.DefaultTemplate()
+
+	when, _ := issuedAt.(time.Time)
+	body := certify.Render(template.Body, certify.Fields{
+		Learner: name, Course: course.title,
+		Date: when.Format(certify.DateFormat), Serial: serial,
+	})
+
+	return []any{
+		certID, tenantID, course.id, student, serial,
+		name, course.title, issuedAt, template.Title, body, "",
+	}
+}
+
+// seedSerial is a plausible, unguessable certificate number derived from a uuid.
+//
+// Not certify.NewSerial: that draws from crypto/rand, and a seed that cannot be
+// reproduced is a seed whose URLs break on every reseed. Uppercase hex has no
+// letter a reader misreads for a digit, so it needs no special alphabet.
+func seedSerial(u uuid.UUID) string {
+	hex := strings.ToUpper(strings.ReplaceAll(u.String(), "-", ""))[:16]
+	return fmt.Sprintf("%s-%s-%s-%s-%s", certify.SerialPrefix, hex[0:4], hex[4:8], hex[8:12], hex[12:16])
 }
 
 // ----------------------------------------------------------------------- extra
@@ -927,14 +1066,16 @@ func databaseName(url string) string {
 
 func report(cfg config, url string, got counts, took time.Duration) {
 	rows := got.users + got.courses + got.lessons + got.quizzes + got.questions +
-		got.assignments + got.enrolments + got.progress + got.attempts + got.answers
+		got.assignments + got.enrolments + got.progress + got.attempts + got.answers +
+		got.grades + got.certificates
 
 	fmt.Printf("seeded %d rows in %s\n\n", rows, took.Round(time.Millisecond))
 	fmt.Printf("  workspaces  %d\n  people      %d\n  courses     %d\n  lessons     %d\n",
 		got.tenants, got.users, got.courses, got.lessons)
 	fmt.Printf("  quizzes     %d (%d questions)\n  assignments %d\n  enrolments  %d\n  progress    %d\n",
 		got.quizzes, got.questions, got.assignments, got.enrolments, got.progress)
-	fmt.Printf("  attempts    %d (%d answers)\n\n", got.attempts, got.answers)
+	fmt.Printf("  attempts    %d (%d answers)\n  grades      %d\n  certificates %d\n\n",
+		got.attempts, got.answers, got.grades, got.certificates)
 
 	// Which database, because these accounts are only in this one. `pnpm test:e2e`
 	// runs against `lms_test`, which has no demo accounts at all — and an API left
