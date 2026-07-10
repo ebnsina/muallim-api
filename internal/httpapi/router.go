@@ -13,6 +13,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
 
+	"github.com/ebnsina/lms-api/internal/assess"
 	"github.com/ebnsina/lms-api/internal/auth"
 	"github.com/ebnsina/lms-api/internal/catalog"
 	"github.com/ebnsina/lms-api/internal/enroll"
@@ -42,6 +43,7 @@ type Options struct {
 	Catalog *catalog.Service
 	Auth    *auth.Service
 	Enrol   *enroll.Service
+	Assess  *assess.Service
 	DB      Pinger
 
 	// AuthLimiter throttles credential-verifying endpoints. Nil disables it, which
@@ -82,6 +84,10 @@ func New(opts Options) (http.Handler, huma.API) {
 	registerAuthoring(api, opts.Catalog)
 	registerPrerequisites(api, opts.Catalog)
 	registerEnrolment(api, opts.Enrol)
+
+	// Assessment takes the enrolment service too: whether a person may see a quiz
+	// is decided by whether they may see its lesson, and that rule lives there.
+	registerAssessment(api, opts.Assess, opts.Enrol)
 
 	// Order matters, outermost first.
 	//

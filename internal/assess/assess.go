@@ -14,6 +14,7 @@ package assess
 
 import (
 	"errors"
+	"net/netip"
 	"time"
 
 	"github.com/google/uuid"
@@ -52,6 +53,15 @@ var (
 	// ErrEmptyQuiz means the quiz has no questions, so an attempt at it would be
 	// graded out of zero.
 	ErrEmptyQuiz = errors.New("assess: a quiz needs at least one question")
+
+	// ErrAttemptInProgress means the learner already has a live attempt. Starting
+	// is idempotent, so callers hand the existing one back rather than surfacing
+	// this; it exists so the repository can say what the database refused.
+	ErrAttemptInProgress = errors.New("assess: an attempt is already in progress")
+
+	// ErrIncompleteOrder means a submitted order did not name every sibling
+	// exactly once, so it is refused rather than half-applied.
+	ErrIncompleteOrder = errors.New("assess: the order must list every question exactly once")
 )
 
 // Audit actions this package emits.
@@ -266,6 +276,6 @@ type Answer struct {
 // Author identifies who did something, for the audit trail.
 type Author struct {
 	UserID    uuid.UUID
-	IP        *string
-	UserAgent *string
+	IP        netip.Addr
+	UserAgent string
 }

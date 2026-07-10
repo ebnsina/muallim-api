@@ -19,6 +19,8 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
+	"github.com/ebnsina/lms-api/internal/assess"
+	"github.com/ebnsina/lms-api/internal/audit"
 	"github.com/ebnsina/lms-api/internal/auth"
 	"github.com/ebnsina/lms-api/internal/comms"
 	"github.com/ebnsina/lms-api/internal/platform/config"
@@ -106,10 +108,21 @@ func run() error {
 		return err
 	}
 
+	// The grading service is built with an enqueuer that refuses. Grading queues
+	// nothing — only a submitting request does — so a worker holding a working one
+	// could only ever queue work by mistake.
+	quizzes := assess.NewService(db, assess.NewPostgresRepository(), assessAuditor{audit.NewRecorder()}, refusingEnqueuer{})
+
+	grading, err := assess.NewGradeAttemptWorker(quizzes)
+	if err != nil {
+		return err
+	}
+
 	workers := river.NewWorkers()
 	river.AddWorker(workers, emails)
 	river.AddWorker(workers, orphans)
 	river.AddWorker(workers, revocations)
+	river.AddWorker(workers, grading)
 
 	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Logger:  log,

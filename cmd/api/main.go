@@ -20,6 +20,7 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
+	"github.com/ebnsina/lms-api/internal/assess"
 	"github.com/ebnsina/lms-api/internal/audit"
 	"github.com/ebnsina/lms-api/internal/auth"
 	"github.com/ebnsina/lms-api/internal/catalog"
@@ -158,6 +159,12 @@ func run() error {
 	courses := catalog.NewService(db, catalogRepo, catalogRepo, catalogRepo, catalogAuditor{recorder}, videos)
 	learning := enroll.NewService(db, enroll.NewPostgresRepository(), enrolAuditor{recorder})
 
+	grading, err := assess.NewRiverEnqueuer(jobs)
+	if err != nil {
+		return err
+	}
+	quizzes := assess.NewService(db, assess.NewPostgresRepository(), assessAuditor{recorder}, grading)
+
 	handler, _ := httpapi.New(httpapi.Options{
 		Version:     cfg.Version,
 		Logger:      log,
@@ -166,6 +173,7 @@ func run() error {
 		Catalog:     courses,
 		Auth:        identities,
 		Enrol:       learning,
+		Assess:      quizzes,
 		DB:          db,
 		AuthLimiter: ratelimit.New(ratelimit.Options{
 			Burst: cfg.AuthRateBurst,

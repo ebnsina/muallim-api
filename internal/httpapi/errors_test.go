@@ -10,6 +10,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/ebnsina/lms-api/internal/assess"
 	"github.com/ebnsina/lms-api/internal/auth"
 	"github.com/ebnsina/lms-api/internal/catalog"
 	"github.com/ebnsina/lms-api/internal/enroll"
@@ -234,6 +235,53 @@ func TestUnmappedErrorBecomes500(t *testing.T) {
 		t.Errorf("an unmapped error mapped to %d, want 500", got)
 	}
 	if got := statusOf(enrolError(mystery)); got != http.StatusInternalServerError {
+		t.Errorf("an unmapped error mapped to %d, want 500", got)
+	}
+}
+
+// The assessment sentinels go through their own mapper.
+//
+// Two of them are deliberately indistinguishable to a client. An attempt that
+// belongs to somebody else and an attempt that does not exist are both 404: the
+// difference between them is exactly the fact a probe would be after.
+func TestAssessmentSentinelsMapToADeliberateStatus(t *testing.T) {
+	t.Parallel()
+
+	tests := map[error]int{
+		assess.ErrNotFound:       http.StatusNotFound,
+		assess.ErrNotYourAttempt: http.StatusNotFound,
+
+		assess.ErrQuizExists:        http.StatusConflict,
+		assess.ErrAttemptsExhausted: http.StatusConflict,
+		assess.ErrAttemptClosed:     http.StatusConflict,
+		assess.ErrAttemptInProgress: http.StatusConflict,
+		assess.ErrAttemptExpired:    http.StatusConflict,
+		assess.ErrEmptyQuiz:         http.StatusConflict,
+
+		assess.ErrInvalidQuiz:     http.StatusUnprocessableEntity,
+		assess.ErrInvalidQuestion: http.StatusUnprocessableEntity,
+		assess.ErrIncompleteOrder: http.StatusUnprocessableEntity,
+	}
+
+	for err, want := range tests {
+		if got := statusOf(assessError(err)); got != want {
+			t.Errorf("%v mapped to %d, want %d", err, got, want)
+		}
+
+		// Wrapped sentinels must map identically: domains wrap with context.
+		wrapped := fmt.Errorf("assess: doing a thing: %w", err)
+		if got := statusOf(assessError(wrapped)); got != want {
+			t.Errorf("wrapped %v mapped to %d, want %d", err, got, want)
+		}
+	}
+}
+
+// An unmapped error is a 500, and that is the point of the table above: a
+// sentinel nobody gave a case to reaches a user as "unexpected error".
+func TestAnUnmappedAssessmentErrorIsFiveHundred(t *testing.T) {
+	t.Parallel()
+
+	if got := statusOf(assessError(errors.New("assess: something new"))); got != http.StatusInternalServerError {
 		t.Errorf("an unmapped error mapped to %d, want 500", got)
 	}
 }

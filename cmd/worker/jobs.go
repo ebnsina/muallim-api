@@ -6,8 +6,12 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
 
+	"github.com/ebnsina/lms-api/internal/assess"
+	"github.com/ebnsina/lms-api/internal/audit"
 	"github.com/ebnsina/lms-api/internal/auth"
 )
 
@@ -57,4 +61,28 @@ func (w *EraseOrphansWorker) Work(ctx context.Context, _ *river.Job[EraseOrphans
 		w.log.InfoContext(ctx, "erased orphaned users", slog.Int("count", erased))
 	}
 	return nil
+}
+
+// assessAuditor adapts the recorder to the assess package's interface, exactly as
+// cmd/api does. Grading writes an audit line in the transaction that records the
+// score.
+type assessAuditor struct{ recorder *audit.Recorder }
+
+func (a assessAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, e assess.AuditEntry) error {
+	return a.recorder.Record(ctx, tx, tenantID, audit.Entry{
+		ActorID: e.ActorID, Action: e.Action,
+		TargetType: e.TargetType, TargetID: e.TargetID,
+		IP: e.IP, UserAgent: e.UserAgent, Metadata: e.Metadata,
+	})
+}
+
+// refusingEnqueuer satisfies assess.Enqueuer and queues nothing.
+//
+// Only a submitting request enqueues grading, and only cmd/api serves requests.
+// A worker given a working enqueuer would be a worker that could queue work — and
+// a grading job that enqueued its own grading is a loop nobody meant to write.
+type refusingEnqueuer struct{}
+
+func (refusingEnqueuer) GradeAttempt(context.Context, pgx.Tx, uuid.UUID, uuid.UUID) error {
+	return errors.New("worker: the grading process does not enqueue jobs")
 }

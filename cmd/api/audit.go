@@ -6,6 +6,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/ebnsina/lms-api/internal/assess"
 	"github.com/ebnsina/lms-api/internal/audit"
 	"github.com/ebnsina/lms-api/internal/auth"
 	"github.com/ebnsina/lms-api/internal/catalog"
@@ -65,5 +66,16 @@ func (a enrolAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID,
 		IP:         e.IP,
 		UserAgent:  e.UserAgent,
 		Metadata:   e.Metadata,
+	})
+}
+
+// assessAuditor adapts the recorder to the assess package's interface.
+type assessAuditor struct{ recorder *audit.Recorder }
+
+func (a assessAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, e assess.AuditEntry) error {
+	return a.recorder.Record(ctx, tx, tenantID, audit.Entry{
+		ActorID: e.ActorID, Action: e.Action,
+		TargetType: e.TargetType, TargetID: e.TargetID,
+		IP: e.IP, UserAgent: e.UserAgent, Metadata: e.Metadata,
 	})
 }
