@@ -13,6 +13,7 @@ import (
 	"github.com/ebnsina/lms-api/internal/assess"
 	"github.com/ebnsina/lms-api/internal/audit"
 	"github.com/ebnsina/lms-api/internal/auth"
+	"github.com/ebnsina/lms-api/internal/enroll"
 )
 
 // EraseOrphansArgs sweeps users who belong to no workspace.
@@ -85,4 +86,18 @@ type refusingEnqueuer struct{}
 
 func (refusingEnqueuer) GradeAttempt(context.Context, pgx.Tx, uuid.UUID, uuid.UUID) error {
 	return errors.New("worker: the grading process does not enqueue jobs")
+}
+
+// enrolAuditor adapts the recorder to the enrolment package's interface.
+//
+// Completing the last lesson of a course completes the enrolment, and that
+// transition is audited wherever it happens — including here, in a grading job.
+type enrolAuditor struct{ recorder *audit.Recorder }
+
+func (a enrolAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, e enroll.AuditEntry) error {
+	return a.recorder.Record(ctx, tx, tenantID, audit.Entry{
+		ActorID: e.ActorID, Action: e.Action,
+		TargetType: e.TargetType, TargetID: e.TargetID,
+		IP: e.IP, UserAgent: e.UserAgent, Metadata: e.Metadata,
+	})
 }

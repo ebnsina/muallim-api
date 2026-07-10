@@ -23,6 +23,7 @@ import (
 	"github.com/ebnsina/lms-api/internal/audit"
 	"github.com/ebnsina/lms-api/internal/auth"
 	"github.com/ebnsina/lms-api/internal/comms"
+	"github.com/ebnsina/lms-api/internal/enroll"
 	"github.com/ebnsina/lms-api/internal/platform/config"
 	"github.com/ebnsina/lms-api/internal/platform/database"
 	"github.com/ebnsina/lms-api/internal/platform/logging"
@@ -111,7 +112,11 @@ func run() error {
 	// The grading service is built with an enqueuer that refuses. Grading queues
 	// nothing — only a submitting request does — so a worker holding a working one
 	// could only ever queue work by mistake.
-	quizzes := assess.NewService(db, assess.NewPostgresRepository(), assessAuditor{audit.NewRecorder()}, refusingEnqueuer{})
+	// The grading job completes the lesson of a quiz it has just passed, so this
+	// process needs the enrolment service too — in the same transaction.
+	learning := enroll.NewService(db, enroll.NewPostgresRepository(), enrolAuditor{audit.NewRecorder()})
+
+	quizzes := assess.NewService(db, assess.NewPostgresRepository(), assessAuditor{audit.NewRecorder()}, refusingEnqueuer{}, learning)
 
 	grading, err := assess.NewGradeAttemptWorker(quizzes)
 	if err != nil {

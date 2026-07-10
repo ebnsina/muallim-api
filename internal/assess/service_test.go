@@ -14,6 +14,7 @@ import (
 
 	"github.com/ebnsina/lms-api/internal/assess"
 	"github.com/ebnsina/lms-api/internal/audit"
+	"github.com/ebnsina/lms-api/internal/enroll"
 	"github.com/ebnsina/lms-api/internal/platform/database"
 )
 
@@ -70,8 +71,26 @@ func (e *recordingEnqueuer) queued() []uuid.UUID {
 	return append([]uuid.UUID(nil), e.attempts...)
 }
 
+// The real enrolment service, exactly as cmd/ wires it. A stub would leave the
+// thing under test — that a passed quiz completes its lesson, in the transaction
+// that recorded the grade — entirely unexercised.
+func newCompletions(db *database.DB) *enroll.Service {
+	return enroll.NewService(db, enroll.NewPostgresRepository(), enrolAuditor{audit.NewRecorder()})
+}
+
+type enrolAuditor struct{ recorder *audit.Recorder }
+
+func (a enrolAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, e enroll.AuditEntry) error {
+	return a.recorder.Record(ctx, tx, tenantID, audit.Entry{
+		ActorID: e.ActorID, Action: e.Action,
+		TargetType: e.TargetType, TargetID: e.TargetID,
+		IP: e.IP, UserAgent: e.UserAgent, Metadata: e.Metadata,
+	})
+}
+
 func newService(db *database.DB, jobs assess.Enqueuer) *assess.Service {
-	return assess.NewService(db, assess.NewPostgresRepository(), assessAuditor{audit.NewRecorder()}, jobs)
+	return assess.NewService(db, assess.NewPostgresRepository(), assessAuditor{audit.NewRecorder()},
+		jobs, newCompletions(db))
 }
 
 func seedTenant(t *testing.T, db *database.DB) uuid.UUID {
@@ -115,9 +134,12 @@ func seedUser(t *testing.T, db *database.DB, tenantID uuid.UUID) uuid.UUID {
 	return id
 }
 
-// seedLesson makes the smallest course that can hold a lesson.
-func seedLesson(t *testing.T, db *database.DB, tenantID uuid.UUID) uuid.UUID {
+// seedLesson makes the smallest published course that can hold a quiz lesson, and
+// returns the lesson and the course's slug.
+func seedLesson(t *testing.T, db *database.DB, tenantID uuid.UUID) (uuid.UUID, string) {
 	t.Helper()
+
+	slug := "c-" + uuid.NewString()[:8]
 
 	var lessonID uuid.UUID
 	err := db.WithTenant(t.Context(), tenantID, func(ctx context.Context, tx pgx.Tx) error {
@@ -125,7 +147,7 @@ func seedLesson(t *testing.T, db *database.DB, tenantID uuid.UUID) uuid.UUID {
 		if err := tx.QueryRow(ctx,
 			`INSERT INTO courses (tenant_id, slug, title, status)
 			 VALUES ($1, $2, 'Course', 'published') RETURNING id`,
-			tenantID, "c-"+uuid.NewString()[:8]).Scan(&courseID); err != nil {
+			tenantID, slug).Scan(&courseID); err != nil {
 			return err
 		}
 		if err := tx.QueryRow(ctx,
@@ -141,17 +163,19 @@ func seedLesson(t *testing.T, db *database.DB, tenantID uuid.UUID) uuid.UUID {
 	if err != nil {
 		t.Fatalf("seed lesson: %v", err)
 	}
-	return lessonID
+	return lessonID, slug
 }
 
 type fixture struct {
-	db      *database.DB
-	svc     *assess.Service
-	jobs    *recordingEnqueuer
-	tenant  uuid.UUID
-	lesson  uuid.UUID
-	learner uuid.UUID
-	author  assess.Author
+	db       *database.DB
+	svc      *assess.Service
+	learning *enroll.Service
+	jobs     *recordingEnqueuer
+	tenant   uuid.UUID
+	lesson   uuid.UUID
+	course   string
+	learner  uuid.UUID
+	author   assess.Author
 }
 
 func newFixture(t *testing.T) fixture {
@@ -160,13 +184,35 @@ func newFixture(t *testing.T) fixture {
 	db := testDB(t)
 	jobs := &recordingEnqueuer{}
 	tenantID := seedTenant(t, db)
+	lessonID, slug := seedLesson(t, db, tenantID)
 
 	return fixture{
-		db: db, svc: newService(db, jobs), jobs: jobs,
-		tenant: tenantID, lesson: seedLesson(t, db, tenantID),
+		db: db, svc: newService(db, jobs), learning: newCompletions(db), jobs: jobs,
+		tenant: tenantID, lesson: lessonID, course: slug,
 		learner: seedUser(t, db, tenantID),
 		author:  assess.Author{UserID: seedUser(t, db, tenantID)},
 	}
+}
+
+// enrol puts the learner in the course, which is what makes a quiz theirs to take
+// and their progress a row worth writing.
+func (f fixture) enrol(t *testing.T) {
+	t.Helper()
+
+	if _, err := f.learning.Enrol(t.Context(), f.tenant, f.course, enroll.Actor{UserID: f.learner}, enroll.SourceSelf); err != nil {
+		t.Fatalf("enrol: %v", err)
+	}
+}
+
+// progress reads the learner's standing in the course.
+func (f fixture) progress(t *testing.T) enroll.Progress {
+	t.Helper()
+
+	p, err := f.learning.Progress(t.Context(), f.tenant, f.course, f.learner)
+	if err != nil {
+		t.Fatalf("progress: %v", err)
+	}
+	return p
 }
 
 // quiz builds a two-question quiz: one that grades itself, one that does not.
@@ -600,9 +646,10 @@ func TestAFailedEnqueueRollsBackTheSubmission(t *testing.T) {
 	jobs := &recordingEnqueuer{err: errors.New("the queue is down")}
 	tenantID := seedTenant(t, db)
 
+	lessonID, slug := seedLesson(t, db, tenantID)
 	f := fixture{
-		db: db, svc: newService(db, jobs), jobs: jobs,
-		tenant: tenantID, lesson: seedLesson(t, db, tenantID),
+		db: db, svc: newService(db, jobs), learning: newCompletions(db), jobs: jobs,
+		tenant: tenantID, lesson: lessonID, course: slug,
 		learner: seedUser(t, db, tenantID),
 		author:  assess.Author{UserID: seedUser(t, db, tenantID)},
 	}

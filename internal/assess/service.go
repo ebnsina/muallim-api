@@ -78,17 +78,21 @@ const MaxAttemptsListed = 50
 
 // Service holds the assessment rules and owns transaction boundaries.
 type Service struct {
-	db    *database.DB
-	repo  Repository
-	audit AuditRecorder
-	jobs  Enqueuer
+	db          *database.DB
+	repo        Repository
+	audit       AuditRecorder
+	jobs        Enqueuer
+	completions Completions
 
 	now func() time.Time
 }
 
 // NewService returns a Service.
-func NewService(db *database.DB, repo Repository, recorder AuditRecorder, jobs Enqueuer) *Service {
-	return &Service{db: db, repo: repo, audit: recorder, jobs: jobs, now: time.Now}
+func NewService(db *database.DB, repo Repository, recorder AuditRecorder, jobs Enqueuer, completions Completions) *Service {
+	return &Service{
+		db: db, repo: repo, audit: recorder, jobs: jobs, completions: completions,
+		now: time.Now,
+	}
 }
 
 // CreateQuiz attaches a quiz to a lesson.
@@ -485,6 +489,13 @@ func (s *Service) GradeAttempt(ctx context.Context, tenantID, attemptID uuid.UUI
 		graded, err = s.repo.FinishGrading(ctx, tx, tenantID, attempt.ID, status,
 			result.Points, result.MaxPoints, verdict)
 		if err != nil {
+			return err
+		}
+
+		// Passing the quiz completes its lesson, in this transaction. A grade that
+		// committed without the progress it implies is a learner whose course page
+		// and gradebook disagree.
+		if err := s.settle(ctx, tx, tenantID, quiz, graded); err != nil {
 			return err
 		}
 

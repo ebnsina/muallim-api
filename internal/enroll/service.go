@@ -2,6 +2,7 @@ package enroll
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -283,79 +284,124 @@ func (s *Service) CompleteLesson(ctx context.Context, tenantID, lessonID uuid.UU
 	var progress Progress
 
 	err := s.db.WithTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
-		view, err := s.repo.LessonForReader(ctx, tx, tenantID, lessonID, actor.UserID)
-		if err != nil {
-			return err
-		}
-
-		// Completing a lesson requires an enrolment, always. A preview is readable
-		// without one, but reading a sample is not studying a course, and progress
-		// on a course nobody enrolled in is a row nothing can ever use.
-		reader := Reader{UserID: actor.UserID}
-		now := s.now()
-		switch decide(view, reader, now) {
-		case AccessEnrolled:
-			// The only case that may mark progress.
-		case AccessLocked:
-			// An unreleased lesson cannot be completed, and saying "you are not
-			// enrolled" to somebody who is would send them to buy what they own.
-			_, at := unlockAt(view, now)
-			return &LessonLocked{AvailableAt: at}
-		default:
-			return ErrNotEnrolled
-		}
-
-		courseID := view.Lesson.CourseID
-		if err := s.repo.MarkLesson(ctx, tx, tenantID, actor.UserID, lessonID, courseID, complete); err != nil {
-			return err
-		}
-
-		progress, err = s.repo.RecomputeProgress(ctx, tx, tenantID, actor.UserID, courseID)
-		if err != nil {
-			return err
-		}
-
-		// The enrolment's status is a roll-up of the same rows, so it is recomputed
-		// here too — in both directions. Reopening a lesson un-finishes the course,
-		// and an enrolment left saying "completed" while its progress says 80% is a
-		// row that answers differently depending on which field you read. It is also
-		// what a prerequisite reads.
-		if !progress.Complete() {
-			reopened, err := s.repo.ReopenEnrolment(ctx, tx, tenantID, courseID, actor.UserID)
-			if err != nil {
-				return err
-			}
-			if !reopened {
-				return nil
-			}
-
-			return s.audit.Record(ctx, tx, tenantID, AuditEntry{
-				ActorID: &actor.UserID, Action: ActionCourseReopened,
-				TargetType: "course", TargetID: courseID.String(),
-				IP: actor.IP, UserAgent: actor.UserAgent,
-			})
-		}
-
-		finished, err := s.repo.CompleteEnrolment(ctx, tx, tenantID, courseID, actor.UserID)
-		if err != nil {
-			return err
-		}
-		if !finished {
-			// Already completed. Re-completing the last lesson is not a new event.
-			return nil
-		}
-
-		return s.audit.Record(ctx, tx, tenantID, AuditEntry{
-			ActorID: &actor.UserID, Action: ActionCourseFinished,
-			TargetType: "course", TargetID: courseID.String(),
-			IP: actor.IP, UserAgent: actor.UserAgent,
-			Metadata: map[string]any{"lessons": progress.LessonsTotal},
-		})
+		var err error
+		progress, err = s.completeLessonIn(ctx, tx, tenantID, lessonID, actor, complete)
+		return err
 	})
 	if err != nil {
 		return Progress{}, err
 	}
 	return progress, nil
+}
+
+// TryCompleteLesson marks a lesson complete inside a transaction the caller owns,
+// and reports whether it did.
+//
+// It exists for one caller: the assessment package, which completes a lesson when
+// its quiz is passed and must do so in the same transaction that recorded the
+// grade. A grade that committed without the progress it implies, or progress
+// without its grade, is a learner whose course page and gradebook disagree. Its
+// signature is assess.Completions, which that package declares and this method
+// happens to satisfy — no adapter, and no import in either direction.
+//
+// The three refusals below are answers, not failures. A learner may cancel their
+// enrolment between submitting an attempt and the worker reaching the job, and a
+// lesson may lock behind a sequential drip if they reopen an earlier one. Nothing
+// about that will change on a retry, so a grading job that failed here would
+// retry, dead-letter, and leave the attempt in `grading` for ever — because the
+// whole transaction, grade included, rolls back with it. The honest outcome is a
+// graded attempt and no progress.
+//
+// All three are decided in Go before any statement runs, so the caller's
+// transaction is still healthy when this returns false. Any other error is a real
+// one, and aborts the transaction as it should.
+//
+// The transaction must already be bound to tenantID.
+func (s *Service) TryCompleteLesson(ctx context.Context, tx pgx.Tx, tenantID, lessonID, userID uuid.UUID) (bool, error) {
+	var locked *LessonLocked
+
+	_, err := s.completeLessonIn(ctx, tx, tenantID, lessonID, Actor{UserID: userID}, true)
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, ErrNotEnrolled), errors.Is(err, ErrNotFound), errors.As(err, &locked):
+		return false, nil
+	default:
+		return false, err
+	}
+}
+
+// completeLessonIn is CompleteLesson inside a transaction the caller owns. The
+// transaction must already be bound to tenantID.
+func (s *Service) completeLessonIn(ctx context.Context, tx pgx.Tx, tenantID, lessonID uuid.UUID, actor Actor, complete bool) (Progress, error) {
+	view, err := s.repo.LessonForReader(ctx, tx, tenantID, lessonID, actor.UserID)
+	if err != nil {
+		return Progress{}, err
+	}
+
+	// Completing a lesson requires an enrolment, always. A preview is readable
+	// without one, but reading a sample is not studying a course, and progress
+	// on a course nobody enrolled in is a row nothing can ever use.
+	reader := Reader{UserID: actor.UserID}
+	now := s.now()
+	switch decide(view, reader, now) {
+	case AccessEnrolled:
+		// The only case that may mark progress.
+	case AccessLocked:
+		// An unreleased lesson cannot be completed, and saying "you are not
+		// enrolled" to somebody who is would send them to buy what they own.
+		_, at := unlockAt(view, now)
+		return Progress{}, &LessonLocked{AvailableAt: at}
+	default:
+		return Progress{}, ErrNotEnrolled
+	}
+
+	courseID := view.Lesson.CourseID
+	if err := s.repo.MarkLesson(ctx, tx, tenantID, actor.UserID, lessonID, courseID, complete); err != nil {
+		return Progress{}, err
+	}
+
+	progress, err := s.repo.RecomputeProgress(ctx, tx, tenantID, actor.UserID, courseID)
+	if err != nil {
+		return Progress{}, err
+	}
+
+	// The enrolment's status is a roll-up of the same rows, so it is recomputed
+	// here too — in both directions. Reopening a lesson un-finishes the course,
+	// and an enrolment left saying "completed" while its progress says 80% is a
+	// row that answers differently depending on which field you read. It is also
+	// what a prerequisite reads.
+	if !progress.Complete() {
+		reopened, err := s.repo.ReopenEnrolment(ctx, tx, tenantID, courseID, actor.UserID)
+		if err != nil {
+			return Progress{}, err
+		}
+		if !reopened {
+			return progress, nil
+		}
+
+		return progress, s.audit.Record(ctx, tx, tenantID, AuditEntry{
+			ActorID: &actor.UserID, Action: ActionCourseReopened,
+			TargetType: "course", TargetID: courseID.String(),
+			IP: actor.IP, UserAgent: actor.UserAgent,
+		})
+	}
+
+	finished, err := s.repo.CompleteEnrolment(ctx, tx, tenantID, courseID, actor.UserID)
+	if err != nil {
+		return Progress{}, err
+	}
+	if !finished {
+		// Already completed. Re-completing the last lesson is not a new event.
+		return progress, nil
+	}
+
+	return progress, s.audit.Record(ctx, tx, tenantID, AuditEntry{
+		ActorID: &actor.UserID, Action: ActionCourseFinished,
+		TargetType: "course", TargetID: courseID.String(),
+		IP: actor.IP, UserAgent: actor.UserAgent,
+		Metadata: map[string]any{"lessons": progress.LessonsTotal},
+	})
 }
 
 // Progress returns a learner's standing in one course.

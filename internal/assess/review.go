@@ -165,6 +165,16 @@ func (s *Service) MarkAnswer(ctx context.Context, tenantID, attemptID, questionI
 			return err
 		}
 
+		// Marking the last essay can be what makes the attempt a pass, and a passed
+		// quiz completes its lesson. Same transaction, same reason as in the job.
+		quiz, err := s.repo.QuizByID(ctx, tx, tenantID, attempt.QuizID)
+		if err != nil {
+			return err
+		}
+		if err := s.settle(ctx, tx, tenantID, quiz, attempt); err != nil {
+			return err
+		}
+
 		return s.audit.Record(ctx, tx, tenantID, AuditEntry{
 			ActorID: &marker.UserID, Action: ActionAnswerMarked,
 			TargetType: "attempt", TargetID: attemptID.String(),
