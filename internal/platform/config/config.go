@@ -113,6 +113,23 @@ type Config struct {
 	// unaffected: their URLs are written from a video id, not pasted.
 	EmbedHosts []string
 
+	/*
+		The object store. Cloudflare R2 in production, MinIO in a container for
+		development — they speak the same protocol, so there is one implementation.
+
+		Empty means this deployment stores no files, and the assignment endpoints
+		refuse rather than pretend. That is a better failure than a signed URL
+		pointing at nowhere.
+	*/
+	S3Endpoint  string
+	S3Bucket    string
+	S3AccessKey string
+	S3SecretKey string
+	S3Region    string
+
+	// S3PathStyle addresses a bucket as `endpoint/bucket/key`. MinIO needs it.
+	S3PathStyle bool
+
 	// WorkerMaxWorkers bounds how many jobs the worker process runs at once.
 	WorkerMaxWorkers int
 
@@ -168,6 +185,13 @@ func Load() (Config, error) {
 		StreamCustomer: env("LMS_CLOUDFLARE_STREAM_CUSTOMER", ""),
 		EmbedHosts:     list(env("LMS_EMBED_ALLOWED_HOSTS", "")),
 
+		S3Endpoint:  env("LMS_S3_ENDPOINT", ""),
+		S3Bucket:    env("LMS_S3_BUCKET", ""),
+		S3AccessKey: env("LMS_S3_ACCESS_KEY", ""),
+		S3SecretKey: env("LMS_S3_SECRET_KEY", ""),
+		S3Region:    env("LMS_S3_REGION", "auto"),
+		S3PathStyle: env("LMS_S3_PATH_STYLE", "") == "true",
+
 		WorkerMaxWorkers: number("LMS_WORKER_MAX_WORKERS", 10),
 	}
 
@@ -213,6 +237,23 @@ func (c Config) validate() error {
 	// would honour a wildcard here — the check is an exact map lookup — so an
 	// operator who wrote one would believe they had opened the door and be wrong in
 	// the safe direction, which is still a lie worth refusing.
+	/*
+		A half-configured object store is worse than none: the endpoint would be set,
+		the credentials would not, and every upload would fail at the signature with
+		an error nobody could read.
+	*/
+	configured := 0
+	for _, value := range []string{c.S3Endpoint, c.S3Bucket, c.S3AccessKey, c.S3SecretKey} {
+		if value != "" {
+			configured++
+		}
+	}
+	if configured != 0 && configured != 4 {
+		errs = append(errs, errors.New(
+			"config: LMS_S3_ENDPOINT, LMS_S3_BUCKET, LMS_S3_ACCESS_KEY and LMS_S3_SECRET_KEY "+
+				"must be set together, or not at all"))
+	}
+
 	if slices.Contains(c.EmbedHosts, "*") {
 		errs = append(errs, errors.New(`config: LMS_EMBED_ALLOWED_HOSTS cannot contain "*"; list exact hosts, e.g. fast.wistia.net`))
 	}
@@ -250,6 +291,11 @@ func (c Config) validate() error {
 	}
 
 	return errors.Join(errs...)
+}
+
+// StorageConfigured reports whether this deployment can accept an upload.
+func (c Config) StorageConfigured() bool {
+	return c.S3Endpoint != "" && c.S3Bucket != "" && c.S3AccessKey != "" && c.S3SecretKey != ""
 }
 
 // MailerConfigured reports whether mail can actually be delivered.

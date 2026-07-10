@@ -30,6 +30,19 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
+      # A real S3 API. The upload tests are skipped without one, and a skipped
+      # test that guards a request signature is a test nobody is running.
+      #
+      # Port 9002 because that is where docker-compose puts it, so the Makefile
+      # needs no second address for CI.
+      minio:
+        image: bitnami/minio:latest
+        env:
+          MINIO_ROOT_USER: lms
+          MINIO_ROOT_PASSWORD: lms-secret-key
+          MINIO_DEFAULT_BUCKETS: lms-uploads
+        ports: ['9002:9000']
+
     steps:
       - uses: actions/checkout@v4
 
@@ -62,6 +75,18 @@ jobs:
           fi
 
       - run: make migrate
+
+      # The service container reports healthy before MinIO has finished creating
+      # the bucket, and a test that uploads into a bucket that is not there yet
+      # fails for a reason that has nothing to do with the change under review.
+      - name: Wait for MinIO
+        run: |
+          for _ in $(seq 1 30); do
+            if curl -fsS http://localhost:9002/minio/health/live; then exit 0; fi
+            sleep 1
+          done
+          echo "::error::MinIO never came up"
+          exit 1
 
       # vet, gofmt, and the race suite against a real Postgres. Mocking the
       # database would test the mock: neither RLS nor a query plan has an opinion

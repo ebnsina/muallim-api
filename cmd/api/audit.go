@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/ebnsina/lms-api/internal/assess"
+	"github.com/ebnsina/lms-api/internal/assign"
 	"github.com/ebnsina/lms-api/internal/audit"
 	"github.com/ebnsina/lms-api/internal/auth"
 	"github.com/ebnsina/lms-api/internal/catalog"
@@ -73,6 +74,17 @@ func (a enrolAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID,
 type assessAuditor struct{ recorder *audit.Recorder }
 
 func (a assessAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, e assess.AuditEntry) error {
+	return a.recorder.Record(ctx, tx, tenantID, audit.Entry{
+		ActorID: e.ActorID, Action: e.Action,
+		TargetType: e.TargetType, TargetID: e.TargetID,
+		IP: e.IP, UserAgent: e.UserAgent, Metadata: e.Metadata,
+	})
+}
+
+// assignAuditor adapts the recorder to the assign package's interface.
+type assignAuditor struct{ recorder *audit.Recorder }
+
+func (a assignAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, e assign.AuditEntry) error {
 	return a.recorder.Record(ctx, tx, tenantID, audit.Entry{
 		ActorID: e.ActorID, Action: e.Action,
 		TargetType: e.TargetType, TargetID: e.TargetID,

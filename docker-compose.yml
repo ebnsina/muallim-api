@@ -16,5 +16,42 @@ services:
       timeout: 5s
       retries: 5
 
+  # MinIO speaks the S3 API, which is what R2 speaks. One implementation, one
+  # code path — a development store that behaves differently from the production
+  # one is a development store that hides the bug you are about to ship.
+  minio:
+    image: minio/minio:latest
+    container_name: lms-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: lms
+      MINIO_ROOT_PASSWORD: lms-secret-key
+    # 9002/9003 rather than the usual 9000/9001: MinIO's default ports are the
+    # ones every other project on a laptop has already taken.
+    ports:
+      - "9002:9000"
+      - "9003:9001"
+    volumes:
+      - lms-minio:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Creates the bucket and exits. Idempotent, so `docker compose up` twice is fine.
+  minio-bucket:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 lms lms-secret-key &&
+      mc mb --ignore-existing local/lms-uploads &&
+      echo 'bucket lms-uploads is ready'
+      "
+
 volumes:
   lms-pgdata:
+  lms-minio:

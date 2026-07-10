@@ -21,6 +21,7 @@ import (
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
 	"github.com/ebnsina/lms-api/internal/assess"
+	"github.com/ebnsina/lms-api/internal/assign"
 	"github.com/ebnsina/lms-api/internal/audit"
 	"github.com/ebnsina/lms-api/internal/auth"
 	"github.com/ebnsina/lms-api/internal/catalog"
@@ -168,6 +169,18 @@ func run() error {
 	// assess and satisfied by enroll, which have never heard of each other.
 	quizzes := assess.NewService(db, assess.NewPostgresRepository(), assessAuditor{recorder}, grading, learning)
 
+	store, err := newObjectStore(cfg, log)
+	if err != nil {
+		return err
+	}
+
+	deletions, err := assign.NewRiverEnqueuer(jobs)
+	if err != nil {
+		return err
+	}
+	assignments := assign.NewService(db, assign.NewPostgresRepository(), store,
+		assignAuditor{recorder}, deletions, learning)
+
 	handler, _ := httpapi.New(httpapi.Options{
 		Version:     cfg.Version,
 		Logger:      log,
@@ -177,6 +190,7 @@ func run() error {
 		Auth:        identities,
 		Enrol:       learning,
 		Assess:      quizzes,
+		Assign:      assignments,
 		DB:          db,
 		AuthLimiter: ratelimit.New(ratelimit.Options{
 			Burst: cfg.AuthRateBurst,

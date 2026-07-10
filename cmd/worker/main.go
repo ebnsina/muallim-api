@@ -20,6 +20,7 @@ import (
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
 	"github.com/ebnsina/lms-api/internal/assess"
+	"github.com/ebnsina/lms-api/internal/assign"
 	"github.com/ebnsina/lms-api/internal/audit"
 	"github.com/ebnsina/lms-api/internal/auth"
 	"github.com/ebnsina/lms-api/internal/comms"
@@ -123,11 +124,25 @@ func run() error {
 		return err
 	}
 
+	// The object store, for deleting files whose rows have gone. A deployment with
+	// no bucket has no such files, and the worker refuses the job rather than
+	// pretending it did something.
+	store, err := newObjectStore(cfg, log)
+	if err != nil {
+		return err
+	}
+
+	deletions, err := assign.NewDeleteObjectsWorker(store)
+	if err != nil {
+		return err
+	}
+
 	workers := river.NewWorkers()
 	river.AddWorker(workers, emails)
 	river.AddWorker(workers, orphans)
 	river.AddWorker(workers, revocations)
 	river.AddWorker(workers, grading)
+	river.AddWorker(workers, deletions)
 
 	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Logger:  log,

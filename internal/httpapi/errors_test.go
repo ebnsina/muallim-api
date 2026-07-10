@@ -11,9 +11,11 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/ebnsina/lms-api/internal/assess"
+	"github.com/ebnsina/lms-api/internal/assign"
 	"github.com/ebnsina/lms-api/internal/auth"
 	"github.com/ebnsina/lms-api/internal/catalog"
 	"github.com/ebnsina/lms-api/internal/enroll"
+	"github.com/ebnsina/lms-api/internal/platform/blob"
 )
 
 // statusOf extracts the HTTP status a mapped error will render as, or 500 when
@@ -288,6 +290,54 @@ func TestAnUnmappedAssessmentErrorIsFiveHundred(t *testing.T) {
 	t.Parallel()
 
 	if got := statusOf(assessError(errors.New("assess: something new"))); got != http.StatusInternalServerError {
+		t.Errorf("an unmapped error mapped to %d, want 500", got)
+	}
+}
+
+// The assignment sentinels go through their own mapper.
+//
+// `ErrNotYours` and `ErrNotFound` are deliberately the same status. A key that
+// belongs to somebody else and a key that does not exist look identical to
+// whoever asked, because the difference between them is what a probe is after.
+func TestAssignmentSentinelsMapToADeliberateStatus(t *testing.T) {
+	t.Parallel()
+
+	tests := map[error]int{
+		assign.ErrNotFound: http.StatusNotFound,
+		assign.ErrNotYours: http.StatusNotFound,
+
+		assign.ErrAssignmentExists: http.StatusConflict,
+		assign.ErrAlreadySubmitted: http.StatusConflict,
+		assign.ErrNothingToSubmit:  http.StatusConflict,
+		assign.ErrNotSubmitted:     http.StatusConflict,
+		assign.ErrTooManyFiles:     http.StatusConflict,
+		assign.ErrPastDue:          http.StatusConflict,
+		assign.ErrUploadMissing:    http.StatusConflict,
+
+		assign.ErrInvalidAssignment: http.StatusUnprocessableEntity,
+		assign.ErrInvalidFile:       http.StatusUnprocessableEntity,
+		assign.ErrInvalidGrade:      http.StatusUnprocessableEntity,
+
+		// Not a 500. Nothing is broken; this deployment has no bucket.
+		blob.ErrNotConfigured: http.StatusServiceUnavailable,
+	}
+
+	for err, want := range tests {
+		if got := statusOf(assignError(err)); got != want {
+			t.Errorf("%v mapped to %d, want %d", err, got, want)
+		}
+
+		wrapped := fmt.Errorf("assign: doing a thing: %w", err)
+		if got := statusOf(assignError(wrapped)); got != want {
+			t.Errorf("wrapped %v mapped to %d, want %d", err, got, want)
+		}
+	}
+}
+
+func TestAnUnmappedAssignmentErrorIsFiveHundred(t *testing.T) {
+	t.Parallel()
+
+	if got := statusOf(assignError(errors.New("assign: something new"))); got != http.StatusInternalServerError {
 		t.Errorf("an unmapped error mapped to %d, want 500", got)
 	}
 }

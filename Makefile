@@ -3,6 +3,7 @@
 
 DB_URL      ?= postgres://lms:lms@localhost:5432/lms?sslmode=disable
 TEST_DB_URL ?= postgres://lms:lms@localhost:5432/lms_test?sslmode=disable
+TEST_S3_URL ?= http://localhost:9002
 
 help: ## List available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -19,8 +20,10 @@ build: ## Compile all binaries into bin/
 test: ## Run tests (database tests skip without a test database)
 	go test ./... -race
 
-test-db: ## Run every test, including the ones that need Postgres
-	LMS_TEST_DATABASE_URL="$(TEST_DB_URL)" go test ./... -race
+test-db: ## Run every test, including the ones that need Postgres and MinIO
+	LMS_TEST_DATABASE_URL="$(TEST_DB_URL)" \
+	LMS_TEST_S3_ENDPOINT="$(TEST_S3_URL)" \
+	go test ./... -race
 
 fmt: ## Format all Go source
 	gofmt -w .
@@ -69,6 +72,10 @@ db-create: ## Create the lms role and both databases on a local Postgres
 
 db-up: ## Start Postgres in Docker
 	docker compose up -d postgres
+
+storage-up: ## Start MinIO, and create the bucket
+	docker compose up -d minio minio-bucket
+	@echo "MinIO on :9002, console on :9003 — lms / lms-secret-key"
 
 db-down: ## Stop Postgres
 	docker compose down
