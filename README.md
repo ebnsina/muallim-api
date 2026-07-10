@@ -95,7 +95,9 @@ make check          # vet, format check, and race-enabled tests — what CI runs
 make test
 make lint
 make fmt
-make seed           # the "localhost" workspace, in both databases
+make seed           # a demo workspace with a demo account and enough data to click around
+make seed-huge      # the same at ~1.1M rows, to judge a page at the size it will be
+make seed-test      # only the bare workspace the end-to-end tests need
 make worker         # background jobs
 make build          # binaries into bin/
 ```
