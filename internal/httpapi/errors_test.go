@@ -14,6 +14,7 @@ import (
 	"github.com/ebnsina/lms-api/internal/assign"
 	"github.com/ebnsina/lms-api/internal/auth"
 	"github.com/ebnsina/lms-api/internal/catalog"
+	"github.com/ebnsina/lms-api/internal/certify"
 	"github.com/ebnsina/lms-api/internal/enroll"
 	"github.com/ebnsina/lms-api/internal/grade"
 	"github.com/ebnsina/lms-api/internal/platform/blob"
@@ -373,6 +374,37 @@ func TestAnUnmappedGradeErrorIsFiveHundred(t *testing.T) {
 	t.Parallel()
 
 	if got := statusOf(gradeError(errors.New("grade: something new"))); got != http.StatusInternalServerError {
+		t.Errorf("an unmapped error mapped to %d, want 500", got)
+	}
+}
+
+// The certify sentinels go through their own mapper.
+func TestCertifySentinelsMapToADeliberateStatus(t *testing.T) {
+	t.Parallel()
+
+	tests := map[error]int{
+		certify.ErrNotFound:        http.StatusNotFound,
+		certify.ErrTemplateExists:  http.StatusConflict,
+		certify.ErrRevoked:         http.StatusConflict,
+		certify.ErrInvalidTemplate: http.StatusUnprocessableEntity,
+	}
+
+	for err, want := range tests {
+		if got := statusOf(certifyError(err)); got != want {
+			t.Errorf("%v mapped to %d, want %d", err, got, want)
+		}
+
+		wrapped := fmt.Errorf("certify: doing a thing: %w", err)
+		if got := statusOf(certifyError(wrapped)); got != want {
+			t.Errorf("wrapped %v mapped to %d, want %d", err, got, want)
+		}
+	}
+}
+
+func TestAnUnmappedCertifyErrorIsFiveHundred(t *testing.T) {
+	t.Parallel()
+
+	if got := statusOf(certifyError(errors.New("certify: something new"))); got != http.StatusInternalServerError {
 		t.Errorf("an unmapped error mapped to %d, want 500", got)
 	}
 }

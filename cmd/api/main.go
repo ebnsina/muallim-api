@@ -25,6 +25,7 @@ import (
 	"github.com/ebnsina/lms-api/internal/audit"
 	"github.com/ebnsina/lms-api/internal/auth"
 	"github.com/ebnsina/lms-api/internal/catalog"
+	"github.com/ebnsina/lms-api/internal/certify"
 	"github.com/ebnsina/lms-api/internal/comms"
 	"github.com/ebnsina/lms-api/internal/enroll"
 	"github.com/ebnsina/lms-api/internal/grade"
@@ -159,7 +160,12 @@ func run() error {
 
 	catalogRepo := catalog.NewPostgresRepository()
 	courses := catalog.NewService(db, catalogRepo, catalogRepo, catalogRepo, catalogAuditor{recorder}, videos)
-	learning := enroll.NewService(db, enroll.NewPostgresRepository(), enrolAuditor{recorder})
+	// Certificates are issued in the transaction that finishes a course. `enroll`
+	// declares the interface; certify satisfies it; neither has heard of the other.
+	credentials := certify.NewService(db, certify.NewPostgresRepository(), certifyAuditor{recorder})
+
+	learning := enroll.NewService(db, enroll.NewPostgresRepository(), enrolAuditor{recorder},
+		certificates{credentials})
 
 	grading, err := assess.NewRiverEnqueuer(jobs)
 	if err != nil {
@@ -194,6 +200,7 @@ func run() error {
 		Tenants:     tenants,
 		Catalog:     courses,
 		Grades:      grades,
+		Certify:     credentials,
 		Auth:        identities,
 		Enrol:       learning,
 		Assess:      quizzes,

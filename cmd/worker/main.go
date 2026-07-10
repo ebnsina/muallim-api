@@ -23,6 +23,7 @@ import (
 	"github.com/ebnsina/lms-api/internal/assign"
 	"github.com/ebnsina/lms-api/internal/audit"
 	"github.com/ebnsina/lms-api/internal/auth"
+	"github.com/ebnsina/lms-api/internal/certify"
 	"github.com/ebnsina/lms-api/internal/comms"
 	"github.com/ebnsina/lms-api/internal/enroll"
 	"github.com/ebnsina/lms-api/internal/grade"
@@ -116,7 +117,10 @@ func run() error {
 	// could only ever queue work by mistake.
 	// The grading job completes the lesson of a quiz it has just passed, so this
 	// process needs the enrolment service too — in the same transaction.
-	learning := enroll.NewService(db, enroll.NewPostgresRepository(), enrolAuditor{audit.NewRecorder()})
+	credentials := certify.NewService(db, certify.NewPostgresRepository(), certifyAuditor{audit.NewRecorder()})
+
+	learning := enroll.NewService(db, enroll.NewPostgresRepository(), enrolAuditor{audit.NewRecorder()},
+		certificates{credentials})
 
 	// The worker grades attempts, so it writes to the gradebook too — in the same
 	// transaction, through the same adapter the API uses.

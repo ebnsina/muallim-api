@@ -2,6 +2,8 @@ package enroll_test
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -133,5 +135,115 @@ func TestAPrerequisiteFinishedTwiceStillCounts(t *testing.T) {
 
 	if _, err := svc.Enrol(t.Context(), tenantID, advanced, actorFor(learner), enroll.SourceSelf); err != nil {
 		t.Errorf("a prerequisite finished twice did not open the gate: %v", err)
+	}
+}
+
+// certificateFor reads the certificate a course issued to a learner, if any.
+func certificateFor(t *testing.T, db *database.DB, tenantID uuid.UUID, slug string, userID uuid.UUID) (serial string, found bool) {
+	t.Helper()
+
+	err := db.WithTenantReadOnly(t.Context(), tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `
+			SELECT ce.serial
+			FROM certificates ce JOIN courses c ON c.id = ce.course_id AND c.tenant_id = ce.tenant_id
+			WHERE ce.tenant_id = $1 AND c.slug = $2 AND ce.user_id = $3`,
+			tenantID, slug, userID).Scan(&serial)
+
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		found = err == nil
+		return err
+	})
+	if err != nil {
+		t.Fatalf("read certificate: %v", err)
+	}
+	return serial, found
+}
+
+/*
+Finishing a course issues a certificate, in the transaction that finished it.
+
+The seam is an interface `enroll` declares and `cmd` satisfies over the certify
+service. Neither package imports the other, so nothing in either would notice if
+the wiring were dropped — except this.
+*/
+func TestFinishingACourseIssuesACertificate(t *testing.T) {
+	t.Parallel()
+
+	db := testDB(t)
+	svc := newService(db)
+	tenantID := seedTenant(t, db)
+	learner := seedUser(t, db, tenantID)
+
+	slug, lessons := seedCourse(t, db, tenantID, 2, true)
+
+	if _, err := svc.Enrol(t.Context(), tenantID, slug, actorFor(learner), enroll.SourceSelf); err != nil {
+		t.Fatalf("enrol: %v", err)
+	}
+
+	// Half-way through, there is nothing to show for it.
+	if _, err := svc.CompleteLesson(t.Context(), tenantID, lessons[0], actorFor(learner), true); err != nil {
+		t.Fatalf("complete first lesson: %v", err)
+	}
+	if serial, found := certificateFor(t, db, tenantID, slug, learner); found {
+		t.Fatalf("a certificate (%s) was issued for half a course", serial)
+	}
+
+	finish(t, svc, tenantID, slug, lessons, learner)
+
+	serial, found := certificateFor(t, db, tenantID, slug, learner)
+	if !found {
+		t.Fatal("the course was finished and no certificate was issued")
+	}
+	if !strings.HasPrefix(serial, "CERT-") {
+		t.Errorf("the serial is %q", serial)
+	}
+}
+
+/*
+Finishing a course twice is finishing it once.
+
+A learner reopens the last lesson and completes it again. The certificate they had
+is the certificate they keep — a second one would give them two numbers for one
+achievement, and only one of them would be the number they had written down.
+*/
+func TestReopeningAndRefinishingDoesNotReissue(t *testing.T) {
+	t.Parallel()
+
+	db := testDB(t)
+	svc := newService(db)
+	tenantID := seedTenant(t, db)
+	learner := seedUser(t, db, tenantID)
+
+	slug, lessons := seedCourse(t, db, tenantID, 2, true)
+	finish(t, svc, tenantID, slug, lessons, learner)
+
+	first, found := certificateFor(t, db, tenantID, slug, learner)
+	if !found {
+		t.Fatal("no certificate after finishing")
+	}
+
+	// Reopen the last lesson, and finish it again.
+	if _, err := svc.CompleteLesson(t.Context(), tenantID, lessons[1], actorFor(learner), false); err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+
+	// Reopening does not tear up the certificate. It records that the course was
+	// completed on a day, and that day happened.
+	if again, found := certificateFor(t, db, tenantID, slug, learner); !found || again != first {
+		t.Errorf("reopening a lesson changed the certificate: %q -> %q (found=%v)", first, again, found)
+	}
+
+	if _, err := svc.CompleteLesson(t.Context(), tenantID, lessons[1], actorFor(learner), true); err != nil {
+		t.Fatalf("refinish: %v", err)
+	}
+
+	second, found := certificateFor(t, db, tenantID, slug, learner)
+	if !found {
+		t.Fatal("the certificate vanished on re-finishing")
+	}
+	if second != first {
+		t.Errorf("re-finishing issued a new certificate: %q, was %q", second, first)
 	}
 }

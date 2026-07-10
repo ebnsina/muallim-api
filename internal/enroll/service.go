@@ -40,17 +40,33 @@ type AuditRecorder interface {
 }
 
 // Service holds the enrolment rules and owns transaction boundaries.
+/*
+Certificates issues a certificate to a learner who has finished a course.
+
+Declared here, by the package that needs it, and implemented in cmd/ over the
+certify service — a domain package may not import a sibling. It takes the caller's
+transaction, so the completed enrolment and the certificate commit together. A
+certificate written afterwards by a job is a learner who finished a course and
+cannot prove it until the queue catches up.
+
+Idempotent at the far end. Re-completing the last lesson issues nothing new.
+*/
+type Certificates interface {
+	IssueIfEarned(ctx context.Context, tx pgx.Tx, tenantID, courseID, userID uuid.UUID) error
+}
+
 type Service struct {
-	db    *database.DB
-	repo  Repository
-	audit AuditRecorder
+	db           *database.DB
+	repo         Repository
+	audit        AuditRecorder
+	certificates Certificates
 
 	now func() time.Time
 }
 
 // NewService returns a Service.
-func NewService(db *database.DB, repo Repository, recorder AuditRecorder) *Service {
-	return &Service{db: db, repo: repo, audit: recorder, now: time.Now}
+func NewService(db *database.DB, repo Repository, recorder AuditRecorder, certificates Certificates) *Service {
+	return &Service{db: db, repo: repo, audit: recorder, certificates: certificates, now: time.Now}
 }
 
 // hasLiveEnrolment reports whether the learner is already in the course.
@@ -394,6 +410,12 @@ func (s *Service) completeLessonIn(ctx context.Context, tx pgx.Tx, tenantID, les
 	if !finished {
 		// Already completed. Re-completing the last lesson is not a new event.
 		return progress, nil
+	}
+
+	// The certificate, in the transaction that finished the course. A learner who
+	// has completed a course and cannot yet prove it is a support ticket.
+	if err := s.certificates.IssueIfEarned(ctx, tx, tenantID, courseID, actor.UserID); err != nil {
+		return Progress{}, err
 	}
 
 	return progress, s.audit.Record(ctx, tx, tenantID, AuditEntry{

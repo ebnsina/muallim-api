@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/ebnsina/lms-api/internal/audit"
+	"github.com/ebnsina/lms-api/internal/certify"
 	"github.com/ebnsina/lms-api/internal/enroll"
 	"github.com/ebnsina/lms-api/internal/platform/database"
 )
@@ -45,7 +46,7 @@ func (a enrolAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID,
 }
 
 func newService(db *database.DB) *enroll.Service {
-	return enroll.NewService(db, enroll.NewPostgresRepository(), enrolAuditor{audit.NewRecorder()})
+	return enroll.NewService(db, enroll.NewPostgresRepository(), enrolAuditor{audit.NewRecorder()}, newIssuer(db))
 }
 
 func seedTenant(t *testing.T, db *database.DB) uuid.UUID {
@@ -554,4 +555,31 @@ func TestGrantEnrolsSomebodyElse(t *testing.T) {
 	if _, _, err := svc.Lesson(t.Context(), tenantID, lessons[1], enroll.Reader{UserID: learner}); !errors.Is(err, enroll.ErrNotFound) {
 		t.Errorf("a granted learner read an unpublished lesson: %v", err)
 	}
+}
+
+/*
+The real certificate service, exactly as cmd/ wires it.
+
+A stub would return nil and prove nothing: whether finishing a course issues a
+certificate is the question, and `enroll` cannot answer it — it has never heard of
+`certify`.
+*/
+type issuer struct{ svc *certify.Service }
+
+func (i issuer) IssueIfEarned(ctx context.Context, tx pgx.Tx, tenantID, courseID, userID uuid.UUID) error {
+	return i.svc.IssueIfEarned(ctx, tx, tenantID, courseID, userID)
+}
+
+type certifyAuditor struct{ recorder *audit.Recorder }
+
+func (a certifyAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, e certify.AuditEntry) error {
+	return a.recorder.Record(ctx, tx, tenantID, audit.Entry{
+		ActorID: e.ActorID, Action: e.Action,
+		TargetType: e.TargetType, TargetID: e.TargetID,
+		Metadata: e.Metadata,
+	})
+}
+
+func newIssuer(db *database.DB) issuer {
+	return issuer{certify.NewService(db, certify.NewPostgresRepository(), certifyAuditor{audit.NewRecorder()})}
 }

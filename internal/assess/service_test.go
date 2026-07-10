@@ -14,6 +14,7 @@ import (
 
 	"github.com/ebnsina/lms-api/internal/assess"
 	"github.com/ebnsina/lms-api/internal/audit"
+	"github.com/ebnsina/lms-api/internal/certify"
 	"github.com/ebnsina/lms-api/internal/enroll"
 	"github.com/ebnsina/lms-api/internal/grade"
 	"github.com/ebnsina/lms-api/internal/platform/database"
@@ -76,7 +77,7 @@ func (e *recordingEnqueuer) queued() []uuid.UUID {
 // thing under test — that a passed quiz completes its lesson, in the transaction
 // that recorded the grade — entirely unexercised.
 func newCompletions(db *database.DB) *enroll.Service {
-	return enroll.NewService(db, enroll.NewPostgresRepository(), enrolAuditor{audit.NewRecorder()})
+	return enroll.NewService(db, enroll.NewPostgresRepository(), enrolAuditor{audit.NewRecorder()}, newIssuer(db))
 }
 
 type enrolAuditor struct{ recorder *audit.Recorder }
@@ -913,4 +914,31 @@ func TestAQuizzesGradebookItemFollowsItsQuestions(t *testing.T) {
 		t.Errorf("the quiz is still worth %d after losing a question worth points (was %d)",
 			after.Items[0].MaxPoints, worth)
 	}
+}
+
+/*
+The real certificate service, exactly as cmd/ wires it.
+
+A stub would return nil and prove nothing: whether finishing a course issues a
+certificate is the question, and `enroll` cannot answer it — it has never heard of
+`certify`.
+*/
+type issuer struct{ svc *certify.Service }
+
+func (i issuer) IssueIfEarned(ctx context.Context, tx pgx.Tx, tenantID, courseID, userID uuid.UUID) error {
+	return i.svc.IssueIfEarned(ctx, tx, tenantID, courseID, userID)
+}
+
+type certifyAuditor struct{ recorder *audit.Recorder }
+
+func (a certifyAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, e certify.AuditEntry) error {
+	return a.recorder.Record(ctx, tx, tenantID, audit.Entry{
+		ActorID: e.ActorID, Action: e.Action,
+		TargetType: e.TargetType, TargetID: e.TargetID,
+		Metadata: e.Metadata,
+	})
+}
+
+func newIssuer(db *database.DB) issuer {
+	return issuer{certify.NewService(db, certify.NewPostgresRepository(), certifyAuditor{audit.NewRecorder()})}
 }

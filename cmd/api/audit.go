@@ -11,6 +11,7 @@ import (
 	"github.com/ebnsina/lms-api/internal/audit"
 	"github.com/ebnsina/lms-api/internal/auth"
 	"github.com/ebnsina/lms-api/internal/catalog"
+	"github.com/ebnsina/lms-api/internal/certify"
 	"github.com/ebnsina/lms-api/internal/enroll"
 )
 
@@ -89,5 +90,16 @@ func (a assignAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID
 		ActorID: e.ActorID, Action: e.Action,
 		TargetType: e.TargetType, TargetID: e.TargetID,
 		IP: e.IP, UserAgent: e.UserAgent, Metadata: e.Metadata,
+	})
+}
+
+// certifyAuditor adapts the recorder to the certify package's interface.
+type certifyAuditor struct{ recorder *audit.Recorder }
+
+func (a certifyAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, e certify.AuditEntry) error {
+	return a.recorder.Record(ctx, tx, tenantID, audit.Entry{
+		ActorID: e.ActorID, Action: e.Action,
+		TargetType: e.TargetType, TargetID: e.TargetID,
+		Metadata: e.Metadata,
 	})
 }

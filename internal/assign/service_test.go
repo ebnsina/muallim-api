@@ -18,6 +18,7 @@ import (
 
 	"github.com/ebnsina/lms-api/internal/assign"
 	"github.com/ebnsina/lms-api/internal/audit"
+	"github.com/ebnsina/lms-api/internal/certify"
 	"github.com/ebnsina/lms-api/internal/enroll"
 	"github.com/ebnsina/lms-api/internal/grade"
 	"github.com/ebnsina/lms-api/internal/platform/blob"
@@ -155,7 +156,7 @@ func newFixture(t *testing.T) fixture {
 
 	// The real enrolment service, exactly as cmd/ wires it. A passed assignment
 	// completes its lesson, and a stub would leave that untested.
-	learning := enroll.NewService(db, enroll.NewPostgresRepository(), enrolAuditor{audit.NewRecorder()})
+	learning := enroll.NewService(db, enroll.NewPostgresRepository(), enrolAuditor{audit.NewRecorder()}, newIssuer(db))
 
 	grades := grade.NewService(db, grade.NewPostgresRepository())
 
@@ -948,4 +949,31 @@ func TestEditingAnAssignmentUpdatesItsGradebookItem(t *testing.T) {
 		t.Errorf("the item is %q worth %d, want %q worth %d",
 			grades.Items[0].Title, grades.Items[0].MaxPoints, title, points)
 	}
+}
+
+/*
+The real certificate service, exactly as cmd/ wires it.
+
+A stub would return nil and prove nothing: whether finishing a course issues a
+certificate is the question, and `enroll` cannot answer it — it has never heard of
+`certify`.
+*/
+type issuer struct{ svc *certify.Service }
+
+func (i issuer) IssueIfEarned(ctx context.Context, tx pgx.Tx, tenantID, courseID, userID uuid.UUID) error {
+	return i.svc.IssueIfEarned(ctx, tx, tenantID, courseID, userID)
+}
+
+type certifyAuditor struct{ recorder *audit.Recorder }
+
+func (a certifyAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, e certify.AuditEntry) error {
+	return a.recorder.Record(ctx, tx, tenantID, audit.Entry{
+		ActorID: e.ActorID, Action: e.Action,
+		TargetType: e.TargetType, TargetID: e.TargetID,
+		Metadata: e.Metadata,
+	})
+}
+
+func newIssuer(db *database.DB) issuer {
+	return issuer{certify.NewService(db, certify.NewPostgresRepository(), certifyAuditor{audit.NewRecorder()})}
 }
