@@ -146,27 +146,27 @@ func TestRenderDoesNotSubstituteItsOwnOutput(t *testing.T) {
 	}
 }
 
-// The default template says all four things, so a workspace that never writes one
-// still prints a certificate with a name, a course, a date and a code on it.
-func TestTheDefaultTemplateNamesEveryField(t *testing.T) {
+/*
+The default template is valid, and renders to a clean description.
+
+Its body names none of the four fields — they are shown in their own places by
+whoever renders the certificate — so what this checks is that it is a legal
+template and that nothing in it is left looking like an unfilled placeholder.
+*/
+func TestTheDefaultTemplateIsValidAndClean(t *testing.T) {
 	t.Parallel()
 
 	template := DefaultTemplate()
 	if err := template.validate(); err != nil {
 		t.Fatalf("the default template is invalid: %v", err)
 	}
-
-	rendered := Render(template.Body, Fields{
-		Learner: "L", Course: "C", Date: "D", Serial: "S",
-	})
-
-	for _, want := range []string{"L", "C", "D", "S"} {
-		if !strings.Contains(rendered, want) {
-			t.Errorf("the default template never prints %q: %q", want, rendered)
-		}
+	if template.Title == "" {
+		t.Error("the default template has no heading")
 	}
+
+	rendered := Render(template.Body, Fields{Learner: "L", Course: "C", Date: "D", Serial: "S"})
 	if strings.Contains(rendered, "{{") {
-		t.Errorf("the default template left a placeholder unsubstituted: %q", rendered)
+		t.Errorf("the default template left something that looks like a placeholder: %q", rendered)
 	}
 }
 

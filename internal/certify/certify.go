@@ -102,8 +102,14 @@ func DefaultTemplate() Template {
 		Name:    "Default",
 		Builtin: true,
 		Title:   "Certificate of Completion",
-		Body: "This is to certify that {{learner}} has successfully completed " +
-			"the course {{course}} on {{date}}.\n\nCertificate number {{serial}}.",
+
+		// The description, and only the description. The learner's name, the course,
+		// the date and the serial are shown by whoever renders the certificate, in
+		// their own places — a certificate reads them as separate facts, not as one
+		// run of prose. A template that wants them inline may still name them with the
+		// placeholders below; the default does not.
+		Body: "Awarded in recognition of dedication and the successful completion of " +
+			"every lesson and assessment this course requires.",
 	}
 }
 
