@@ -45,6 +45,11 @@ type Course struct {
 	// per-lesson schedule columns mean anything.
 	DripMode string
 
+	// LessonCount is the number of lessons across the course's topics. It is set
+	// only where a caller asks for it — the listing fills it, a single-course load
+	// does not — so a zero here can mean "no lessons" or "not counted".
+	LessonCount int
+
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }

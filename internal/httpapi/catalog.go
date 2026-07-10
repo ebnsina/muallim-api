@@ -42,6 +42,10 @@ type CourseSummary struct {
 
 	// DripMode decides how the course releases its lessons.
 	DripMode string `json:"drip_mode" enum:"none,scheduled,after_enrolment,sequential"`
+
+	// LessonCount is how many lessons the course holds, for a listing that wants to
+	// say so without loading each curriculum.
+	LessonCount int `json:"lesson_count"`
 }
 
 // LessonView is a lesson within a curriculum.
@@ -290,6 +294,7 @@ func courseSummary(c catalog.Course) CourseSummary {
 		Status:      c.Status,
 		PublishedAt: c.PublishedAt,
 		DripMode:    c.DripMode,
+		LessonCount: c.LessonCount,
 	}
 }
 

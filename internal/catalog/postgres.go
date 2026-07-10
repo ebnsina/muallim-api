@@ -87,7 +87,63 @@ func (r *PostgresRepository) ListCourses(ctx context.Context, tx pgx.Tx, tenantI
 	if err != nil {
 		return nil, fmt.Errorf("catalog: scan courses: %w", err)
 	}
+
+	// The lesson count is a second statement, not a subquery on the listing. A
+	// subquery would drag the lessons and topics tables into the listing's plan —
+	// the very plan a test pins to an index seek — and a per-course subquery is one
+	// count per row besides. This counts every course on the page at once, keyed by
+	// id, exactly as the children of any tree-load are batched here.
+	if len(courses) > 0 {
+		ids := make([]uuid.UUID, len(courses))
+		for i := range courses {
+			ids[i] = courses[i].ID
+		}
+		counts, err := r.lessonCounts(ctx, tx, tenantID, ids)
+		if err != nil {
+			return nil, err
+		}
+		for i := range courses {
+			courses[i].LessonCount = counts[courses[i].ID]
+		}
+	}
 	return courses, nil
+}
+
+// lessonCountsByCourseSQL counts the lessons under a set of courses in one pass.
+//
+// A course with no lessons simply does not appear in the result; the caller reads
+// a missing key as zero. The join walks topics_tenant_course_position_idx to the
+// course's topics and lessons_tenant_topic_position_idx to their lessons.
+const lessonCountsByCourseSQL = `
+	SELECT t.course_id, count(l.id)
+	FROM lessons l
+	JOIN topics t ON t.id = l.topic_id
+	WHERE t.tenant_id = $1 AND t.course_id = ANY($2)
+	GROUP BY t.course_id`
+
+// lessonCounts returns, for each course id given, how many lessons it holds.
+func (r *PostgresRepository) lessonCounts(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, courseIDs []uuid.UUID) (map[uuid.UUID]int, error) {
+	rows, err := tx.Query(ctx, lessonCountsByCourseSQL, tenantID, courseIDs)
+	if err != nil {
+		return nil, fmt.Errorf("catalog: count lessons: %w", err)
+	}
+	defer rows.Close()
+
+	counts := make(map[uuid.UUID]int, len(courseIDs))
+	for rows.Next() {
+		var (
+			id uuid.UUID
+			n  int
+		)
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, fmt.Errorf("catalog: scan lesson count: %w", err)
+		}
+		counts[id] = n
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("catalog: count lessons: %w", err)
+	}
+	return counts, nil
 }
 
 // courseBySlugSQL hides unpublished courses unless the caller may see drafts.
