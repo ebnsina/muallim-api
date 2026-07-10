@@ -22,7 +22,12 @@ make check          # vet, format check, race tests against a real Postgres
 make test           # tests; database tests skip without LMS_TEST_DATABASE_URL
 make test-db        # every test, including the ones that need Postgres
 make spec           # write bin/openapi.json — the contract for lms-web
+make seed           # a demo workspace with a demo account
+make seed-huge      # ~1.1M rows, three workspaces — judge a page at the size it will be
 ```
+
+The demo accounts all share one password, printed by `make seed`. `demo@` owns
+the workspace, `marker@` has essays waiting.
 
 ## Rules that are easy to violate
 
