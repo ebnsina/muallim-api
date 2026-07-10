@@ -29,6 +29,11 @@ make seed-huge      # ~1.1M rows, three workspaces — judge a page at the size 
 The demo accounts all share one password, printed by `make seed`. `demo@` owns
 the workspace, `marker@` has essays waiting.
 
+The seeder writes assignments but no submissions: it holds a database connection
+and cannot reach the object store, and a row pointing at a key with no object
+behind it is a download that 404s. Upload a real file as `student@` instead —
+`make storage-up` starts the MinIO it goes to.
+
 ## Rules that are easy to violate
 
 **Never assume a library API.** Query Context7 (`resolve-library-id` → `query-docs`) before writing against any dependency. Verify with `go doc`. Training data lags releases.

@@ -61,6 +61,9 @@ type config struct {
 	// quizRate is the share of courses whose last lesson carries a quiz.
 	quizRate float64
 
+	// assignmentRate is the share of courses whose last lesson is work to hand in.
+	assignmentRate float64
+
 	// enrolRate is the share of (student, course) pairs that become enrolments.
 	enrolRate float64
 
@@ -87,6 +90,7 @@ func run() error {
 	flag.IntVar(&cfg.topics, "topics", 4, "topics per course")
 	flag.IntVar(&cfg.lessons, "lessons", 5, "lessons per topic")
 	flag.Float64Var(&cfg.quizRate, "quiz-rate", 0.5, "share of courses with a quiz")
+	flag.Float64Var(&cfg.assignmentRate, "assignment-rate", 0.4, "share of courses with an assignment")
 	flag.Float64Var(&cfg.enrolRate, "enrol-rate", 0.25, "share of student/course pairs that enrol")
 	flag.Float64Var(&cfg.attemptRate, "attempt-rate", 0.6, "share of enrolled learners who sit the quiz")
 	flag.BoolVar(&cfg.reset, "reset", false, "delete the seeded workspaces first, and everything in them")
@@ -145,6 +149,7 @@ func run() error {
 // counts is what was written, for the summary.
 type counts struct {
 	tenants, users, courses, lessons, quizzes, questions int
+	assignments                                          int
 	enrolments, progress, attempts, answers              int
 }
 
@@ -155,6 +160,7 @@ func (c *counts) add(other counts) {
 	c.lessons += other.lessons
 	c.quizzes += other.quizzes
 	c.questions += other.questions
+	c.assignments += other.assignments
 	c.enrolments += other.enrolments
 	c.progress += other.progress
 	c.attempts += other.attempts
@@ -264,6 +270,9 @@ func seedWorkspace(ctx context.Context, db *database.DB, cfg config, index int, 
 			if course.quiz != nil {
 				got.quizzes++
 				got.questions += len(course.quiz.questions)
+			}
+			if course.assignment {
+				got.assignments++
 			}
 		}
 
@@ -446,20 +455,30 @@ type seededCourse struct {
 	slug    string
 	lessons []uuid.UUID
 	quiz    *seededQuiz
+
+	// assignment says the course ends with work to hand in. There is no id here
+	// because nothing else in the seeder addresses it: see seedCatalogue.
+	assignment bool
 }
 
 func seedCatalogue(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg config, rng *rand.Rand) ([]seededCourse, error) {
 	var (
-		courses  [][]any
-		topics   [][]any
-		lessons  [][]any
-		quizzes  [][]any
-		question [][]any
-		options  [][]any
+		courses     [][]any
+		topics      [][]any
+		lessons     [][]any
+		quizzes     [][]any
+		question    [][]any
+		options     [][]any
+		assignments [][]any
 	)
 
 	seeded := make([]seededCourse, 0, cfg.courses)
 	now := time.Now()
+
+	// How many assignments have been dealt so far. It picks the deadline, so the
+	// three states a learner can be in — open, overdue, no deadline at all — are
+	// all on the dashboard rather than all up to the dice.
+	assigned := 0
 
 	for index := range cfg.courses {
 		// The title list is shorter than the catalogue, so a course past the end of it
@@ -509,16 +528,21 @@ func seedCatalogue(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg confi
 			}
 		}
 
+		// Whatever the last topic ends with sits after the lessons already in it.
+		// Positions are dense, so they are counted rather than assumed.
+		lastTopic := topics[len(topics)-1][0].(uuid.UUID)
+		tail := cfg.lessons
+
 		// Half the courses end with a quiz, on a lesson of their own.
 		if rng.Float64() < cfg.quizRate {
 			quizLesson := uuid.New()
-			lastTopic := topics[len(topics)-1][0].(uuid.UUID)
 
 			lessons = append(lessons, []any{
 				quizLesson, tenantID, lastTopic, "End-of-course quiz",
-				"quiz", 600, false, cfg.lessons,
+				"quiz", 600, false, tail,
 				"", "none", "", "",
 			})
+			tail++
 			course.lessons = append(course.lessons, quizLesson)
 
 			quiz := &seededQuiz{id: uuid.New(), lessonID: quizLesson, passing: 60}
@@ -560,6 +584,54 @@ func seedCatalogue(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg confi
 			course.quiz = quiz
 		}
 
+		/*
+			Some courses end with work to hand in.
+
+			The assignment is seeded; no submission is. A submission's files live in an
+			object store this command cannot reach — it holds a database connection and
+			nothing else — and a row pointing at a key with no object behind it is a
+			download that 404s, a marking queue full of work nobody can open, and a demo
+			that lies about the one thing this feature does. `student@` uploads a real
+			file in a second, which is the honest version of the same thing.
+
+			Never on the first course, and always on the second and third. The first is
+			the one the demo accounts finish outright, and a course at 100% whose last
+			lesson is work nobody handed in is a course claiming something untrue. The
+			next two are the ones they are part-way through, so whoever signs in has an
+			assignment open in front of them rather than whatever the dice said.
+		*/
+		if index != 0 && (index <= 2 || rng.Float64() < cfg.assignmentRate) {
+			handInLesson := uuid.New()
+			title := assignmentTitles[assigned%len(assignmentTitles)]
+
+			lessons = append(lessons, []any{
+				handInLesson, tenantID, lastTopic, title,
+				"assignment", 3600, false, tail,
+				"", "none", "", "",
+			})
+			tail++
+			course.lessons = append(course.lessons, handInLesson)
+
+			// Open, overdue, and no deadline, in that order. Late work is accepted in
+			// every case: a demo whose only button is disabled demonstrates nothing.
+			// The page says "was due", the submission is flagged late, and the marking
+			// queue tells the marker so.
+			var dueAt any
+			switch assigned % 3 {
+			case 0:
+				dueAt = now.Add(14 * 24 * time.Hour)
+			case 1:
+				dueAt = now.Add(-3 * 24 * time.Hour)
+			}
+
+			assignments = append(assignments, []any{
+				uuid.New(), tenantID, handInLesson, title,
+				assignmentBrief, 100, 60, 3, int64(25 << 20), dueAt, true,
+			})
+			course.assignment = true
+			assigned++
+		}
+
 		seeded = append(seeded, course)
 	}
 
@@ -574,6 +646,7 @@ func seedCatalogue(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg confi
 		{"quizzes", []string{"id", "tenant_id", "lesson_id", "title", "description", "time_limit_seconds", "max_attempts", "passing_percent"}, quizzes},
 		{"questions", []string{"id", "tenant_id", "quiz_id", "type", "prompt", "points", "position", "explanation", "case_sensitive", "accepted"}, question},
 		{"question_options", []string{"id", "tenant_id", "question_id", "content", "position", "is_correct", "match_id", "match_content"}, options},
+		{"assignments", []string{"id", "tenant_id", "lesson_id", "title", "instructions", "points", "passing_points", "max_files", "max_bytes", "due_at", "allow_late"}, assignments},
 	}
 
 	for _, c := range copies {
@@ -809,13 +882,13 @@ func slugify(title string) string {
 
 func report(cfg config, got counts, took time.Duration) {
 	rows := got.users + got.courses + got.lessons + got.quizzes + got.questions +
-		got.enrolments + got.progress + got.attempts + got.answers
+		got.assignments + got.enrolments + got.progress + got.attempts + got.answers
 
 	fmt.Printf("seeded %d rows in %s\n\n", rows, took.Round(time.Millisecond))
 	fmt.Printf("  workspaces  %d\n  people      %d\n  courses     %d\n  lessons     %d\n",
 		got.tenants, got.users, got.courses, got.lessons)
-	fmt.Printf("  quizzes     %d (%d questions)\n  enrolments  %d\n  progress    %d\n",
-		got.quizzes, got.questions, got.enrolments, got.progress)
+	fmt.Printf("  quizzes     %d (%d questions)\n  assignments %d\n  enrolments  %d\n  progress    %d\n",
+		got.quizzes, got.questions, got.assignments, got.enrolments, got.progress)
 	fmt.Printf("  attempts    %d (%d answers)\n\n", got.attempts, got.answers)
 
 	fmt.Printf("sign in at http://localhost:5173 — every account shares one password\n\n")
@@ -895,6 +968,24 @@ a form we have already solved.
 
 This is worth saying plainly: the answer is not the point. Anyone can be told an
 answer. The method is the thing that survives the problem it was invented for.`)
+
+	assignmentTitles = []string{
+		"Final assignment: a method of your own",
+		"Final assignment: the proof, written out",
+		"Final assignment: an instrument and its error",
+		"Final assignment: a translation, and what it cost",
+	}
+
+	assignmentBrief = strings.TrimSpace(`
+Choose one problem from the last section and solve it in full. Show the method,
+not only the answer — a reader who disagrees with you should be able to find the
+step where you parted company.
+
+Hand in one file. A scan of handwriting is fine, provided it is legible; so is a
+document. You may attach up to three files if you have working to include, and
+each may be up to 25 MB.
+
+You will be marked out of 100. Sixty is a pass, and a pass completes the course.`)
 )
 
 // Compile-time proof that the constants this file writes are the ones the domain
