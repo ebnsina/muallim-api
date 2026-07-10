@@ -227,6 +227,22 @@ func (r *PostgresRepository) DeleteTemplate(ctx context.Context, tx pgx.Tx, tena
 	return nil
 }
 
+// CourseTemplateID reads which template a course prints, or nil for the default.
+func (r *PostgresRepository) CourseTemplateID(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, slug string) (*uuid.UUID, error) {
+	var id *uuid.UUID
+	err := tx.QueryRow(ctx,
+		`SELECT certificate_template_id FROM courses WHERE tenant_id = $1 AND slug = $2`,
+		tenantID, slug).Scan(&id)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("certify: read course template: %w", err)
+	}
+	return id, nil
+}
+
 func (r *PostgresRepository) SetCourseTemplate(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, slug string, templateID *uuid.UUID) error {
 	tag, err := tx.Exec(ctx,
 		`UPDATE courses SET certificate_template_id = $3, updated_at = now()

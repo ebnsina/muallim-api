@@ -84,6 +84,14 @@ type TemplateOutput struct {
 	}
 }
 
+// CourseTemplateOutput is which template a course prints. Null means the default.
+type CourseTemplateOutput struct {
+	CacheControl string `header:"Cache-Control"`
+	Body         struct {
+		TemplateID *string `json:"template_id,omitempty" doc:"Null for the built-in default."`
+	}
+}
+
 func registerCertificates(api huma.API, svc *certify.Service) {
 	huma.Register(api, huma.Operation{
 		OperationID: "verify-certificate",
@@ -264,6 +272,36 @@ func registerCertificateTemplates(api huma.API, svc *certify.Service) {
 			return nil, certifyError(err)
 		}
 		return &struct{}{}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "get-course-certificate-template",
+		Method:      http.MethodGet,
+		Path:        "/v1/courses/{slug}/certificate-template",
+		Summary:     "Which template a course prints",
+		Description: "The template's id, or null for the built-in default. For an editor that shows " +
+			"the current choice. Requires course:write.",
+		Tags:     []string{"Authoring"},
+		Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, in *struct {
+		Slug string `path:"slug" maxLength:"200"`
+	}) (*CourseTemplateOutput, error) {
+		p, err := requirePermission(ctx, auth.PermCourseWrite)
+		if err != nil {
+			return nil, err
+		}
+
+		id, err := svc.CourseTemplateID(ctx, p.TenantID, in.Slug)
+		if err != nil {
+			return nil, certifyError(err)
+		}
+
+		out := &CourseTemplateOutput{CacheControl: "private, no-store"}
+		if id != nil {
+			serial := id.String()
+			out.Body.TemplateID = &serial
+		}
+		return out, nil
 	})
 
 	huma.Register(api, huma.Operation{

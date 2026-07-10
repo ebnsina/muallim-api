@@ -31,6 +31,7 @@ type Repository interface {
 	Templates(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) ([]Template, error)
 	CreateTemplate(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, t Template) (Template, error)
 	DeleteTemplate(ctx context.Context, tx pgx.Tx, tenantID, templateID uuid.UUID) error
+	CourseTemplateID(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, slug string) (*uuid.UUID, error)
 	SetCourseTemplate(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, slug string, templateID *uuid.UUID) error
 }
 
@@ -253,6 +254,18 @@ func (s *Service) DeleteTemplate(ctx context.Context, tenantID, templateID uuid.
 	return s.db.WithTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
 		return s.repo.DeleteTemplate(ctx, tx, tenantID, templateID)
 	})
+}
+
+// CourseTemplateID is which template a course prints — its own, or nil for the
+// built-in default. For an editor that shows the current choice.
+func (s *Service) CourseTemplateID(ctx context.Context, tenantID uuid.UUID, slug string) (*uuid.UUID, error) {
+	var id *uuid.UUID
+	err := s.db.WithTenantReadOnly(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		id, err = s.repo.CourseTemplateID(ctx, tx, tenantID, slug)
+		return err
+	})
+	return id, err
 }
 
 // SetCourseTemplate points a course at a template, or back at the default.
