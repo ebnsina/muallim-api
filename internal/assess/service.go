@@ -209,6 +209,12 @@ func (s *Service) AddQuestion(ctx context.Context, tenantID, lessonID uuid.UUID,
 		if err != nil {
 			return err
 		}
+
+		// The quiz is now worth more. The gradebook is told in this transaction.
+		if err := s.syncItem(ctx, tx, tenantID, quiz.ID); err != nil {
+			return err
+		}
+
 		return s.audit.Record(ctx, tx, tenantID, AuditEntry{
 			ActorID: &author.UserID, Action: ActionQuestionCreated,
 			TargetType: "question", TargetID: created.ID.String(),
@@ -229,6 +235,12 @@ func (s *Service) RemoveQuestion(ctx context.Context, tenantID, questionID uuid.
 		if err != nil {
 			return err
 		}
+
+		// And now it is worth less.
+		if err := s.syncItem(ctx, tx, tenantID, quizID); err != nil {
+			return err
+		}
+
 		return s.audit.Record(ctx, tx, tenantID, AuditEntry{
 			ActorID: &author.UserID, Action: ActionQuestionDeleted,
 			TargetType: "question", TargetID: questionID.String(),

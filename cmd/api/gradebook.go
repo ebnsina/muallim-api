@@ -49,3 +49,23 @@ func (g assignmentGrades) RecordMark(ctx context.Context, tx pgx.Tx, tenantID, l
 		Title: title, Points: points, MaxPoints: maxPoints,
 	})
 }
+
+func (g quizGrades) EnsureItem(ctx context.Context, tx pgx.Tx, tenantID, lessonID, sourceID uuid.UUID,
+	title string, maxPoints int,
+) error {
+	return g.svc.EnsureItem(ctx, tx, tenantID, grade.Score{
+		LessonID: lessonID,
+		Source:   grade.SourceQuiz, SourceID: sourceID,
+		Title: title, MaxPoints: maxPoints,
+	})
+}
+
+func (g assignmentGrades) EnsureItem(ctx context.Context, tx pgx.Tx, tenantID, lessonID, sourceID uuid.UUID,
+	title string, maxPoints int,
+) error {
+	return g.svc.EnsureItem(ctx, tx, tenantID, grade.Score{
+		LessonID: lessonID,
+		Source:   grade.SourceAssignment, SourceID: sourceID,
+		Title: title, MaxPoints: maxPoints,
+	})
+}

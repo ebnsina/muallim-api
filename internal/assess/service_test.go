@@ -860,3 +860,57 @@ func TestRegradingDoesNotDoubleTheGradebook(t *testing.T) {
 		t.Errorf("%d items after two grading runs, want 1", len(grades.Items))
 	}
 }
+
+func (g quizGrades) EnsureItem(ctx context.Context, tx pgx.Tx, tenantID, lessonID, sourceID uuid.UUID,
+	title string, maxPoints int,
+) error {
+	return g.svc.EnsureItem(ctx, tx, tenantID, grade.Score{
+		LessonID: lessonID,
+		Source:   grade.SourceQuiz, SourceID: sourceID,
+		Title: title, MaxPoints: maxPoints,
+	})
+}
+
+/*
+A quiz's worth follows its questions, in the transaction that changed them.
+
+A quiz is worth the sum of its questions' points, so adding one makes it worth
+more and removing one makes it worth less. The gradebook is told each time; a
+number that only refreshed when somebody was graded would be stale for exactly as
+long as nobody had sat the quiz.
+*/
+func TestAQuizzesGradebookItemFollowsItsQuestions(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+	_, choiceID, _ := f.quiz(t, assess.NewQuiz{PassingPercent: 60})
+
+	before, err := f.grades.LearnerGrades(t.Context(), f.tenant, f.course, f.learner)
+	if err != nil {
+		t.Fatalf("grades: %v", err)
+	}
+	if len(before.Items) != 1 {
+		t.Fatalf("%d items for a quiz nobody has sat, want 1", len(before.Items))
+	}
+	worth := before.Items[0].MaxPoints
+	if worth <= 0 {
+		t.Fatalf("the quiz is worth %d points", worth)
+	}
+
+	// Removing a question makes it worth less.
+	if err := f.svc.RemoveQuestion(t.Context(), f.tenant, choiceID, f.author); err != nil {
+		t.Fatalf("remove question: %v", err)
+	}
+
+	after, err := f.grades.LearnerGrades(t.Context(), f.tenant, f.course, f.learner)
+	if err != nil {
+		t.Fatalf("grades: %v", err)
+	}
+	if len(after.Items) != 1 {
+		t.Fatalf("%d items after removing a question, want 1", len(after.Items))
+	}
+	if after.Items[0].MaxPoints >= worth {
+		t.Errorf("the quiz is still worth %d after losing a question worth points (was %d)",
+			after.Items[0].MaxPoints, worth)
+	}
+}

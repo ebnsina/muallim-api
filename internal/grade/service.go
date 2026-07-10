@@ -87,6 +87,32 @@ func (s *Service) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, sco
 	return s.repo.UpsertEntry(ctx, tx, tenantID, itemID, score)
 }
 
+/*
+EnsureItem records that an assessment exists, before anybody has been marked on it.
+
+Called when a quiz or an assignment is created or reworded, in the transaction
+that did it. Without this, an assessment only appears in the gradebook once the
+first learner is graded — so a course with one unmarked assignment tells its
+learners it has nothing to grade, which is a lie they can check.
+
+An assessment worth nothing gets no item. A quiz with no questions cannot be
+attempted, and an item worth zero points is a percentage waiting to divide by it.
+*/
+func (s *Service) EnsureItem(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, score Score) error {
+	if score.MaxPoints <= 0 {
+		return nil
+	}
+
+	// `Points` is not part of an item, and validate() insists on a legal one.
+	score.Points = 0
+	if err := score.validate(); err != nil {
+		return err
+	}
+
+	_, err := s.repo.UpsertItem(ctx, tx, tenantID, score)
+	return err
+}
+
 // Scale resolves the scale a course grades by: its own, or the built-in default.
 func (s *Service) scaleFor(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, course Course) (Scale, error) {
 	if course.ScaleID == nil {

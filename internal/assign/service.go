@@ -78,6 +78,10 @@ re-marked.
 type Grades interface {
 	RecordMark(ctx context.Context, tx pgx.Tx, tenantID, lessonID, userID, sourceID uuid.UUID,
 		title string, points, maxPoints int) error
+
+	// EnsureItem says the assignment exists, before anybody has handed anything in.
+	EnsureItem(ctx context.Context, tx pgx.Tx, tenantID, lessonID, sourceID uuid.UUID,
+		title string, maxPoints int) error
 }
 
 // Enqueuer queues the deletion of an object whose row has gone.
@@ -195,6 +199,15 @@ func (s *Service) CreateAssignment(ctx context.Context, tenantID, lessonID uuid.
 		if err != nil {
 			return err
 		}
+
+		// The gradebook learns of the assignment now, not when the first learner is
+		// marked. A course with one unmarked assignment must not tell its learners it
+		// has nothing to grade.
+		if err := s.grades.EnsureItem(ctx, tx, tenantID, lessonID, created.ID,
+			created.Title, created.Points); err != nil {
+			return err
+		}
+
 		return s.audit.Record(ctx, tx, tenantID, AuditEntry{
 			ActorID: &author.UserID, Action: ActionAssignmentCreated,
 			TargetType: "assignment", TargetID: created.ID.String(),
@@ -230,6 +243,14 @@ func (s *Service) EditAssignment(ctx context.Context, tenantID, lessonID uuid.UU
 		if err != nil {
 			return err
 		}
+
+		// A renamed assignment, or one worth different points, is the same item said
+		// differently. Marks already given keep the total they were given out of.
+		if err := s.grades.EnsureItem(ctx, tx, tenantID, existing.LessonID, existing.ID,
+			updated.Title, updated.Points); err != nil {
+			return err
+		}
+
 		return s.audit.Record(ctx, tx, tenantID, AuditEntry{
 			ActorID: &author.UserID, Action: ActionAssignmentUpdated,
 			TargetType: "assignment", TargetID: existing.ID.String(),

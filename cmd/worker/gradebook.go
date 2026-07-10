@@ -36,3 +36,13 @@ func (g quizGrades) RecordScore(ctx context.Context, tx pgx.Tx, tenantID, lesson
 		KeepHighest: keepHighest,
 	})
 }
+
+func (g quizGrades) EnsureItem(ctx context.Context, tx pgx.Tx, tenantID, lessonID, sourceID uuid.UUID,
+	title string, maxPoints int,
+) error {
+	return g.svc.EnsureItem(ctx, tx, tenantID, grade.Score{
+		LessonID: lessonID,
+		Source:   grade.SourceQuiz, SourceID: sourceID,
+		Title: title, MaxPoints: maxPoints,
+	})
+}

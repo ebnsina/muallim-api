@@ -879,3 +879,73 @@ func TestMarkingReachesTheGradebook(t *testing.T) {
 		t.Errorf("the gradebook still says %d; the mark was lowered to 4", after.Entries[0].Points)
 	}
 }
+
+func (g assignmentGrades) EnsureItem(ctx context.Context, tx pgx.Tx, tenantID, lessonID, sourceID uuid.UUID,
+	title string, maxPoints int,
+) error {
+	return g.svc.EnsureItem(ctx, tx, tenantID, grade.Score{
+		LessonID: lessonID,
+		Source:   grade.SourceAssignment, SourceID: sourceID,
+		Title: title, MaxPoints: maxPoints,
+	})
+}
+
+/*
+An assignment appears in the gradebook the moment it exists.
+
+Before this, an item was written only when the first learner was marked — so a
+course with one unmarked assignment told its learners it had nothing to grade,
+and told its teacher the same. The lie was visible on the page.
+*/
+func TestAnUnmarkedAssignmentIsAlreadyInTheGradebook(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+	f.assignment(t, assign.NewAssignment{Title: "Essay", Points: 30, PassingPoints: 15})
+
+	grades, err := f.grades.LearnerGrades(t.Context(), f.tenant, f.course, f.learner)
+	if err != nil {
+		t.Fatalf("grades: %v", err)
+	}
+
+	if len(grades.Items) != 1 {
+		t.Fatalf("%d gradebook items for an assignment nobody has been marked on, want 1", len(grades.Items))
+	}
+	if grades.Items[0].MaxPoints != 30 {
+		t.Errorf("the item is worth %d, want 30", grades.Items[0].MaxPoints)
+	}
+
+	// And nobody has a grade for it: an item is not a mark.
+	if len(grades.Entries) != 0 {
+		t.Errorf("%d entries, want none", len(grades.Entries))
+	}
+	if grades.Result.Band.Label != "" {
+		t.Errorf("an unmarked learner was graded %q", grades.Result.Band.Label)
+	}
+}
+
+// Reworking an assignment reworks its item, and does not add a second one.
+func TestEditingAnAssignmentUpdatesItsGradebookItem(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+	f.assignment(t, assign.NewAssignment{Title: "Essay", Points: 30, PassingPoints: 15})
+
+	title, points := "Essay, revised", 50
+	if _, err := f.svc.EditAssignment(t.Context(), f.tenant, f.lesson,
+		assign.AssignmentPatch{Title: &title, Points: &points}, f.author); err != nil {
+		t.Fatalf("edit: %v", err)
+	}
+
+	grades, err := f.grades.LearnerGrades(t.Context(), f.tenant, f.course, f.learner)
+	if err != nil {
+		t.Fatalf("grades: %v", err)
+	}
+	if len(grades.Items) != 1 {
+		t.Fatalf("%d items after an edit, want 1", len(grades.Items))
+	}
+	if grades.Items[0].Title != title || grades.Items[0].MaxPoints != points {
+		t.Errorf("the item is %q worth %d, want %q worth %d",
+			grades.Items[0].Title, grades.Items[0].MaxPoints, title, points)
+	}
+}

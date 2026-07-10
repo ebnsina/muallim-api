@@ -38,6 +38,12 @@ assignment is marked rather than attempted, and that path overwrites.
 type Grades interface {
 	RecordScore(ctx context.Context, tx pgx.Tx, tenantID, lessonID, userID, sourceID uuid.UUID,
 		title string, points, maxPoints int, keepHighest bool) error
+
+	// EnsureItem says the assessment exists, before anybody has attempted it. A
+	// gradebook that only learned of a quiz when somebody was graded on it would
+	// tell a class of thirty that there was nothing to do.
+	EnsureItem(ctx context.Context, tx pgx.Tx, tenantID, lessonID, sourceID uuid.UUID,
+		title string, maxPoints int) error
 }
 
 /*
@@ -51,6 +57,36 @@ Called wherever `settle` is, and unlike `settle` it does not care whether the
 attempt passed. A failed quiz is a grade, and a course total that skipped it would
 flatter everybody who failed one.
 */
+/*
+syncItem tells the gradebook what the quiz is currently worth.
+
+A quiz's worth is the sum of its questions' points, so it changes every time one is
+added or removed. Called from both, in the transaction that changed it.
+
+A quiz stripped back to no questions keeps the item it had. `EnsureItem` will not
+write one worth zero points — there is nothing to be a percentage of — and deleting
+the item would silently delete the marks of everybody who sat the quiz before it was
+emptied. The stale item is the lesser wrong, and it says what those marks were out of.
+*/
+func (s *Service) syncItem(ctx context.Context, tx pgx.Tx, tenantID, quizID uuid.UUID) error {
+	quiz, err := s.repo.QuizByID(ctx, tx, tenantID, quizID)
+	if err != nil {
+		return err
+	}
+
+	questions, err := s.repo.Questions(ctx, tx, tenantID, quizID)
+	if err != nil {
+		return err
+	}
+
+	total := 0
+	for _, question := range questions {
+		total += question.Points
+	}
+
+	return s.grades.EnsureItem(ctx, tx, tenantID, quiz.LessonID, quiz.ID, quiz.Title, total)
+}
+
 func (s *Service) record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, quiz Quiz, attempt Attempt) error {
 	if attempt.Status != StatusGraded {
 		return nil
