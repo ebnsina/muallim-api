@@ -83,14 +83,17 @@ type Service struct {
 	audit       AuditRecorder
 	jobs        Enqueuer
 	completions Completions
+	grades      Grades
 
 	now func() time.Time
 }
 
 // NewService returns a Service.
-func NewService(db *database.DB, repo Repository, recorder AuditRecorder, jobs Enqueuer, completions Completions) *Service {
+func NewService(db *database.DB, repo Repository, recorder AuditRecorder, jobs Enqueuer,
+	completions Completions, grades Grades) *Service {
 	return &Service{
-		db: db, repo: repo, audit: recorder, jobs: jobs, completions: completions,
+		db: db, repo: repo, audit: recorder, jobs: jobs,
+		completions: completions, grades: grades,
 		now: time.Now,
 	}
 }
@@ -495,6 +498,13 @@ func (s *Service) GradeAttempt(ctx context.Context, tenantID, attemptID uuid.UUI
 		// Passing the quiz completes its lesson, in this transaction. A grade that
 		// committed without the progress it implies is a learner whose course page
 		// and gradebook disagree.
+		// The gradebook, then the completion. Both in this transaction; a grade that
+		// commits without the progress it implies is a course page and a gradebook
+		// disagreeing about the same learner.
+		if err := s.record(ctx, tx, tenantID, quiz, graded); err != nil {
+			return err
+		}
+
 		if err := s.settle(ctx, tx, tenantID, quiz, graded); err != nil {
 			return err
 		}

@@ -171,6 +171,10 @@ func (s *Service) MarkAnswer(ctx context.Context, tenantID, attemptID, questionI
 		if err != nil {
 			return err
 		}
+		if err := s.record(ctx, tx, tenantID, quiz, attempt); err != nil {
+			return err
+		}
+
 		if err := s.settle(ctx, tx, tenantID, quiz, attempt); err != nil {
 			return err
 		}

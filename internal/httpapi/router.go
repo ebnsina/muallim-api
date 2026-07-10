@@ -18,6 +18,7 @@ import (
 	"github.com/ebnsina/lms-api/internal/auth"
 	"github.com/ebnsina/lms-api/internal/catalog"
 	"github.com/ebnsina/lms-api/internal/enroll"
+	"github.com/ebnsina/lms-api/internal/grade"
 	"github.com/ebnsina/lms-api/internal/platform/ratelimit"
 	"github.com/ebnsina/lms-api/internal/tenant"
 )
@@ -46,6 +47,7 @@ type Options struct {
 	Enrol   *enroll.Service
 	Assess  *assess.Service
 	Assign  *assign.Service
+	Grades  *grade.Service
 	DB      Pinger
 
 	// AuthLimiter throttles credential-verifying endpoints. Nil disables it, which
@@ -94,6 +96,7 @@ func New(opts Options) (http.Handler, huma.API) {
 	// Assignments take the enrolment service for the same reason: whether a person
 	// may see one is whether they may see its lesson.
 	registerAssignments(api, opts.Assign, opts.Enrol)
+	registerGrades(api, opts.Grades)
 
 	// Order matters, outermost first.
 	//

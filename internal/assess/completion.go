@@ -24,6 +24,47 @@ type Completions interface {
 	TryCompleteLesson(ctx context.Context, tx pgx.Tx, tenantID, lessonID, userID uuid.UUID) (bool, error)
 }
 
+/*
+Grades records an attempt's score in the gradebook.
+
+Declared here for the same reason `Completions` is, and implemented in cmd/ over
+the grade service. It takes the caller's transaction, so the attempt and the grade
+commit together.
+
+`keepHighest` is true for a quiz: a learner may attempt one several times, and
+their standing is the best they have done, not the last thing they did. An
+assignment is marked rather than attempted, and that path overwrites.
+*/
+type Grades interface {
+	RecordScore(ctx context.Context, tx pgx.Tx, tenantID, lessonID, userID, sourceID uuid.UUID,
+		title string, points, maxPoints int, keepHighest bool) error
+}
+
+/*
+record writes the attempt's score to the gradebook.
+
+Only a graded attempt has a score. One awaiting an essay mark has points against
+some of its questions and not others, and recording that as a course grade would
+tell a learner they scored 4 of 12 on a quiz nobody has finished marking.
+
+Called wherever `settle` is, and unlike `settle` it does not care whether the
+attempt passed. A failed quiz is a grade, and a course total that skipped it would
+flatter everybody who failed one.
+*/
+func (s *Service) record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, quiz Quiz, attempt Attempt) error {
+	if attempt.Status != StatusGraded {
+		return nil
+	}
+	if attempt.MaxPoints <= 0 {
+		// A quiz with no questions, or none worth anything. There is nothing to be a
+		// percentage of, and an item worth zero points would divide by it.
+		return nil
+	}
+
+	return s.grades.RecordScore(ctx, tx, tenantID, quiz.LessonID, attempt.UserID, quiz.ID,
+		quiz.Title, attempt.Points, attempt.MaxPoints, true)
+}
+
 // settle completes the quiz's lesson when the attempt has passed it.
 //
 // Passing a quiz completes its lesson. Failing one does not un-complete it, and

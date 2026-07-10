@@ -19,6 +19,7 @@ import (
 	"github.com/ebnsina/lms-api/internal/assign"
 	"github.com/ebnsina/lms-api/internal/audit"
 	"github.com/ebnsina/lms-api/internal/enroll"
+	"github.com/ebnsina/lms-api/internal/grade"
 	"github.com/ebnsina/lms-api/internal/platform/blob"
 	"github.com/ebnsina/lms-api/internal/platform/database"
 )
@@ -119,12 +120,27 @@ type fixture struct {
 	store    *blob.S3
 	jobs     *recordingEnqueuer
 	learning *enroll.Service
+	grades   *grade.Service
 
 	tenant  uuid.UUID
 	lesson  uuid.UUID
 	course  string
 	learner uuid.UUID
 	author  assign.Author
+}
+
+// assignmentGrades adapts the real gradebook to `assign.Grades`, as cmd/ does.
+// The real one, because "did the mark reach the gradebook" is the question.
+type assignmentGrades struct{ svc *grade.Service }
+
+func (g assignmentGrades) RecordMark(ctx context.Context, tx pgx.Tx, tenantID, lessonID, userID, sourceID uuid.UUID,
+	title string, points, maxPoints int,
+) error {
+	return g.svc.Record(ctx, tx, tenantID, grade.Score{
+		LessonID: lessonID, UserID: userID,
+		Source: grade.SourceAssignment, SourceID: sourceID,
+		Title: title, Points: points, MaxPoints: maxPoints,
+	})
 }
 
 func newFixture(t *testing.T) fixture {
@@ -141,10 +157,12 @@ func newFixture(t *testing.T) fixture {
 	// completes its lesson, and a stub would leave that untested.
 	learning := enroll.NewService(db, enroll.NewPostgresRepository(), enrolAuditor{audit.NewRecorder()})
 
+	grades := grade.NewService(db, grade.NewPostgresRepository())
+
 	return fixture{
-		db: db, store: store, jobs: jobs, learning: learning,
+		db: db, store: store, jobs: jobs, learning: learning, grades: grades,
 		svc: assign.NewService(db, assign.NewPostgresRepository(), store,
-			assignAuditor{audit.NewRecorder()}, jobs, learning),
+			assignAuditor{audit.NewRecorder()}, jobs, learning, assignmentGrades{grades}),
 		tenant: tenantID, lesson: lessonID, course: slug,
 		learner: seedUser(t, db, tenantID),
 		author:  assign.Author{UserID: seedUser(t, db, tenantID)},
@@ -804,5 +822,60 @@ func TestEditingWritesEveryField(t *testing.T) {
 	}
 	if reloaded.DueAt != nil {
 		t.Errorf("the stored deadline is %v, want none", reloaded.DueAt)
+	}
+}
+
+/*
+Marking a submission writes the gradebook, in the same transaction.
+
+The seam is an interface `assign` declares and `cmd` satisfies over the grade
+service. Neither package imports the other, which means nothing in either of them
+would notice if the wiring were dropped — except this.
+*/
+func TestMarkingReachesTheGradebook(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+	assignment := f.assignment(t, assign.NewAssignment{Points: 20, PassingPoints: 10})
+	f.enrol(t)
+	f.attach(t, f.learner, "essay.txt", []byte("my essay"))
+
+	if _, err := f.svc.Submit(t.Context(), f.tenant, f.lesson, f.learner,
+		assign.Author{UserID: f.learner}); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	submission, err := f.svc.Submissions(t.Context(), f.tenant, f.lesson, true, 10)
+	if err != nil || len(submission) != 1 {
+		t.Fatalf("marking queue: %v (%d rows)", err, len(submission))
+	}
+
+	if _, err := f.svc.Mark(t.Context(), f.tenant, submission[0].Submission.ID, 15, "Good.", f.author); err != nil {
+		t.Fatalf("mark: %v", err)
+	}
+
+	grades, err := f.grades.LearnerGrades(t.Context(), f.tenant, f.course, f.learner)
+	if err != nil {
+		t.Fatalf("grades: %v", err)
+	}
+	if len(grades.Entries) != 1 {
+		t.Fatalf("%d gradebook entries, want 1", len(grades.Entries))
+	}
+	if grades.Entries[0].Points != 15 || grades.Entries[0].MaxPoints != 20 {
+		t.Errorf("recorded %d of %d, want 15 of 20",
+			grades.Entries[0].Points, grades.Entries[0].MaxPoints)
+	}
+	if grades.Items[0].Title != assignment.Title {
+		t.Errorf("the item is called %q, want %q", grades.Items[0].Title, assignment.Title)
+	}
+
+	// A marker who lowers a grade means to. `assign` does not keep the highest.
+	if _, err := f.svc.Mark(t.Context(), f.tenant, submission[0].Submission.ID, 4, "On reflection.", f.author); err != nil {
+		t.Fatalf("re-mark: %v", err)
+	}
+
+	after, _ := f.grades.LearnerGrades(t.Context(), f.tenant, f.course, f.learner)
+	if after.Entries[0].Points != 4 {
+		t.Errorf("the gradebook still says %d; the mark was lowered to 4", after.Entries[0].Points)
 	}
 }

@@ -63,6 +63,23 @@ type Completions interface {
 	TryCompleteLesson(ctx context.Context, tx pgx.Tx, tenantID, lessonID, userID uuid.UUID) (bool, error)
 }
 
+/*
+Grades records a mark in the gradebook.
+
+Declared here, by the package that needs it, and implemented in cmd/ over the
+grade service — a domain package may not import a sibling. It takes the caller's
+transaction, so the mark and the grade commit together. A submission graded 80
+whose gradebook says nothing is a learner and a teacher looking at two different
+numbers.
+
+Idempotent at the far end, because this is called again every time a submission is
+re-marked.
+*/
+type Grades interface {
+	RecordMark(ctx context.Context, tx pgx.Tx, tenantID, lessonID, userID, sourceID uuid.UUID,
+		title string, points, maxPoints int) error
+}
+
 // Enqueuer queues the deletion of an object whose row has gone.
 //
 // It takes the caller's transaction, so the job and the delete commit together.
@@ -91,14 +108,17 @@ type Service struct {
 	audit       AuditRecorder
 	jobs        Enqueuer
 	completions Completions
+	grades      Grades
 
 	now func() time.Time
 }
 
 // NewService returns a Service.
-func NewService(db *database.DB, repo Repository, store blob.Store, recorder AuditRecorder, jobs Enqueuer, completions Completions) *Service {
+func NewService(db *database.DB, repo Repository, store blob.Store, recorder AuditRecorder,
+	jobs Enqueuer, completions Completions, grades Grades) *Service {
 	return &Service{
-		db: db, repo: repo, store: store, audit: recorder, jobs: jobs, completions: completions,
+		db: db, repo: repo, store: store, audit: recorder, jobs: jobs,
+		completions: completions, grades: grades,
 		now: time.Now,
 	}
 }
@@ -644,6 +664,14 @@ func (s *Service) Mark(ctx context.Context, tenantID, submissionID uuid.UUID, po
 
 		marked, err = s.repo.Mark(ctx, tx, tenantID, submissionID, marker.UserID, points, feedback)
 		if err != nil {
+			return err
+		}
+
+		// The gradebook, in the transaction that awarded the mark. Recorded whatever
+		// the grade: a zero is a grade, and an assignment somebody failed still counts
+		// against the course total.
+		if err := s.grades.RecordMark(ctx, tx, tenantID, assignment.LessonID, submission.UserID,
+			assignment.ID, assignment.Title, points, assignment.Points); err != nil {
 			return err
 		}
 

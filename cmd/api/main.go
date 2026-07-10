@@ -27,6 +27,7 @@ import (
 	"github.com/ebnsina/lms-api/internal/catalog"
 	"github.com/ebnsina/lms-api/internal/comms"
 	"github.com/ebnsina/lms-api/internal/enroll"
+	"github.com/ebnsina/lms-api/internal/grade"
 	"github.com/ebnsina/lms-api/internal/httpapi"
 	"github.com/ebnsina/lms-api/internal/platform/cache"
 	"github.com/ebnsina/lms-api/internal/platform/config"
@@ -164,10 +165,15 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	// The gradebook. `assess` and `assign` write to it through interfaces they
+	// declare; the adapters are in gradebook.go, and neither domain has heard of it.
+	grades := grade.NewService(db, grade.NewPostgresRepository())
+
 	// `learning` satisfies assess.Completions: passing a quiz completes its lesson,
 	// in the transaction that recorded the grade. The interface is declared by
 	// assess and satisfied by enroll, which have never heard of each other.
-	quizzes := assess.NewService(db, assess.NewPostgresRepository(), assessAuditor{recorder}, grading, learning)
+	quizzes := assess.NewService(db, assess.NewPostgresRepository(), assessAuditor{recorder},
+		grading, learning, quizGrades{grades})
 
 	store, err := newObjectStore(cfg, log)
 	if err != nil {
@@ -179,7 +185,7 @@ func run() error {
 		return err
 	}
 	assignments := assign.NewService(db, assign.NewPostgresRepository(), store,
-		assignAuditor{recorder}, deletions, learning)
+		assignAuditor{recorder}, deletions, learning, assignmentGrades{grades})
 
 	handler, _ := httpapi.New(httpapi.Options{
 		Version:     cfg.Version,
@@ -187,6 +193,7 @@ func run() error {
 		CORSOrigins: cfg.CORSOrigins,
 		Tenants:     tenants,
 		Catalog:     courses,
+		Grades:      grades,
 		Auth:        identities,
 		Enrol:       learning,
 		Assess:      quizzes,

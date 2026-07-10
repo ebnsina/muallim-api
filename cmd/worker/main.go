@@ -25,6 +25,7 @@ import (
 	"github.com/ebnsina/lms-api/internal/auth"
 	"github.com/ebnsina/lms-api/internal/comms"
 	"github.com/ebnsina/lms-api/internal/enroll"
+	"github.com/ebnsina/lms-api/internal/grade"
 	"github.com/ebnsina/lms-api/internal/platform/config"
 	"github.com/ebnsina/lms-api/internal/platform/database"
 	"github.com/ebnsina/lms-api/internal/platform/logging"
@@ -117,7 +118,12 @@ func run() error {
 	// process needs the enrolment service too — in the same transaction.
 	learning := enroll.NewService(db, enroll.NewPostgresRepository(), enrolAuditor{audit.NewRecorder()})
 
-	quizzes := assess.NewService(db, assess.NewPostgresRepository(), assessAuditor{audit.NewRecorder()}, refusingEnqueuer{}, learning)
+	// The worker grades attempts, so it writes to the gradebook too — in the same
+	// transaction, through the same adapter the API uses.
+	grades := grade.NewService(db, grade.NewPostgresRepository())
+
+	quizzes := assess.NewService(db, assess.NewPostgresRepository(), assessAuditor{audit.NewRecorder()},
+		refusingEnqueuer{}, learning, quizGrades{grades})
 
 	grading, err := assess.NewGradeAttemptWorker(quizzes)
 	if err != nil {

@@ -15,6 +15,7 @@ import (
 	"github.com/ebnsina/lms-api/internal/assess"
 	"github.com/ebnsina/lms-api/internal/audit"
 	"github.com/ebnsina/lms-api/internal/enroll"
+	"github.com/ebnsina/lms-api/internal/grade"
 	"github.com/ebnsina/lms-api/internal/platform/database"
 )
 
@@ -88,9 +89,28 @@ func (a enrolAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID,
 	})
 }
 
+/*
+quizGrades adapts the real gradebook to `assess.Grades`, exactly as cmd/ does.
+
+A stub would record whatever the test wanted, which is precisely the question
+these tests exist to ask: does a graded attempt reach the gradebook, in the
+transaction that graded it?
+*/
+type quizGrades struct{ svc *grade.Service }
+
+func (g quizGrades) RecordScore(ctx context.Context, tx pgx.Tx, tenantID, lessonID, userID, sourceID uuid.UUID,
+	title string, points, maxPoints int, keepHighest bool,
+) error {
+	return g.svc.Record(ctx, tx, tenantID, grade.Score{
+		LessonID: lessonID, UserID: userID,
+		Source: grade.SourceQuiz, SourceID: sourceID,
+		Title: title, Points: points, MaxPoints: maxPoints, KeepHighest: keepHighest,
+	})
+}
+
 func newService(db *database.DB, jobs assess.Enqueuer) *assess.Service {
 	return assess.NewService(db, assess.NewPostgresRepository(), assessAuditor{audit.NewRecorder()},
-		jobs, newCompletions(db))
+		jobs, newCompletions(db), quizGrades{grade.NewService(db, grade.NewPostgresRepository())})
 }
 
 func seedTenant(t *testing.T, db *database.DB) uuid.UUID {
@@ -170,6 +190,7 @@ type fixture struct {
 	db       *database.DB
 	svc      *assess.Service
 	learning *enroll.Service
+	grades   *grade.Service
 	jobs     *recordingEnqueuer
 	tenant   uuid.UUID
 	lesson   uuid.UUID
@@ -188,6 +209,7 @@ func newFixture(t *testing.T) fixture {
 
 	return fixture{
 		db: db, svc: newService(db, jobs), learning: newCompletions(db), jobs: jobs,
+		grades: grade.NewService(db, grade.NewPostgresRepository()),
 		tenant: tenantID, lesson: lessonID, course: slug,
 		learner: seedUser(t, db, tenantID),
 		author:  assess.Author{UserID: seedUser(t, db, tenantID)},
@@ -267,6 +289,30 @@ func (f fixture) correctOption(t *testing.T, questionID uuid.UUID) uuid.UUID {
 		}
 	}
 	t.Fatalf("no correct option on question %s", questionID)
+	return uuid.Nil
+}
+
+// wrongOption is any option that is not the answer. A test that wants a failing
+// attempt has to name one, and naming it by index would break the day somebody
+// reorders the fixture.
+func (f fixture) wrongOption(t *testing.T, questionID uuid.UUID) uuid.UUID {
+	t.Helper()
+
+	_, questions, err := f.svc.AuthoredQuiz(t.Context(), f.tenant, f.lesson)
+	if err != nil {
+		t.Fatalf("authored quiz: %v", err)
+	}
+	for _, q := range questions {
+		if q.ID != questionID {
+			continue
+		}
+		for _, o := range q.Options {
+			if !o.IsCorrect {
+				return o.ID
+			}
+		}
+	}
+	t.Fatalf("every option on question %s is correct", questionID)
 	return uuid.Nil
 }
 
@@ -649,6 +695,7 @@ func TestAFailedEnqueueRollsBackTheSubmission(t *testing.T) {
 	lessonID, slug := seedLesson(t, db, tenantID)
 	f := fixture{
 		db: db, svc: newService(db, jobs), learning: newCompletions(db), jobs: jobs,
+		grades: grade.NewService(db, grade.NewPostgresRepository()),
 		tenant: tenantID, lesson: lessonID, course: slug,
 		learner: seedUser(t, db, tenantID),
 		author:  assess.Author{UserID: seedUser(t, db, tenantID)},
@@ -713,5 +760,103 @@ func TestLoadingAQuizHasNoNPlusOne(t *testing.T) {
 			t.Fatalf("a quiz of %d questions issued %d queries, want %d — "+
 				"the count must not grow with the quiz", len(view.Questions), got, want)
 		}
+	}
+}
+
+/*
+A graded attempt reaches the gradebook, in the transaction that graded it.
+
+The seam is an interface `assess` declares and `cmd` satisfies over the grade
+service. Neither package imports the other, so nothing in either would notice if
+the wiring were dropped — except this.
+
+Recorded whatever the verdict. A failed quiz is a grade, and a course total that
+skipped the failures would flatter everybody who failed one.
+*/
+func TestAGradedAttemptReachesTheGradebook(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+	_, choiceID, typedID := f.quiz(t, assess.NewQuiz{PassingPercent: 60})
+
+	if _, err := f.svc.StartAttempt(t.Context(), f.tenant, f.lesson, f.learner, assess.Author{UserID: f.learner}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	// Both wrong, so the attempt certainly fails. A failed quiz is a grade, and a
+	// course total that skipped the failures would flatter everybody who failed one.
+	if err := f.svc.SaveAnswer(t.Context(), f.tenant, f.lesson, f.learner, choiceID,
+		assess.Response{Choices: []uuid.UUID{f.wrongOption(t, choiceID)}}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if err := f.svc.SaveAnswer(t.Context(), f.tenant, f.lesson, f.learner, typedID,
+		assess.Response{Text: "not the answer"}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	submitted, err := f.svc.SubmitAttempt(t.Context(), f.tenant, f.lesson, f.learner, assess.Author{UserID: f.learner})
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	graded, err := f.svc.GradeAttempt(t.Context(), f.tenant, submitted.ID)
+	if err != nil {
+		t.Fatalf("grade: %v", err)
+	}
+	if graded.Passed == nil || *graded.Passed {
+		t.Fatalf("the attempt was meant to fail; passed = %v", graded.Passed)
+	}
+
+	// No enrolment needed: a learner reads their own marks, and `LearnerGrades`
+	// asks the gradebook, not the roll.
+	grades, err := f.grades.LearnerGrades(t.Context(), f.tenant, f.course, f.learner)
+	if err != nil {
+		t.Fatalf("grades: %v", err)
+	}
+	if len(grades.Entries) != 1 {
+		t.Fatalf("%d gradebook entries after a graded attempt, want 1", len(grades.Entries))
+	}
+	if grades.Entries[0].Points != graded.Points || grades.Entries[0].MaxPoints != graded.MaxPoints {
+		t.Errorf("recorded %d of %d, want the attempt's %d of %d",
+			grades.Entries[0].Points, grades.Entries[0].MaxPoints, graded.Points, graded.MaxPoints)
+	}
+}
+
+// Grading is idempotent, and so is what it writes. A retried job records the same
+// score again rather than a second entry that halves the learner's percentage.
+func TestRegradingDoesNotDoubleTheGradebook(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+	_, choiceID, typedID := f.quiz(t, assess.NewQuiz{PassingPercent: 60})
+
+	if _, err := f.svc.StartAttempt(t.Context(), f.tenant, f.lesson, f.learner, assess.Author{UserID: f.learner}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	right := f.correctOption(t, choiceID)
+	_ = f.svc.SaveAnswer(t.Context(), f.tenant, f.lesson, f.learner, choiceID, assess.Response{Choices: []uuid.UUID{right}})
+	_ = f.svc.SaveAnswer(t.Context(), f.tenant, f.lesson, f.learner, typedID, assess.Response{Text: "Paris"})
+
+	submitted, err := f.svc.SubmitAttempt(t.Context(), f.tenant, f.lesson, f.learner, assess.Author{UserID: f.learner})
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	if _, err := f.svc.GradeAttempt(t.Context(), f.tenant, submitted.ID); err != nil {
+		t.Fatalf("grade: %v", err)
+	}
+	if _, err := f.svc.GradeAttempt(t.Context(), f.tenant, submitted.ID); err != nil {
+		t.Fatalf("regrade: %v", err)
+	}
+
+	grades, err := f.grades.LearnerGrades(t.Context(), f.tenant, f.course, f.learner)
+	if err != nil {
+		t.Fatalf("grades: %v", err)
+	}
+	if len(grades.Entries) != 1 {
+		t.Errorf("%d entries after two grading runs, want 1", len(grades.Entries))
+	}
+	if len(grades.Items) != 1 {
+		t.Errorf("%d items after two grading runs, want 1", len(grades.Items))
 	}
 }

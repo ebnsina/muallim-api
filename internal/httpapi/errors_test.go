@@ -15,6 +15,7 @@ import (
 	"github.com/ebnsina/lms-api/internal/auth"
 	"github.com/ebnsina/lms-api/internal/catalog"
 	"github.com/ebnsina/lms-api/internal/enroll"
+	"github.com/ebnsina/lms-api/internal/grade"
 	"github.com/ebnsina/lms-api/internal/platform/blob"
 )
 
@@ -338,6 +339,40 @@ func TestAnUnmappedAssignmentErrorIsFiveHundred(t *testing.T) {
 	t.Parallel()
 
 	if got := statusOf(assignError(errors.New("assign: something new"))); got != http.StatusInternalServerError {
+		t.Errorf("an unmapped error mapped to %d, want 500", got)
+	}
+}
+
+// The gradebook's sentinels go through their own mapper.
+func TestGradeSentinelsMapToADeliberateStatus(t *testing.T) {
+	t.Parallel()
+
+	tests := map[error]int{
+		grade.ErrNotFound:     http.StatusNotFound,
+		grade.ErrScaleExists:  http.StatusConflict,
+		grade.ErrInvalidScale: http.StatusUnprocessableEntity,
+
+		// Not a 4xx. A malformed score is one this system built, not one a client
+		// sent, so it renders as the bug it is: a 500 with a correlation id.
+		grade.ErrInvalidScore: http.StatusInternalServerError,
+	}
+
+	for err, want := range tests {
+		if got := statusOf(gradeError(err)); got != want {
+			t.Errorf("%v mapped to %d, want %d", err, got, want)
+		}
+
+		wrapped := fmt.Errorf("grade: doing a thing: %w", err)
+		if got := statusOf(gradeError(wrapped)); got != want {
+			t.Errorf("wrapped %v mapped to %d, want %d", err, got, want)
+		}
+	}
+}
+
+func TestAnUnmappedGradeErrorIsFiveHundred(t *testing.T) {
+	t.Parallel()
+
+	if got := statusOf(gradeError(errors.New("grade: something new"))); got != http.StatusInternalServerError {
 		t.Errorf("an unmapped error mapped to %d, want 500", got)
 	}
 }
