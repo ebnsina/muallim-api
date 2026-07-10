@@ -3,6 +3,7 @@ package assign
 import (
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -178,5 +179,58 @@ func TestAPatchIsValidatedAgainstItsResult(t *testing.T) {
 	forty := 40
 	if err := merge(existing, AssignmentPatch{Points: &fifty, PassingPoints: &forty}).validate(); err != nil {
 		t.Errorf("lowering both was refused: %v", err)
+	}
+}
+
+/*
+A patch carries three answers about the deadline, not two.
+
+Absent leaves it, a value sets it, and cleared removes it. A `*time.Time` alone
+cannot say the difference between the first and the last, and an author who
+could set a deadline but never take one off would have to delete the assignment
+— and every submission under it — to fix a typo.
+*/
+func TestPatchingTheDeadline(t *testing.T) {
+	t.Parallel()
+
+	due := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+	later := due.Add(24 * time.Hour)
+
+	existing := Assignment{
+		Title: "Essay", Points: 100, PassingPoints: 50,
+		MaxFiles: 3, MaxBytes: 1 << 20, DueAt: &due, AllowLate: true,
+	}
+
+	if got := merge(existing, AssignmentPatch{}).DueAt; got == nil || !got.Equal(due) {
+		t.Errorf("an empty patch moved the deadline to %v", got)
+	}
+
+	if got := merge(existing, AssignmentPatch{DueAt: &later}).DueAt; got == nil || !got.Equal(later) {
+		t.Errorf("setting the deadline gave %v, want %v", got, later)
+	}
+
+	if got := merge(existing, AssignmentPatch{ClearDueAt: true}).DueAt; got != nil {
+		t.Errorf("clearing the deadline left %v", got)
+	}
+
+	// A deadline that is being removed and set in the same breath is removed.
+	if got := merge(existing, AssignmentPatch{DueAt: &later, ClearDueAt: true}).DueAt; got != nil {
+		t.Errorf("clearing lost to setting, leaving %v", got)
+	}
+}
+
+// The other two fields a patch used to drop on the floor.
+func TestPatchingLateness(t *testing.T) {
+	t.Parallel()
+
+	existing := Assignment{Title: "Essay", Points: 100, MaxFiles: 3, MaxBytes: 1 << 20, AllowLate: true}
+
+	if merge(existing, AssignmentPatch{}).AllowLate != true {
+		t.Error("an empty patch changed the late policy")
+	}
+
+	no := false
+	if merge(existing, AssignmentPatch{AllowLate: &no}).AllowLate != false {
+		t.Error("turning late work off did nothing")
 	}
 }

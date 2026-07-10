@@ -20,7 +20,7 @@ type Repository interface {
 	CreateAssignment(ctx context.Context, tx pgx.Tx, tenantID, lessonID uuid.UUID, n NewAssignment) (Assignment, error)
 	AssignmentByLesson(ctx context.Context, tx pgx.Tx, tenantID, lessonID uuid.UUID) (Assignment, error)
 	AssignmentByID(ctx context.Context, tx pgx.Tx, tenantID, assignmentID uuid.UUID) (Assignment, error)
-	UpdateAssignment(ctx context.Context, tx pgx.Tx, tenantID, assignmentID uuid.UUID, p AssignmentPatch) (Assignment, error)
+	UpdateAssignment(ctx context.Context, tx pgx.Tx, tenantID, assignmentID uuid.UUID, a NewAssignment) (Assignment, error)
 	DeleteAssignment(ctx context.Context, tx pgx.Tx, tenantID, lessonID uuid.UUID) (uuid.UUID, []string, error)
 
 	OpenDraft(ctx context.Context, tx pgx.Tx, tenantID, assignmentID, userID uuid.UUID) (Submission, error)
@@ -128,8 +128,15 @@ type AssignmentPatch struct {
 	PassingPoints *int
 	MaxFiles      *int
 	MaxBytes      *int64
-	DueAt         *time.Time
 	AllowLate     *bool
+
+	// A deadline has three states, and a pointer only carries two. `DueAt` sets one
+	// and `ClearDueAt` removes one; both nil and false leaves whatever is there.
+	//
+	// Without this, an author who sets a deadline can never take it off again — the
+	// omitted field and the erased field are the same nil.
+	DueAt      *time.Time
+	ClearDueAt bool
 }
 
 // Upload bounds. The schema enforces the same numbers; these produce a sentence.
@@ -199,7 +206,7 @@ func (s *Service) EditAssignment(ctx context.Context, tenantID, lessonID uuid.UU
 			return err
 		}
 
-		updated, err = s.repo.UpdateAssignment(ctx, tx, tenantID, existing.ID, p)
+		updated, err = s.repo.UpdateAssignment(ctx, tx, tenantID, existing.ID, merged)
 		if err != nil {
 			return err
 		}
@@ -241,6 +248,20 @@ func merge(a Assignment, p AssignmentPatch) NewAssignment {
 	if p.MaxBytes != nil {
 		merged.MaxBytes = *p.MaxBytes
 	}
+	if p.AllowLate != nil {
+		merged.AllowLate = *p.AllowLate
+	}
+
+	// Clearing wins over setting. They cannot both be asked for — the HTTP layer
+	// builds these two out of one JSON field — and if they ever were, removing a
+	// deadline is the safer of the two to have meant.
+	switch {
+	case p.ClearDueAt:
+		merged.DueAt = nil
+	case p.DueAt != nil:
+		merged.DueAt = p.DueAt
+	}
+
 	return merged
 }
 

@@ -749,3 +749,60 @@ func TestADraftCannotBeMarked(t *testing.T) {
 		t.Fatalf("marking a draft: %v, want ErrNotSubmitted", err)
 	}
 }
+
+/*
+An edit reaches the database as the assignment it produces, not as the patch.
+
+`merge` gets this right on its own — there is a table test for it — and for a
+while the repository then rebuilt the same decision out of the raw patch with
+COALESCE, which cannot write NULL. Every field could be set and the deadline
+could never be erased. Two implementations of one rule, and only one of them was
+tested.
+*/
+func TestEditingWritesEveryField(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+	next := time.Now().Add(48 * time.Hour).Truncate(time.Second)
+	f.assignment(t, assign.NewAssignment{DueAt: &next, AllowLate: true, Points: 100, PassingPoints: 50})
+
+	title, allowLate := "Renamed", false
+	edited, err := f.svc.EditAssignment(t.Context(), f.tenant, f.lesson,
+		assign.AssignmentPatch{Title: &title, AllowLate: &allowLate}, f.author)
+	if err != nil {
+		t.Fatalf("edit: %v", err)
+	}
+
+	if edited.Title != title {
+		t.Errorf("title is %q, want %q", edited.Title, title)
+	}
+	if edited.AllowLate {
+		t.Error("turning late work off did not reach the database")
+	}
+	// An unmentioned field is untouched.
+	if edited.DueAt == nil || !edited.DueAt.Equal(next) {
+		t.Errorf("an unmentioned deadline moved to %v, want %v", edited.DueAt, next)
+	}
+	if edited.Points != 100 {
+		t.Errorf("an unmentioned points total became %d", edited.Points)
+	}
+
+	// And the deadline comes off.
+	cleared, err := f.svc.EditAssignment(t.Context(), f.tenant, f.lesson,
+		assign.AssignmentPatch{ClearDueAt: true}, f.author)
+	if err != nil {
+		t.Fatalf("clear the deadline: %v", err)
+	}
+	if cleared.DueAt != nil {
+		t.Fatalf("the deadline survived being cleared: %v", cleared.DueAt)
+	}
+
+	// Not just in the returned row. Read it back.
+	reloaded, err := f.svc.Assignment(t.Context(), f.tenant, f.lesson)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if reloaded.DueAt != nil {
+		t.Errorf("the stored deadline is %v, want none", reloaded.DueAt)
+	}
+}

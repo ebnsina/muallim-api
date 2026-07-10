@@ -431,14 +431,16 @@ func registerAssignmentAuthoring(api huma.API, svc *assign.Service) {
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id" format:"uuid"`
 		Body struct {
-			Title         *string    `json:"title,omitempty" minLength:"1" maxLength:"200"`
-			Instructions  *string    `json:"instructions,omitempty" maxLength:"8000"`
-			Points        *int       `json:"points,omitempty" minimum:"0" maximum:"1000"`
-			PassingPoints *int       `json:"passing_points,omitempty" minimum:"0" maximum:"1000"`
-			MaxFiles      *int       `json:"max_files,omitempty" minimum:"1" maximum:"20"`
-			MaxBytes      *int64     `json:"max_bytes,omitempty" minimum:"1" maximum:"1073741824"`
-			DueAt         *time.Time `json:"due_at,omitempty"`
-			AllowLate     *bool      `json:"allow_late,omitempty"`
+			Title         *string `json:"title,omitempty" minLength:"1" maxLength:"200"`
+			Instructions  *string `json:"instructions,omitempty" maxLength:"8000"`
+			Points        *int    `json:"points,omitempty" minimum:"0" maximum:"1000"`
+			PassingPoints *int    `json:"passing_points,omitempty" minimum:"0" maximum:"1000"`
+			MaxFiles      *int    `json:"max_files,omitempty" minimum:"1" maximum:"20"`
+			MaxBytes      *int64  `json:"max_bytes,omitempty" minimum:"1" maximum:"1073741824"`
+			AllowLate     *bool   `json:"allow_late,omitempty"`
+
+			// `null` erases the deadline; an absent field leaves it where it is.
+			DueAt Optional[time.Time] `json:"due_at,omitempty" doc:"An instant, or null to remove the deadline."`
 		}
 	}) (*AssignmentOnlyOutput, error) {
 		p, author, err := assignmentAuthor(ctx)
@@ -450,12 +452,21 @@ func registerAssignmentAuthoring(api huma.API, svc *assign.Service) {
 			return nil, err
 		}
 
-		assignment, err := svc.EditAssignment(ctx, p.TenantID, lessonID, assign.AssignmentPatch{
+		patch := assign.AssignmentPatch{
 			Title: in.Body.Title, Instructions: in.Body.Instructions,
 			Points: in.Body.Points, PassingPoints: in.Body.PassingPoints,
 			MaxFiles: in.Body.MaxFiles, MaxBytes: in.Body.MaxBytes,
-			DueAt: in.Body.DueAt, AllowLate: in.Body.AllowLate,
-		}, author)
+			AllowLate: in.Body.AllowLate,
+		}
+		if in.Body.DueAt.Sent {
+			if in.Body.DueAt.Null {
+				patch.ClearDueAt = true
+			} else {
+				patch.DueAt = &in.Body.DueAt.Value
+			}
+		}
+
+		assignment, err := svc.EditAssignment(ctx, p.TenantID, lessonID, patch, author)
 		if err != nil {
 			return nil, assignError(err)
 		}

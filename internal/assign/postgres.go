@@ -93,23 +93,28 @@ func (r *PostgresRepository) AssignmentByID(ctx context.Context, tx pgx.Tx, tena
 	return assignment, nil
 }
 
-// UpdateAssignment applies a patch. COALESCE leaves a nil field alone.
-func (r *PostgresRepository) UpdateAssignment(ctx context.Context, tx pgx.Tx, tenantID, assignmentID uuid.UUID, p AssignmentPatch) (Assignment, error) {
+// UpdateAssignment writes an assignment whole.
+//
+// It takes the merged result, not the patch. A COALESCE here would be a second
+// implementation of `merge`, and it cannot express the one thing merge exists
+// for: `coalesce(NULL, due_at)` keeps the deadline, so a field can be set and
+// never erased. The validated result is the only thing worth writing.
+func (r *PostgresRepository) UpdateAssignment(ctx context.Context, tx pgx.Tx, tenantID, assignmentID uuid.UUID, a NewAssignment) (Assignment, error) {
 	assignment, err := scanAssignment(tx.QueryRow(ctx,
 		`UPDATE assignments SET
-		     title          = coalesce($3, title),
-		     instructions   = coalesce($4, instructions),
-		     points         = coalesce($5, points),
-		     passing_points = coalesce($6, passing_points),
-		     max_files      = coalesce($7, max_files),
-		     max_bytes      = coalesce($8, max_bytes),
-		     due_at         = coalesce($9, due_at),
-		     allow_late     = coalesce($10, allow_late),
+		     title          = $3,
+		     instructions   = $4,
+		     points         = $5,
+		     passing_points = $6,
+		     max_files      = $7,
+		     max_bytes      = $8,
+		     due_at         = $9,
+		     allow_late     = $10,
 		     updated_at     = now()
 		 WHERE tenant_id = $1 AND id = $2
 		 RETURNING `+assignmentColumns,
-		tenantID, assignmentID, p.Title, p.Instructions, p.Points, p.PassingPoints,
-		p.MaxFiles, p.MaxBytes, p.DueAt, p.AllowLate))
+		tenantID, assignmentID, a.Title, a.Instructions, a.Points, a.PassingPoints,
+		a.MaxFiles, a.MaxBytes, a.DueAt, a.AllowLate))
 
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
