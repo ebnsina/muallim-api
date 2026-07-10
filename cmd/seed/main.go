@@ -89,8 +89,8 @@ func run() error {
 	flag.IntVar(&cfg.workspaces, "workspaces", 1, "how many tenants; the first is always `localhost`")
 	flag.IntVar(&cfg.courses, "courses", 8, "courses per workspace")
 	flag.IntVar(&cfg.students, "students", 40, "students per workspace")
-	flag.IntVar(&cfg.topics, "topics", 4, "topics per course")
-	flag.IntVar(&cfg.lessons, "lessons", 5, "lessons per topic")
+	flag.IntVar(&cfg.topics, "topics", 4, "most topics per course (each has 2..N+1)")
+	flag.IntVar(&cfg.lessons, "lessons", 5, "most lessons per topic (each has 3..N+2)")
 	flag.Float64Var(&cfg.quizRate, "quiz-rate", 0.5, "share of courses with a quiz")
 	flag.Float64Var(&cfg.assignmentRate, "assignment-rate", 0.4, "share of courses with an assignment")
 	flag.Float64Var(&cfg.enrolRate, "enrol-rate", 0.25, "share of student/course pairs that enrol")
@@ -556,11 +556,20 @@ func seedCatalogue(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg confi
 			status, published, drip,
 		})
 
-		for t := range cfg.topics {
+		// Courses vary in size, so a catalogue shows a spread of lesson counts
+		// rather than the same number on every card. Both draws come from the
+		// course's own deterministic rng, so a reseed reproduces the exact shape;
+		// the flags set the ceiling of each range, not a fixed count.
+		topicCount := 2 + rng.IntN(cfg.topics)
+
+		lastTopicLessons := 0
+		for t := range topicCount {
 			topicID := id("topic", course.id, t)
 			topics = append(topics, []any{topicID, tenantID, course.id, topicTitles[t%len(topicTitles)], t})
 
-			for l := range cfg.lessons {
+			lessonCount := 3 + rng.IntN(cfg.lessons)
+			lastTopicLessons = lessonCount
+			for l := range lessonCount {
 				lessonID := id("lesson", topicID, l)
 				course.lessons = append(course.lessons, lessonID)
 
@@ -579,7 +588,7 @@ func seedCatalogue(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg confi
 		// Whatever the last topic ends with sits after the lessons already in it.
 		// Positions are dense, so they are counted rather than assumed.
 		lastTopic := topics[len(topics)-1][0].(uuid.UUID)
-		tail := cfg.lessons
+		tail := lastTopicLessons
 
 		// Half the courses end with a quiz, on a lesson of their own — and the first
 		// always does, because the demo accounts finish it, and a finished course
