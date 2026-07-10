@@ -102,6 +102,23 @@ make worker         # background jobs
 make build          # binaries into bin/
 ```
 
+## Demo accounts
+
+`make seed` builds the `localhost` workspace and prints this table. Every account
+shares one password.
+
+| Email | Password | Role |
+|---|---|---|
+| `demo@muallim.test` | `demo-password-please-change` | owner |
+| `instructor@muallim.test` | `demo-password-please-change` | instructor |
+| `marker@muallim.test` | `demo-password-please-change` | instructor, with essays waiting |
+| `student@muallim.test` | `demo-password-please-change` | student |
+
+These are fixtures, not secrets: they exist only in a database `make seed` will
+happily delete and rebuild, on a reserved `.test` domain that resolves nowhere.
+`make seed -reset` drops the workspace and every account in it, which is why the
+accounts you had before it ran are gone.
+
 ## CI
 
 `.github/workflows/ci.yml` runs `make check`, `staticcheck`, `make spec`, and a build, against a real Postgres 17.
