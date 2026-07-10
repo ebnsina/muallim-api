@@ -169,6 +169,25 @@ func subdomain(index int) string {
 	return fmt.Sprintf("demo-%d", index)
 }
 
+// seedNamespace names this command, so a workspace id derived under it cannot
+// collide with a uuid derived anywhere else.
+var seedNamespace = uuid.MustParse("6f9619ff-8b86-d011-b42d-00c04fc964ff")
+
+// tenantID is derived from the subdomain rather than invented.
+//
+// `-reset` deletes a workspace and builds it again. If the new row took a fresh
+// uuid, a `cmd/api` that happened to be running would keep serving the old one:
+// tenant resolution is cached for five minutes, and the id it hands out would no
+// longer exist. The first write that referenced it — an audit line, in practice —
+// would fail a foreign key, and the login it belonged to would 500.
+//
+// Deriving the id means reseeding is invisible to a running server, and it makes
+// the whole database reproducible: the same subdomain is always the same
+// workspace, so a bookmarked URL and a saved session survive a reseed.
+func tenantID(index int) uuid.UUID {
+	return uuid.NewSHA1(seedNamespace, []byte(subdomain(index)))
+}
+
 // reset deletes the seeded workspaces, and then the people who were only ever in
 // them.
 //
@@ -209,7 +228,7 @@ func reset(ctx context.Context, db *database.DB, cfg config) error {
 func seedWorkspace(ctx context.Context, db *database.DB, cfg config, index int, hash string, rng *rand.Rand) (counts, error) {
 	var got counts
 
-	tenantID := uuid.New()
+	id := tenantID(index)
 	name := workspaceNames[index%len(workspaceNames)]
 
 	// The tenant row is not tenant-scoped, so it goes in unbound.
@@ -218,11 +237,12 @@ func seedWorkspace(ctx context.Context, db *database.DB, cfg config, index int, 
 			`INSERT INTO tenants (id, subdomain, name) VALUES ($1, $2, $3)
 			 ON CONFLICT (lower(subdomain)) DO UPDATE SET name = excluded.name
 			 RETURNING id`,
-			tenantID, subdomain(index), name).Scan(&tenantID)
+			id, subdomain(index), name).Scan(&id)
 	})
 	if err != nil {
 		return got, fmt.Errorf("create tenant: %w", err)
 	}
+	tenantID := id
 	got.tenants = 1
 
 	// Everything below is written inside a transaction bound to this tenant, so
@@ -247,7 +267,7 @@ func seedWorkspace(ctx context.Context, db *database.DB, cfg config, index int, 
 			}
 		}
 
-		learning, err := seedLearning(ctx, tx, tenantID, cfg, catalogue, people.students, rng)
+		learning, err := seedLearning(ctx, tx, tenantID, cfg, catalogue, people.students, people.demo, rng)
 		if err != nil {
 			return fmt.Errorf("learning: %w", err)
 		}
@@ -269,6 +289,11 @@ type people struct {
 	instructor uuid.UUID
 	students   []uuid.UUID
 	everyone   []uuid.UUID
+
+	// The named accounts a person actually signs in as. Kept out of `students` so
+	// their enrolments are dealt by hand rather than by a coin toss — a demo
+	// dashboard that is empty because the dice said so is a demo of nothing.
+	demo []uuid.UUID
 }
 
 func seedPeople(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, index int, hash string, howMany int) (people, error) {
@@ -282,6 +307,7 @@ func seedPeople(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, index int, h
 	}
 
 	accounts := make([]account, 0, howMany+4)
+	named := map[string]bool{}
 
 	// The named accounts exist only in the first workspace. A second `demo@` in a
 	// second tenant would collide on the users table, which is global — one person,
@@ -294,6 +320,7 @@ func seedPeople(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, index int, h
 			{demoStudent, "Al-Khwarizmi", auth.RoleStudent},
 		} {
 			accounts = append(accounts, account{uuid.New(), seat.email, seat.name, seat.role})
+			named[seat.email] = true
 		}
 	} else {
 		accounts = append(accounts,
@@ -320,6 +347,10 @@ func seedPeople(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, index int, h
 		memberships = append(memberships, []any{uuid.New(), tenantID, a.id, a.role, "active"})
 
 		p.everyone = append(p.everyone, a.id)
+		if named[a.email] {
+			p.demo = append(p.demo, a.id)
+		}
+
 		switch a.role {
 		case auth.RoleOwner:
 			p.owner = a.id
@@ -328,7 +359,9 @@ func seedPeople(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, index int, h
 				p.instructor = a.id
 			}
 		case auth.RoleStudent:
-			p.students = append(p.students, a.id)
+			if !named[a.email] {
+				p.students = append(p.students, a.id)
+			}
 		}
 	}
 
@@ -429,7 +462,16 @@ func seedCatalogue(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg confi
 	now := time.Now()
 
 	for index := range cfg.courses {
-		course := seededCourse{id: uuid.New(), slug: fmt.Sprintf("%s-%d", slugify(courseTitles[index%len(courseTitles)]), index)}
+		// The title list is shorter than the catalogue, so a course past the end of it
+		// takes a part number. Two courses with the same name on one dashboard is a
+		// dashboard nobody can navigate — and it is the kind of thing only a realistic
+		// volume of data ever shows you.
+		title := courseTitles[index%len(courseTitles)]
+		if part := index / len(courseTitles); part > 0 {
+			title = fmt.Sprintf("%s, Part %s", title, roman[part%len(roman)])
+		}
+
+		course := seededCourse{id: uuid.New(), slug: fmt.Sprintf("%s-%d", slugify(title), index)}
 
 		// One course in six stays a draft. A catalogue where everything is published
 		// never exercises the query filter that hides the rest.
@@ -441,7 +483,7 @@ func seedCatalogue(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg confi
 		drip := []string{"none", "none", "none", "scheduled", "after_enrolment", "sequential"}[index%6]
 
 		courses = append(courses, []any{
-			course.id, tenantID, course.slug, courseTitles[index%len(courseTitles)],
+			course.id, tenantID, course.slug, title,
 			courseSummaries[index%len(courseSummaries)],
 			[]string{"beginner", "intermediate", "advanced", "expert"}[index%4],
 			status, published, drip,
@@ -549,7 +591,7 @@ type learningCounts struct {
 	enrolments, progress, attempts, answers int
 }
 
-func seedLearning(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg config, catalogue []seededCourse, students []uuid.UUID, rng *rand.Rand) (learningCounts, error) {
+func seedLearning(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg config, catalogue []seededCourse, students, demo []uuid.UUID, rng *rand.Rand) (learningCounts, error) {
 	var got learningCounts
 
 	var (
@@ -561,6 +603,52 @@ func seedLearning(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg config
 	)
 
 	now := time.Now()
+
+	/*
+		The named accounts get a hand-dealt hand.
+
+		Whoever signs in as demo@ must land on a dashboard with something on it — a
+		course nearly done, a course just begun, a course untouched — so the page can
+		be judged. Leaving it to `enrolRate` means the owner's dashboard is empty
+		whenever the dice say so, which is most of the time.
+	*/
+	demoShare := []float64{1.0, 0.6, 0.15, 0}
+	for _, person := range demo {
+		for i, course := range catalogue {
+			if i >= len(demoShare) {
+				break
+			}
+
+			done := int(float64(len(course.lessons)) * demoShare[i])
+			enrolledAt := now.Add(-time.Duration(20+i*10) * 24 * time.Hour)
+
+			status := enroll.StatusActive
+			var completedAt any
+			if done == len(course.lessons) {
+				status = enroll.StatusCompleted
+				completedAt = enrolledAt.Add(9 * 24 * time.Hour)
+			}
+
+			enrolments = append(enrolments, []any{
+				uuid.New(), tenantID, course.id, person, status, enroll.SourceSelf, enrolledAt, completedAt,
+			})
+			got.enrolments++
+
+			for l := range done {
+				progress = append(progress, []any{
+					uuid.New(), tenantID, person, course.lessons[l], course.id,
+					enrolledAt.Add(time.Duration(l) * 12 * time.Hour), 240 + rng.IntN(400),
+				})
+				got.progress++
+			}
+
+			percent := 0
+			if len(course.lessons) > 0 {
+				percent = done * 100 / len(course.lessons)
+			}
+			rollups = append(rollups, []any{tenantID, person, course.id, done, len(course.lessons), percent})
+		}
+	}
 
 	for _, course := range catalogue {
 		for _, student := range students {
@@ -774,6 +862,8 @@ var (
 		"Read the sky, and build the instrument that reads it for you.",
 		"A physician's syllabus, from diagnosis to the pharmacology of what you can grow.",
 	}
+
+	roman = []string{"I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"}
 
 	topicTitles = []string{"Foundations", "The method", "In practice", "Where it breaks", "Further reading"}
 
