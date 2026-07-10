@@ -26,6 +26,7 @@ import (
 	"io"
 	"log/slog"
 	"math/rand/v2"
+	neturl "net/url"
 	"os"
 	"strings"
 	"time"
@@ -142,7 +143,7 @@ func run() error {
 		total.add(got)
 	}
 
-	report(cfg, total, time.Since(started))
+	report(cfg, url, total, time.Since(started))
 	return nil
 }
 
@@ -192,6 +193,30 @@ var seedNamespace = uuid.MustParse("6f9619ff-8b86-d011-b42d-00c04fc964ff")
 // workspace, so a bookmarked URL and a saved session survive a reseed.
 func tenantID(index int) uuid.UUID {
 	return uuid.NewSHA1(seedNamespace, []byte(subdomain(index)))
+}
+
+/*
+id derives a stable uuid from what a row *is*.
+
+Every id in this file used to be `uuid.New()`, which made the `-seed` flag a lie:
+the same seed dealt the same hand of decisions and then gave every card a new
+face. Reseeding changed every course slug's id, every lesson's, every option's,
+so a page anyone had open was a 404 and any script holding an id had to be
+rewritten. Only the workspace survived, and only because it was derived.
+
+The key is the row's natural name — the workspace and the email, the course and
+the position — never a counter that shifts when something before it is added.
+`kind` keeps the namespaces apart: a topic at position 2 of a course and a lesson
+at position 2 of a topic must not collide, and without a prefix they would.
+*/
+func id(kind string, parts ...any) uuid.UUID {
+	key := kind
+	for _, part := range parts {
+		// The separator is what makes this injective. Without it, ("ab", "c") and
+		// ("a", "bc") are the same key, and two rows are the same row.
+		key += fmt.Sprintf("/%v", part)
+	}
+	return uuid.NewSHA1(seedNamespace, []byte(key))
 }
 
 // reset deletes the seeded workspaces, and then the people who were only ever in
@@ -328,20 +353,24 @@ func seedPeople(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, index int, h
 			{demoMarker, "Maryam al-Astrulabi", auth.RoleInstructor},
 			{demoStudent, "Al-Khwarizmi", auth.RoleStudent},
 		} {
-			accounts = append(accounts, account{uuid.New(), seat.email, seat.name, seat.role})
+			accounts = append(accounts, account{id("user", seat.email), seat.email, seat.name, seat.role})
 			named[seat.email] = true
 		}
 	} else {
+		owner := fmt.Sprintf("owner-%d@muallim.test", index)
+		instructor := fmt.Sprintf("instructor-%d@muallim.test", index)
+
 		accounts = append(accounts,
-			account{uuid.New(), fmt.Sprintf("owner-%d@muallim.test", index), scholars[0], auth.RoleOwner},
-			account{uuid.New(), fmt.Sprintf("instructor-%d@muallim.test", index), scholars[1], auth.RoleInstructor},
+			account{id("user", owner), owner, scholars[0], auth.RoleOwner},
+			account{id("user", instructor), instructor, scholars[1], auth.RoleInstructor},
 		)
 	}
 
 	for student := range howMany {
+		email := fmt.Sprintf("learner-%d-%d@muallim.test", index, student)
 		accounts = append(accounts, account{
-			id:    uuid.New(),
-			email: fmt.Sprintf("learner-%d-%d@muallim.test", index, student),
+			id:    id("user", email),
+			email: email,
 			name:  scholars[student%len(scholars)],
 			role:  auth.RoleStudent,
 		})
@@ -353,7 +382,7 @@ func seedPeople(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, index int, h
 
 	for _, a := range accounts {
 		users = append(users, []any{a.id, a.email, hash, a.name, verified})
-		memberships = append(memberships, []any{uuid.New(), tenantID, a.id, a.role, "active"})
+		memberships = append(memberships, []any{id("membership", tenantID, a.email), tenantID, a.id, a.role, "active"})
 
 		p.everyone = append(p.everyone, a.id)
 		if named[a.email] {
@@ -490,7 +519,8 @@ func seedCatalogue(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg confi
 			title = fmt.Sprintf("%s, Part %s", title, roman[part%len(roman)])
 		}
 
-		course := seededCourse{id: uuid.New(), slug: fmt.Sprintf("%s-%d", slugify(title), index)}
+		slug := fmt.Sprintf("%s-%d", slugify(title), index)
+		course := seededCourse{id: id("course", tenantID, slug), slug: slug}
 
 		// One course in six stays a draft. A catalogue where everything is published
 		// never exercises the query filter that hides the rest.
@@ -509,11 +539,11 @@ func seedCatalogue(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg confi
 		})
 
 		for t := range cfg.topics {
-			topicID := uuid.New()
+			topicID := id("topic", course.id, t)
 			topics = append(topics, []any{topicID, tenantID, course.id, topicTitles[t%len(topicTitles)], t})
 
 			for l := range cfg.lessons {
-				lessonID := uuid.New()
+				lessonID := id("lesson", topicID, l)
 				course.lessons = append(course.lessons, lessonID)
 
 				// The first lesson of the first topic is the free sample.
@@ -535,7 +565,7 @@ func seedCatalogue(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg confi
 
 		// Half the courses end with a quiz, on a lesson of their own.
 		if rng.Float64() < cfg.quizRate {
-			quizLesson := uuid.New()
+			quizLesson := id("lesson", course.id, "quiz")
 
 			lessons = append(lessons, []any{
 				quizLesson, tenantID, lastTopic, "End-of-course quiz",
@@ -545,14 +575,14 @@ func seedCatalogue(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg confi
 			tail++
 			course.lessons = append(course.lessons, quizLesson)
 
-			quiz := &seededQuiz{id: uuid.New(), lessonID: quizLesson, passing: 60}
+			quiz := &seededQuiz{id: id("quiz", course.id), lessonID: quizLesson, passing: 60}
 			quizzes = append(quizzes, []any{
 				quiz.id, tenantID, quizLesson, "End-of-course quiz",
 				"Everything from the four sections above.", 0, 3, quiz.passing,
 			})
 
 			for q := range 5 {
-				item := seededQuestion{id: uuid.New(), kind: assess.TypeSingleChoice, points: 2}
+				item := seededQuestion{id: id("question", quiz.id, q), kind: assess.TypeSingleChoice, points: 2}
 
 				// The last question is an essay, so the marking queue has work in it.
 				if q == 4 {
@@ -568,12 +598,13 @@ func seedCatalogue(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg confi
 				if item.kind == assess.TypeSingleChoice {
 					correctAt := rng.IntN(4)
 					for o := range 4 {
-						optionID := uuid.New()
+						optionID := id("option", item.id, o)
 						if o == correctAt {
 							item.correct = optionID
 						}
 						options = append(options, []any{
-							optionID, tenantID, item.id, optionContents[o], o, o == correctAt, uuid.New(), "",
+							optionID, tenantID, item.id, optionContents[o], o, o == correctAt,
+							id("match", item.id, o), "",
 						})
 					}
 				}
@@ -601,7 +632,7 @@ func seedCatalogue(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg confi
 			assignment open in front of them rather than whatever the dice said.
 		*/
 		if index != 0 && (index <= 2 || rng.Float64() < cfg.assignmentRate) {
-			handInLesson := uuid.New()
+			handInLesson := id("lesson", course.id, "assignment")
 			title := assignmentTitles[assigned%len(assignmentTitles)]
 
 			lessons = append(lessons, []any{
@@ -625,7 +656,7 @@ func seedCatalogue(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg confi
 			}
 
 			assignments = append(assignments, []any{
-				uuid.New(), tenantID, handInLesson, title,
+				id("assignment", course.id), tenantID, handInLesson, title,
 				assignmentBrief, 100, 60, 3, int64(25 << 20), dueAt, true,
 			})
 			course.assignment = true
@@ -703,13 +734,14 @@ func seedLearning(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg config
 			}
 
 			enrolments = append(enrolments, []any{
-				uuid.New(), tenantID, course.id, person, status, enroll.SourceSelf, enrolledAt, completedAt,
+				id("enrolment", course.id, person), tenantID, course.id, person,
+				status, enroll.SourceSelf, enrolledAt, completedAt,
 			})
 			got.enrolments++
 
 			for l := range done {
 				progress = append(progress, []any{
-					uuid.New(), tenantID, person, course.lessons[l], course.id,
+					id("progress", person, course.lessons[l]), tenantID, person, course.lessons[l], course.id,
 					enrolledAt.Add(time.Duration(l) * 12 * time.Hour), 240 + rng.IntN(400),
 				})
 				got.progress++
@@ -748,7 +780,7 @@ func seedLearning(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg config
 			}
 
 			enrolments = append(enrolments, []any{
-				uuid.New(), tenantID, course.id, student, status,
+				id("enrolment", course.id, student), tenantID, course.id, student, status,
 				enroll.SourceSelf, enrolledAt, completedAt,
 			})
 			got.enrolments++
@@ -758,7 +790,7 @@ func seedLearning(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg config
 					break
 				}
 				progress = append(progress, []any{
-					uuid.New(), tenantID, student, lesson, course.id,
+					id("progress", student, lesson), tenantID, student, lesson, course.id,
 					enrolledAt.Add(time.Duration(i) * 36 * time.Hour), 180 + rng.IntN(600),
 				})
 				got.progress++
@@ -777,7 +809,7 @@ func seedLearning(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg config
 				continue
 			}
 
-			attemptID := uuid.New()
+			attemptID := id("attempt", course.quiz.id, student)
 			submitted := enrolledAt.Add(time.Duration(rng.IntN(60)) * 24 * time.Hour)
 
 			// One attempt in four is still waiting for a person, so the marking queue
@@ -791,7 +823,7 @@ func seedLearning(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg config
 				switch {
 				case item.kind == assess.TypeOpenEnded && awaiting:
 					answerRows = append(answerRows, []any{
-						uuid.New(), tenantID, attemptID, item.id,
+						id("answer", attemptID, item.id), tenantID, attemptID, item.id,
 						`{"text":"An answer of some length, written under time pressure."}`,
 						false, false, 0, "", nil,
 					})
@@ -800,7 +832,7 @@ func seedLearning(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg config
 					awarded := rng.IntN(item.points + 1)
 					points += awarded
 					answerRows = append(answerRows, []any{
-						uuid.New(), tenantID, attemptID, item.id,
+						id("answer", attemptID, item.id), tenantID, attemptID, item.id,
 						`{"text":"An answer of some length, written under time pressure."}`,
 						true, awarded == item.points, awarded, "Good, though you never define the term.", submitted,
 					})
@@ -810,7 +842,9 @@ func seedLearning(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg config
 					right := rng.Float64() < 0.66
 					chosen := item.correct
 					if !right {
-						chosen = uuid.New() // an option belonging to nothing: a wrong answer.
+						// An option belonging to nothing: a wrong answer. Derived under its
+						// own prefix, so it can never accidentally name a real option.
+						chosen = id("wrong", attemptID, item.id)
 					}
 					awarded := 0
 					if right {
@@ -819,7 +853,7 @@ func seedLearning(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg config
 					points += awarded
 
 					answerRows = append(answerRows, []any{
-						uuid.New(), tenantID, attemptID, item.id,
+						id("answer", attemptID, item.id), tenantID, attemptID, item.id,
 						fmt.Sprintf(`{"choices":["%s"]}`, chosen),
 						true, right, awarded, "", submitted,
 					})
@@ -880,7 +914,18 @@ func slugify(title string) string {
 	return strings.Trim(out.String(), "-")
 }
 
-func report(cfg config, got counts, took time.Duration) {
+// databaseName is the database a URL points at, and nothing else from the URL.
+// The password lives in there too, and a seeder that prints one has put a secret
+// in a terminal, a scrollback, and whatever CI keeps.
+func databaseName(url string) string {
+	parsed, err := neturl.Parse(url)
+	if err != nil {
+		return "?"
+	}
+	return strings.TrimPrefix(parsed.Path, "/")
+}
+
+func report(cfg config, url string, got counts, took time.Duration) {
 	rows := got.users + got.courses + got.lessons + got.quizzes + got.questions +
 		got.assignments + got.enrolments + got.progress + got.attempts + got.answers
 
@@ -891,7 +936,11 @@ func report(cfg config, got counts, took time.Duration) {
 		got.quizzes, got.questions, got.assignments, got.enrolments, got.progress)
 	fmt.Printf("  attempts    %d (%d answers)\n\n", got.attempts, got.answers)
 
-	fmt.Printf("sign in at http://localhost:5173 — every account shares one password\n\n")
+	// Which database, because these accounts are only in this one. `pnpm test:e2e`
+	// runs against `lms_test`, which has no demo accounts at all — and an API left
+	// pointing there answers "those credentials are not valid" to every one of them.
+	fmt.Printf("written to %s. sign in at http://localhost:5173 — every account shares one password\n\n",
+		databaseName(url))
 	fmt.Printf("  %-28s %s   owner\n", demoOwner, DemoPassword)
 	fmt.Printf("  %-28s %s   instructor\n", demoInstructor, DemoPassword)
 	fmt.Printf("  %-28s %s   marks essays\n", demoMarker, DemoPassword)
