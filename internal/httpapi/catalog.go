@@ -107,14 +107,18 @@ func registerCatalog(api huma.API, svc *catalog.Service) {
 			"There is no total count: counting matching rows costs a full scan on every request.",
 		Tags: []string{"Catalog"},
 	}, func(ctx context.Context, in *struct {
-		Limit  int    `query:"limit" minimum:"1" maximum:"100" default:"20" doc:"Page size"`
-		Cursor string `query:"cursor" maxLength:"128" doc:"Opaque cursor from a previous page"`
+		Limit      int    `query:"limit" minimum:"1" maximum:"100" default:"20" doc:"Page size"`
+		Cursor     string `query:"cursor" maxLength:"128" doc:"Opaque cursor from a previous page"`
+		Q          string `query:"q" maxLength:"200" doc:"Filter to courses whose title contains this"`
+		Difficulty string `query:"difficulty" maxLength:"20" doc:"Filter to one of: beginner, intermediate, advanced, expert"`
 	}) (*ListCoursesOutput, error) {
 		// IncludeDrafts is left false. This route is anonymous, and there is no
 		// query parameter that could set it.
 		page, err := svc.ListCourses(ctx, tenant.ID(ctx), catalog.ListParams{
-			Limit:  in.Limit,
-			Cursor: in.Cursor,
+			Limit:      in.Limit,
+			Cursor:     in.Cursor,
+			Search:     in.Q,
+			Difficulty: in.Difficulty,
 		})
 		if err != nil {
 			return nil, catalogError(err)
@@ -140,8 +144,10 @@ func registerCatalog(api huma.API, svc *catalog.Service) {
 		Tags:     []string{"Catalog"},
 		Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, in *struct {
-		Limit  int    `query:"limit" minimum:"1" maximum:"100" default:"20" doc:"Page size"`
-		Cursor string `query:"cursor" maxLength:"128" doc:"Opaque cursor from a previous page"`
+		Limit      int    `query:"limit" minimum:"1" maximum:"100" default:"20" doc:"Page size"`
+		Cursor     string `query:"cursor" maxLength:"128" doc:"Opaque cursor from a previous page"`
+		Q          string `query:"q" maxLength:"200" doc:"Filter to courses whose title contains this"`
+		Difficulty string `query:"difficulty" maxLength:"20" doc:"Filter to one of: beginner, intermediate, advanced, expert"`
 	}) (*ListCoursesOutput, error) {
 		if _, err := requirePermission(ctx, auth.PermCourseWrite); err != nil {
 			return nil, err
@@ -150,6 +156,8 @@ func registerCatalog(api huma.API, svc *catalog.Service) {
 		page, err := svc.ListCourses(ctx, tenant.ID(ctx), catalog.ListParams{
 			Limit:         in.Limit,
 			Cursor:        in.Cursor,
+			Search:        in.Q,
+			Difficulty:    in.Difficulty,
 			IncludeDrafts: true,
 		})
 		if err != nil {

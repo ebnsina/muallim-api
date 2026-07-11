@@ -487,3 +487,63 @@ func TestAuthoringWritesAreBounded(t *testing.T) {
 		t.Errorf("reordering 20 lessons issued %d queries, want %d — a reorder must not be one query per row", got, want)
 	}
 }
+
+// The listing filters by a title search and by difficulty, together and apart. A
+// difficulty the schema does not know filters nothing rather than erroring.
+func TestListingFiltersBySearchAndDifficulty(t *testing.T) {
+	t.Parallel()
+
+	db := testDB(t)
+	svc := newService(db)
+	tenantID := seedTenant(t, db)
+	a := seedAuthor(t, db, tenantID)
+
+	create := func(title, difficulty string) {
+		if _, err := svc.CreateCourse(t.Context(), tenantID, catalog.NewCourse{
+			Slug: "c-" + uuid.NewString()[:8], Title: title, Difficulty: difficulty,
+		}, a); err != nil {
+			t.Fatalf("CreateCourse %q: %v", title, err)
+		}
+	}
+	create("Go Basics", "beginner")
+	create("Advanced Go", "advanced")
+	create("Rust for Beginners", "beginner")
+
+	titles := func(p catalog.ListParams) map[string]bool {
+		p.IncludeDrafts = true
+		p.Limit = 50
+		page, err := svc.ListCourses(t.Context(), tenantID, p)
+		if err != nil {
+			t.Fatalf("ListCourses: %v", err)
+		}
+		set := make(map[string]bool, len(page.Courses))
+		for _, c := range page.Courses {
+			set[c.Title] = true
+		}
+		return set
+	}
+	is := func(got map[string]bool, want ...string) bool {
+		if len(got) != len(want) {
+			return false
+		}
+		for _, w := range want {
+			if !got[w] {
+				return false
+			}
+		}
+		return true
+	}
+
+	if got := titles(catalog.ListParams{Search: "go"}); !is(got, "Go Basics", "Advanced Go") {
+		t.Errorf("search 'go' (case-insensitive) = %v, want the two Go courses", got)
+	}
+	if got := titles(catalog.ListParams{Difficulty: "beginner"}); !is(got, "Go Basics", "Rust for Beginners") {
+		t.Errorf("difficulty beginner = %v", got)
+	}
+	if got := titles(catalog.ListParams{Search: "go", Difficulty: "beginner"}); !is(got, "Go Basics") {
+		t.Errorf("go + beginner = %v, want only Go Basics", got)
+	}
+	if got := titles(catalog.ListParams{Difficulty: "wizard"}); len(got) != 3 {
+		t.Errorf("an unknown difficulty returned %d courses, want all 3", len(got))
+	}
+}

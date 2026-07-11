@@ -25,12 +25,19 @@ func NewPostgresRepository() *PostgresRepository { return &PostgresRepository{} 
 //
 // It fetches limit+1 rows: the extra row answers "is there a next page" without
 // a COUNT(*), which would scan every matching row on every request.
+// The two optional filters are the same residual predicate the cursor uses: a
+// null parameter passes every row, so the index still orders the scan and the
+// plan is unchanged when nobody searches or filters. Courses per workspace are
+// few, so the ILIKE is a filter on an already-small, index-ordered scan, not a
+// reason to reach for a trigram index.
 const listPublishedCoursesSQL = `
 	SELECT id, slug, title, summary, difficulty, status, published_at, drip_mode, created_at, updated_at
 	FROM courses
 	WHERE tenant_id = $1
 	  AND status = 'published'
 	  AND ($2::timestamptz IS NULL OR (created_at, id) < ($2, $3))
+	  AND ($5::text IS NULL OR difficulty = $5)
+	  AND ($6::text IS NULL OR title ILIKE '%' || $6 || '%')
 	ORDER BY created_at DESC, id DESC
 	LIMIT $4`
 
@@ -46,6 +53,8 @@ const listAllCoursesSQL = `
 	FROM courses
 	WHERE tenant_id = $1
 	  AND ($2::timestamptz IS NULL OR (created_at, id) < ($2, $3))
+	  AND ($5::text IS NULL OR difficulty = $5)
+	  AND ($6::text IS NULL OR title ILIKE '%' || $6 || '%')
 	ORDER BY created_at DESC, id DESC
 	LIMIT $4`
 
@@ -72,7 +81,17 @@ func (r *PostgresRepository) ListCourses(ctx context.Context, tx pgx.Tx, tenantI
 		query = listAllCoursesSQL
 	}
 
-	rows, err := tx.Query(ctx, query, tenantID, afterTime, afterID, p.Limit+1)
+	// Blank filters go to the database as NULL, which the query reads as "no
+	// filter". A non-null empty string would match nothing, which is the opposite.
+	var difficulty, search any
+	if p.Difficulty != "" {
+		difficulty = p.Difficulty
+	}
+	if p.Search != "" {
+		search = p.Search
+	}
+
+	rows, err := tx.Query(ctx, query, tenantID, afterTime, afterID, p.Limit+1, difficulty, search)
 	if err != nil {
 		return nil, fmt.Errorf("catalog: list courses: %w", err)
 	}

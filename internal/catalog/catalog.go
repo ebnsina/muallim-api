@@ -135,6 +135,14 @@ type ListParams struct {
 
 	// Cursor is an opaque continuation token from a previous Page.
 	Cursor string
+
+	// Search narrows the listing to courses whose title contains it, case-
+	// insensitively. Blank matches everything.
+	Search string
+
+	// Difficulty narrows to one level. Blank, or anything not a known level,
+	// matches everything — a filter nobody set filters nothing.
+	Difficulty string
 }
 
 // Page size bounds. An unbounded list endpoint is an outage waiting for the

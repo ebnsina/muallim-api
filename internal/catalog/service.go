@@ -3,6 +3,7 @@ package catalog
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -114,5 +115,21 @@ func (p ListParams) normalise() (ListParams, error) {
 		return p, fmt.Errorf("%w: limit must be between 1 and %d", ErrInvalidLimit, MaxPageSize)
 	}
 
+	// A blank search filters nothing; the query treats an empty string as no
+	// filter, so trimming it to empty is the same as not having asked.
+	p.Search = strings.TrimSpace(p.Search)
+
+	// A difficulty the schema does not recognise is dropped rather than refused: a
+	// stale bookmark or a typo shows the whole catalogue, not an error page.
+	if !validDifficulties[p.Difficulty] {
+		p.Difficulty = ""
+	}
+
 	return p, nil
+}
+
+// The levels the courses table's CHECK allows. A filter outside them can match
+// nothing, so it is treated as no filter at all.
+var validDifficulties = map[string]bool{
+	"beginner": true, "intermediate": true, "advanced": true, "expert": true,
 }
