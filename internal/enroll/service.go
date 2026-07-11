@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -32,6 +33,12 @@ type Repository interface {
 	MarkLesson(ctx context.Context, tx pgx.Tx, tenantID, userID, lessonID, courseID uuid.UUID, complete bool) error
 	RecomputeProgress(ctx context.Context, tx pgx.Tx, tenantID, userID, courseID uuid.UUID) (Progress, error)
 	ProgressFor(ctx context.Context, tx pgx.Tx, tenantID, userID, courseID uuid.UUID) (Progress, error)
+
+	UpsertReview(ctx context.Context, tx pgx.Tx, tenantID, courseID, userID uuid.UUID, rating int, body string) (Review, error)
+	DeleteReview(ctx context.Context, tx pgx.Tx, tenantID, courseID, userID uuid.UUID) error
+	ReviewFor(ctx context.Context, tx pgx.Tx, tenantID, courseID, userID uuid.UUID) (Review, error)
+	ListReviews(ctx context.Context, tx pgx.Tx, tenantID, courseID uuid.UUID, limit int) ([]Review, error)
+	ReviewSummary(ctx context.Context, tx pgx.Tx, tenantID, courseID uuid.UUID) (ReviewSummary, error)
 }
 
 // AuditRecorder appends to the audit trail inside the caller's transaction.
@@ -508,4 +515,92 @@ func (s *Service) Grant(ctx context.Context, tenantID uuid.UUID, slug string, le
 		return Enrolment{}, err
 	}
 	return enrolment, nil
+}
+
+// Review records or updates a learner's verdict on a course they are enrolled
+// in. An empty rating out of 1..5 is refused; the body is optional and trimmed.
+func (s *Service) Review(ctx context.Context, tenantID uuid.UUID, slug string, actor Actor, rating int, body string) (Review, error) {
+	if rating < MinRating || rating > MaxRating {
+		return Review{}, ErrInvalidReview
+	}
+	body = strings.TrimSpace(body)
+	if len(body) > MaxReviewBody {
+		return Review{}, ErrInvalidReview
+	}
+
+	var review Review
+	err := s.db.WithTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		courseID, _, err := s.repo.CourseBySlug(ctx, tx, tenantID, slug)
+		if err != nil {
+			return err
+		}
+		// You review a course you belong to. A live enrolment (active or completed)
+		// is the entitlement; a stranger rating a course they never took is noise.
+		if !s.hasLiveEnrolment(ctx, tx, tenantID, courseID, actor.UserID) {
+			return ErrNotEnrolled
+		}
+		review, err = s.repo.UpsertReview(ctx, tx, tenantID, courseID, actor.UserID, rating, body)
+		if err != nil {
+			return err
+		}
+		return s.audit.Record(ctx, tx, tenantID, AuditEntry{
+			ActorID: &actor.UserID, Action: ActionReviewed,
+			TargetType: "course", TargetID: courseID.String(),
+			IP: actor.IP, UserAgent: actor.UserAgent,
+			Metadata: map[string]any{"slug": slug, "rating": rating},
+		})
+	})
+	if err != nil {
+		return Review{}, err
+	}
+	return review, nil
+}
+
+// UnReview retracts a learner's own review. Absent is not an error: the end
+// state a caller asked for — no review — is already true.
+func (s *Service) UnReview(ctx context.Context, tenantID uuid.UUID, slug string, actor Actor) error {
+	return s.db.WithTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		courseID, _, err := s.repo.CourseBySlug(ctx, tx, tenantID, slug)
+		if err != nil {
+			return err
+		}
+		return s.repo.DeleteReview(ctx, tx, tenantID, courseID, actor.UserID)
+	})
+}
+
+// Reviews returns a course's review wall and its summary, plus the caller's own
+// review if they have left one, so the page can prefill the edit form.
+func (s *Service) Reviews(ctx context.Context, tenantID uuid.UUID, slug string, userID uuid.UUID, limit int) ([]Review, ReviewSummary, *Review, error) {
+	if limit <= 0 || limit > MaxPageSize {
+		limit = DefaultPageSize
+	}
+
+	var (
+		list    []Review
+		summary ReviewSummary
+		mine    *Review
+	)
+	err := s.db.WithTenantReadOnly(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		courseID, _, err := s.repo.CourseBySlug(ctx, tx, tenantID, slug)
+		if err != nil {
+			return err
+		}
+		if list, err = s.repo.ListReviews(ctx, tx, tenantID, courseID, limit); err != nil {
+			return err
+		}
+		if summary, err = s.repo.ReviewSummary(ctx, tx, tenantID, courseID); err != nil {
+			return err
+		}
+		if userID != uuid.Nil {
+			r, err := s.repo.ReviewFor(ctx, tx, tenantID, courseID, userID)
+			if err != nil && !errors.Is(err, ErrReviewNotFound) {
+				return err
+			}
+			if err == nil {
+				mine = &r
+			}
+		}
+		return nil
+	})
+	return list, summary, mine, err
 }

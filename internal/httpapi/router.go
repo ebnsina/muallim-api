@@ -93,6 +93,7 @@ func New(opts Options) (http.Handler, huma.API) {
 	registerAuthoring(api, opts.Catalog)
 	registerPrerequisites(api, opts.Catalog)
 	registerEnrolment(api, opts.Enrol)
+	registerReviews(api, opts.Enrol)
 
 	// Assessment takes the enrolment service too: whether a person may see a quiz
 	// is decided by whether they may see its lesson, and that rule lives there.

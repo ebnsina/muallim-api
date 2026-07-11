@@ -143,6 +143,8 @@ func TestEnrolmentSentinelsMapToADeliberateStatus(t *testing.T) {
 		enroll.ErrAlreadyEnrolled: http.StatusConflict,
 		enroll.ErrCourseNotOpen:   http.StatusConflict,
 		enroll.ErrEnrolmentEnded:  http.StatusForbidden,
+		enroll.ErrInvalidReview:   http.StatusUnprocessableEntity,
+		enroll.ErrReviewNotFound:  http.StatusNotFound,
 
 		// Also 403, and for the same reason: the course is visible, and the answer
 		// is "finish those first" rather than "no such course".

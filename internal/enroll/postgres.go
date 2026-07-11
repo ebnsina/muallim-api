@@ -387,3 +387,91 @@ func (r *PostgresRepository) CountEnrolments(ctx context.Context, tx pgx.Tx, ten
 	}
 	return n, nil
 }
+
+const upsertReviewSQL = `
+	INSERT INTO course_reviews (tenant_id, course_id, user_id, rating, body)
+	VALUES ($1, $2, $3, $4, $5)
+	ON CONFLICT (tenant_id, course_id, user_id) DO UPDATE
+	SET rating = EXCLUDED.rating, body = EXCLUDED.body, updated_at = now()
+	RETURNING id, rating, body, created_at, updated_at`
+
+// UpsertReview writes a learner's review, editing their prior one if present.
+func (r *PostgresRepository) UpsertReview(ctx context.Context, tx pgx.Tx, tenantID, courseID, userID uuid.UUID, rating int, body string) (Review, error) {
+	rev := Review{CourseID: courseID, UserID: userID}
+	err := tx.QueryRow(ctx, upsertReviewSQL, tenantID, courseID, userID, rating, body).
+		Scan(&rev.ID, &rev.Rating, &rev.Body, &rev.CreatedAt, &rev.UpdatedAt)
+	if err != nil {
+		return Review{}, fmt.Errorf("enroll: upsert review: %w", err)
+	}
+	return rev, nil
+}
+
+// DeleteReview removes a learner's review. Absent is not an error here.
+func (r *PostgresRepository) DeleteReview(ctx context.Context, tx pgx.Tx, tenantID, courseID, userID uuid.UUID) error {
+	_, err := tx.Exec(ctx,
+		`DELETE FROM course_reviews WHERE tenant_id = $1 AND course_id = $2 AND user_id = $3`,
+		tenantID, courseID, userID)
+	if err != nil {
+		return fmt.Errorf("enroll: delete review: %w", err)
+	}
+	return nil
+}
+
+const reviewForSQL = `
+	SELECT r.id, r.rating, r.body, COALESCE(u.name, ''), r.created_at, r.updated_at
+	FROM course_reviews r
+	LEFT JOIN users u ON u.id = r.user_id
+	WHERE r.tenant_id = $1 AND r.course_id = $2 AND r.user_id = $3`
+
+// ReviewFor returns one learner's review, or ErrReviewNotFound.
+func (r *PostgresRepository) ReviewFor(ctx context.Context, tx pgx.Tx, tenantID, courseID, userID uuid.UUID) (Review, error) {
+	rev := Review{CourseID: courseID, UserID: userID}
+	err := tx.QueryRow(ctx, reviewForSQL, tenantID, courseID, userID).
+		Scan(&rev.ID, &rev.Rating, &rev.Body, &rev.AuthorName, &rev.CreatedAt, &rev.UpdatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Review{}, ErrReviewNotFound
+		}
+		return Review{}, fmt.Errorf("enroll: load review: %w", err)
+	}
+	return rev, nil
+}
+
+const listReviewsSQL = `
+	SELECT r.id, r.user_id, r.rating, r.body, COALESCE(u.name, ''), r.created_at, r.updated_at
+	FROM course_reviews r
+	LEFT JOIN users u ON u.id = r.user_id
+	WHERE r.tenant_id = $1 AND r.course_id = $2
+	ORDER BY r.created_at DESC, r.id
+	LIMIT $3`
+
+// ListReviews returns a course's reviews, newest first, with author names.
+func (r *PostgresRepository) ListReviews(ctx context.Context, tx pgx.Tx, tenantID, courseID uuid.UUID, limit int) ([]Review, error) {
+	rows, err := tx.Query(ctx, listReviewsSQL, tenantID, courseID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("enroll: list reviews: %w", err)
+	}
+	defer rows.Close()
+
+	var out []Review
+	for rows.Next() {
+		rev := Review{CourseID: courseID}
+		if err := rows.Scan(&rev.ID, &rev.UserID, &rev.Rating, &rev.Body, &rev.AuthorName, &rev.CreatedAt, &rev.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("enroll: scan review: %w", err)
+		}
+		out = append(out, rev)
+	}
+	return out, rows.Err()
+}
+
+// ReviewSummary returns a course's review count and mean rating.
+func (r *PostgresRepository) ReviewSummary(ctx context.Context, tx pgx.Tx, tenantID, courseID uuid.UUID) (ReviewSummary, error) {
+	var s ReviewSummary
+	err := tx.QueryRow(ctx,
+		`SELECT count(*), COALESCE(avg(rating), 0) FROM course_reviews WHERE tenant_id = $1 AND course_id = $2`,
+		tenantID, courseID).Scan(&s.Count, &s.Average)
+	if err != nil {
+		return ReviewSummary{}, fmt.Errorf("enroll: review summary: %w", err)
+	}
+	return s, nil
+}

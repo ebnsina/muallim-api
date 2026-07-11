@@ -21,6 +21,8 @@ var (
 	ErrAlreadyEnrolled = errors.New("enroll: already enrolled")
 	ErrCourseNotOpen   = errors.New("enroll: the course is not open for enrolment")
 	ErrEnrolmentEnded  = errors.New("enroll: the enrolment has expired or been cancelled")
+	ErrInvalidReview   = errors.New("enroll: the review is empty or out of range")
+	ErrReviewNotFound  = errors.New("enroll: review not found")
 )
 
 // Audit actions this package emits.
@@ -32,6 +34,18 @@ const (
 	// ActionCourseReopened records a completion being retracted. A finished course
 	// that becomes unfinished is a fact somebody will one day need to explain.
 	ActionCourseReopened = "course.reopened"
+
+	// ActionReviewed records a learner rating a course. Retracting a review is
+	// ordinary and unaudited; leaving a public verdict is the fact worth keeping.
+	ActionReviewed = "course.reviewed"
+)
+
+// Review bounds. A star rating is 1..5; the written body is optional and capped
+// so a review is a paragraph, not an essay pasted into a text column.
+const (
+	MinRating      = 1
+	MaxRating      = 5
+	MaxReviewBody  = 4000
 )
 
 // Drip modes. A course releases its lessons all at once, on a fixed date, a
@@ -123,6 +137,32 @@ type EnrolmentWithCourse struct {
 
 	CourseSlug  string
 	CourseTitle string
+}
+
+// Review is a learner's public verdict on a course they enrolled in.
+//
+// AuthorName is denormalised at read time from the users table, so a review
+// wall is one query. It is empty when the account has since been erased — the
+// review outlives the reviewer, and is shown without a name rather than dropped.
+type Review struct {
+	ID       uuid.UUID
+	CourseID uuid.UUID
+	UserID   uuid.UUID
+
+	Rating int
+	Body   string
+
+	AuthorName string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+// ReviewSummary is a course's standing at a glance: how many learners reviewed
+// it and their mean rating, rounded to one decimal for display. Count zero means
+// no reviews, and Average is then zero rather than a division by nobody.
+type ReviewSummary struct {
+	Count   int
+	Average float64
 }
 
 // LessonContent is a lesson as a learner reads it.

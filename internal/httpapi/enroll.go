@@ -411,6 +411,12 @@ func enrolError(err error) error {
 	case errors.Is(err, enroll.ErrEnrolmentEnded):
 		return huma.Error403Forbidden("Your enrolment has expired.")
 
+	case errors.Is(err, enroll.ErrInvalidReview):
+		return huma.Error422UnprocessableEntity("A review needs a rating from 1 to 5, and a body under 4000 characters.")
+
+	case errors.Is(err, enroll.ErrReviewNotFound):
+		return huma.Error404NotFound("No review found.")
+
 	default:
 		return err
 	}
