@@ -43,9 +43,9 @@ const (
 // Review bounds. A star rating is 1..5; the written body is optional and capped
 // so a review is a paragraph, not an essay pasted into a text column.
 const (
-	MinRating      = 1
-	MaxRating      = 5
-	MaxReviewBody  = 4000
+	MinRating     = 1
+	MaxRating     = 5
+	MaxReviewBody = 4000
 )
 
 // Drip modes. A course releases its lessons all at once, on a fixed date, a
