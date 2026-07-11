@@ -26,6 +26,7 @@ import (
 	"github.com/ebnsina/lms-api/internal/certify"
 	"github.com/ebnsina/lms-api/internal/comms"
 	"github.com/ebnsina/lms-api/internal/enroll"
+	"github.com/ebnsina/lms-api/internal/gamify"
 	"github.com/ebnsina/lms-api/internal/grade"
 	"github.com/ebnsina/lms-api/internal/notify"
 	"github.com/ebnsina/lms-api/internal/platform/config"
@@ -122,8 +123,12 @@ func run() error {
 	// process needs the enrolment service too — in the same transaction.
 	credentials := certify.NewService(db, certify.NewPostgresRepository(), certifyAuditor{audit.NewRecorder()})
 
+	// A passing quiz completes its lesson here in the worker, which can complete the
+	// course — so the same points and badges must be awarded, in that transaction.
+	gamification := gamify.NewService(db, gamify.NewPostgresRepository())
+
 	learning := enroll.NewService(db, enroll.NewPostgresRepository(), enrolAuditor{audit.NewRecorder()},
-		certificates{credentials})
+		certificates{credentials}, gamifyRewards{gamification})
 
 	// The worker grades attempts, so it writes to the gradebook too — in the same
 	// transaction, through the same adapter the API uses.

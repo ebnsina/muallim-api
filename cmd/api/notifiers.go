@@ -8,7 +8,9 @@ import (
 
 	"github.com/ebnsina/lms-api/internal/assess"
 	"github.com/ebnsina/lms-api/internal/assign"
+	"github.com/ebnsina/lms-api/internal/enroll"
 	"github.com/ebnsina/lms-api/internal/forum"
+	"github.com/ebnsina/lms-api/internal/gamify"
 	"github.com/ebnsina/lms-api/internal/learn"
 	"github.com/ebnsina/lms-api/internal/notify"
 )
@@ -69,4 +71,19 @@ func (n assignNotifier) Notify(ctx context.Context, tx pgx.Tx, tenantID uuid.UUI
 	return n.svc.Record(ctx, tx, tenantID, notify.Notification{
 		UserID: m.UserID, Kind: m.Kind, Title: m.Title, Body: m.Body, Link: m.Link,
 	})
+}
+
+// gamifyRewards adapts the gamify service to the Rewards interface enroll
+// declares. Finishing a lesson or a course earns points and badges, in the
+// transaction that recorded the completion; neither domain imports the other.
+type gamifyRewards struct{ svc *gamify.Service }
+
+var _ enroll.Rewards = gamifyRewards{}
+
+func (r gamifyRewards) LessonCompleted(ctx context.Context, tx pgx.Tx, tenantID, userID, lessonID uuid.UUID) error {
+	return r.svc.AwardLesson(ctx, tx, tenantID, userID, lessonID)
+}
+
+func (r gamifyRewards) CourseCompleted(ctx context.Context, tx pgx.Tx, tenantID, userID, courseID uuid.UUID) error {
+	return r.svc.AwardCourse(ctx, tx, tenantID, userID, courseID)
 }

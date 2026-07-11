@@ -165,7 +165,7 @@ func newFixture(t *testing.T) fixture {
 
 	// The real enrolment service, exactly as cmd/ wires it. A passed assignment
 	// completes its lesson, and a stub would leave that untested.
-	learning := enroll.NewService(db, enroll.NewPostgresRepository(), enrolAuditor{audit.NewRecorder()}, newIssuer(db))
+	learning := enroll.NewService(db, enroll.NewPostgresRepository(), enrolAuditor{audit.NewRecorder()}, newIssuer(db), nil)
 
 	grades := grade.NewService(db, grade.NewPostgresRepository())
 	notifier := &captureNotifier{}

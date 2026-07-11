@@ -340,10 +340,56 @@ func seedWorkspace(ctx context.Context, db *database.DB, cfg config, index int, 
 		got.posts = community.posts
 		got.notifications += community.notifications
 
+		if err := seedGamification(ctx, tx, tenantID); err != nil {
+			return fmt.Errorf("gamification: %w", err)
+		}
+
 		return nil
 	})
 
 	return got, err
+}
+
+// seedGamification derives points and badges from the progress already seeded,
+// rather than replaying the award logic — a completed lesson is worth its points
+// whether a learner or the seeder recorded it. One pass of set-based SQL, so it
+// costs the same whatever the row count.
+func seedGamification(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) error {
+	// Points: ten per completed lesson, a hundred per completed course.
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO user_points (tenant_id, user_id, points)
+		SELECT tenant_id, user_id, SUM(points) FROM (
+			SELECT tenant_id, user_id, lessons_completed * 10 AS points
+			FROM course_progress WHERE tenant_id = $1
+			UNION ALL
+			SELECT tenant_id, user_id, 100 AS points
+			FROM enrolments WHERE tenant_id = $1 AND status = 'completed'
+		) x
+		GROUP BY tenant_id, user_id
+		HAVING SUM(points) > 0
+		ON CONFLICT (tenant_id, user_id) DO UPDATE SET points = EXCLUDED.points`,
+		tenantID); err != nil {
+		return err
+	}
+
+	// Badges, from the same seeded state.
+	badges := []struct {
+		badge, from string
+	}{
+		{"first_lesson", `SELECT DISTINCT tenant_id, user_id FROM course_progress WHERE tenant_id = $1 AND lessons_completed > 0`},
+		{"graduate", `SELECT DISTINCT tenant_id, user_id FROM enrolments WHERE tenant_id = $1 AND status = 'completed'`},
+		{"honor_roll", `SELECT tenant_id, user_id FROM enrolments WHERE tenant_id = $1 AND status = 'completed' GROUP BY tenant_id, user_id HAVING count(*) >= 5`},
+	}
+	for _, b := range badges {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO user_badges (tenant_id, user_id, badge)
+			SELECT tenant_id, user_id, '`+b.badge+`' FROM ( `+b.from+` ) s
+			ON CONFLICT (tenant_id, user_id, badge) DO NOTHING`,
+			tenantID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type communityCounts struct {

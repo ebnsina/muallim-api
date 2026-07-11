@@ -77,7 +77,7 @@ func (e *recordingEnqueuer) queued() []uuid.UUID {
 // thing under test — that a passed quiz completes its lesson, in the transaction
 // that recorded the grade — entirely unexercised.
 func newCompletions(db *database.DB) *enroll.Service {
-	return enroll.NewService(db, enroll.NewPostgresRepository(), enrolAuditor{audit.NewRecorder()}, newIssuer(db))
+	return enroll.NewService(db, enroll.NewPostgresRepository(), enrolAuditor{audit.NewRecorder()}, newIssuer(db), nil)
 }
 
 type enrolAuditor struct{ recorder *audit.Recorder }

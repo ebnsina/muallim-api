@@ -14,6 +14,7 @@ import (
 	"github.com/ebnsina/lms-api/internal/audit"
 	"github.com/ebnsina/lms-api/internal/auth"
 	"github.com/ebnsina/lms-api/internal/enroll"
+	"github.com/ebnsina/lms-api/internal/gamify"
 )
 
 // EraseOrphansArgs sweeps users who belong to no workspace.
@@ -100,4 +101,19 @@ func (a enrolAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID,
 		TargetType: e.TargetType, TargetID: e.TargetID,
 		IP: e.IP, UserAgent: e.UserAgent, Metadata: e.Metadata,
 	})
+}
+
+// gamifyRewards adapts the gamify service to enroll's Rewards interface, so a
+// course completed by a passing quiz — graded here in the worker — earns its
+// points and badge too, in the same transaction.
+type gamifyRewards struct{ svc *gamify.Service }
+
+var _ enroll.Rewards = gamifyRewards{}
+
+func (r gamifyRewards) LessonCompleted(ctx context.Context, tx pgx.Tx, tenantID, userID, lessonID uuid.UUID) error {
+	return r.svc.AwardLesson(ctx, tx, tenantID, userID, lessonID)
+}
+
+func (r gamifyRewards) CourseCompleted(ctx context.Context, tx pgx.Tx, tenantID, userID, courseID uuid.UUID) error {
+	return r.svc.AwardCourse(ctx, tx, tenantID, userID, courseID)
 }

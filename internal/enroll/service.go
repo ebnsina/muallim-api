@@ -64,18 +64,29 @@ type Certificates interface {
 	IssueIfEarned(ctx context.Context, tx pgx.Tx, tenantID, courseID, userID uuid.UUID) error
 }
 
+// Rewards awards a learner points and badges for finishing a lesson or a course,
+// in the transaction that recorded the completion. Declared here, satisfied in
+// cmd over the gamify service; neither package imports the other. A nil Rewards
+// awards nothing, which is what the spec-only build and unconcerned tests pass.
+// The far end is idempotent, so a re-completion earns nothing.
+type Rewards interface {
+	LessonCompleted(ctx context.Context, tx pgx.Tx, tenantID, userID, lessonID uuid.UUID) error
+	CourseCompleted(ctx context.Context, tx pgx.Tx, tenantID, userID, courseID uuid.UUID) error
+}
+
 type Service struct {
 	db           *database.DB
 	repo         Repository
 	audit        AuditRecorder
 	certificates Certificates
+	rewards      Rewards
 
 	now func() time.Time
 }
 
 // NewService returns a Service.
-func NewService(db *database.DB, repo Repository, recorder AuditRecorder, certificates Certificates) *Service {
-	return &Service{db: db, repo: repo, audit: recorder, certificates: certificates, now: time.Now}
+func NewService(db *database.DB, repo Repository, recorder AuditRecorder, certificates Certificates, rewards Rewards) *Service {
+	return &Service{db: db, repo: repo, audit: recorder, certificates: certificates, rewards: rewards, now: time.Now}
 }
 
 // hasLiveEnrolment reports whether the learner is already in the course.
@@ -386,6 +397,14 @@ func (s *Service) completeLessonIn(ctx context.Context, tx pgx.Tx, tenantID, les
 		return Progress{}, err
 	}
 
+	// Points for finishing a lesson, once. Only on completion, not on reopening,
+	// and idempotent at the far end, so re-finishing earns nothing.
+	if complete && s.rewards != nil {
+		if err := s.rewards.LessonCompleted(ctx, tx, tenantID, actor.UserID, lessonID); err != nil {
+			return Progress{}, err
+		}
+	}
+
 	progress, err := s.repo.RecomputeProgress(ctx, tx, tenantID, actor.UserID, courseID)
 	if err != nil {
 		return Progress{}, err
@@ -425,6 +444,13 @@ func (s *Service) completeLessonIn(ctx context.Context, tx pgx.Tx, tenantID, les
 	// has completed a course and cannot yet prove it is a support ticket.
 	if err := s.certificates.IssueIfEarned(ctx, tx, tenantID, courseID, actor.UserID); err != nil {
 		return Progress{}, err
+	}
+
+	// Points and a badge for finishing the course, in the same transaction.
+	if s.rewards != nil {
+		if err := s.rewards.CourseCompleted(ctx, tx, tenantID, actor.UserID, courseID); err != nil {
+			return Progress{}, err
+		}
 	}
 
 	return progress, s.audit.Record(ctx, tx, tenantID, AuditEntry{

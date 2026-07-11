@@ -46,7 +46,7 @@ func (a enrolAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID,
 }
 
 func newService(db *database.DB) *enroll.Service {
-	return enroll.NewService(db, enroll.NewPostgresRepository(), enrolAuditor{audit.NewRecorder()}, newIssuer(db))
+	return enroll.NewService(db, enroll.NewPostgresRepository(), enrolAuditor{audit.NewRecorder()}, newIssuer(db), nil)
 }
 
 func seedTenant(t *testing.T, db *database.DB) uuid.UUID {

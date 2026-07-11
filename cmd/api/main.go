@@ -29,6 +29,7 @@ import (
 	"github.com/ebnsina/lms-api/internal/comms"
 	"github.com/ebnsina/lms-api/internal/enroll"
 	"github.com/ebnsina/lms-api/internal/forum"
+	"github.com/ebnsina/lms-api/internal/gamify"
 	"github.com/ebnsina/lms-api/internal/grade"
 	"github.com/ebnsina/lms-api/internal/httpapi"
 	"github.com/ebnsina/lms-api/internal/learn"
@@ -175,8 +176,12 @@ func run() error {
 	// declares the interface; certify satisfies it; neither has heard of the other.
 	credentials := certify.NewService(db, certify.NewPostgresRepository(), certifyAuditor{recorder})
 
+	// Points and badges, awarded in the transaction that records a completion. Same
+	// arrangement: enroll declares Rewards, gamify satisfies it, wired here.
+	gamification := gamify.NewService(db, gamify.NewPostgresRepository())
+
 	learning := enroll.NewService(db, enroll.NewPostgresRepository(), enrolAuditor{recorder},
-		certificates{credentials})
+		certificates{credentials}, gamifyRewards{gamification})
 
 	grading, err := assess.NewRiverEnqueuer(jobs)
 	if err != nil {
@@ -225,6 +230,7 @@ func run() error {
 		Learn:       notes,
 		Notify:      notifications,
 		Forum:       community,
+		Gamify:      gamification,
 		Auth:        identities,
 		Enrol:       learning,
 		Assess:      quizzes,
