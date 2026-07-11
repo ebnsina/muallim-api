@@ -106,6 +106,10 @@ const (
 
 	// TypeOpenEnded is an essay. No machine grades it.
 	TypeOpenEnded = "open_ended"
+
+	// TypeRange auto-accepts a number within the author's bounds, stored as the
+	// single pair Accepted[0] = [min, max].
+	TypeRange = "range"
 )
 
 // ValidQuestionType reports whether t is a type this system grades.
@@ -115,7 +119,7 @@ const (
 func ValidQuestionType(t string) bool {
 	switch t {
 	case TypeTrueFalse, TypeSingleChoice, TypeMultipleChoice, TypeFillBlanks,
-		TypeShortAnswer, TypeOrdering, TypeMatching, TypeOpenEnded:
+		TypeShortAnswer, TypeOrdering, TypeMatching, TypeOpenEnded, TypeRange:
 		return true
 	default:
 		return false

@@ -66,6 +66,8 @@ func TestGrade(t *testing.T) {
 		},
 	}
 	essay := Question{Type: TypeOpenEnded, Points: 10}
+	rng := Question{Type: TypeRange, Points: 2, Accepted: [][]string{{"99.5", "100.5"}}}
+	num := func(f float64) *float64 { return &f }
 
 	tests := []struct {
 		name     string
@@ -85,6 +87,14 @@ func TestGrade(t *testing.T) {
 		},
 		{"single choice with an id from elsewhere", single, Response{Choices: []uuid.UUID{stranger}}, Verdict{}},
 		{"single choice unanswered", single, Response{}, Verdict{}},
+
+		// Range: a number within the bounds, inclusive.
+		{"range in bounds", rng, Response{Number: num(100)}, Verdict{Correct: true, Points: 2}},
+		{"range on the low bound", rng, Response{Number: num(99.5)}, Verdict{Correct: true, Points: 2}},
+		{"range on the high bound", rng, Response{Number: num(100.5)}, Verdict{Correct: true, Points: 2}},
+		{"range below", rng, Response{Number: num(99)}, Verdict{}},
+		{"range above", rng, Response{Number: num(101)}, Verdict{}},
+		{"range unanswered", rng, Response{}, Verdict{}},
 		{
 			// An author should not be able to save this. If one exists, it is
 			// unanswerable rather than always right.

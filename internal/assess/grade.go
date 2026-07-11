@@ -2,6 +2,7 @@ package assess
 
 import (
 	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -30,6 +31,10 @@ type Response struct {
 
 	// Pairs maps each option id to the id of the match the learner put beside it.
 	Pairs map[uuid.UUID]uuid.UUID `json:"pairs,omitempty"`
+
+	// Number is a numeric answer: range. A pointer so that "not answered" and "the
+	// number zero" are different — zero is a legitimate answer to grade.
+	Number *float64 `json:"number,omitempty"`
 }
 
 // Verdict is what grading concluded about one answer.
@@ -72,6 +77,8 @@ func grade(q Question, r Response) Verdict {
 		correct = gradeOrdering(q, r)
 	case TypeMatching:
 		correct = gradeMatching(q, r)
+	case TypeRange:
+		correct = gradeRange(q, r)
 	default:
 		// A type nothing here grades. It cannot reach the database — authoring
 		// refuses it — so arriving is a bug, and the safe answer to a bug is zero.
@@ -207,6 +214,20 @@ func gradeMultipleChoice(q Question, r Response) bool {
 //
 // Every blank must be filled: an answer that omits one is not partly right, it is
 // wrong, because credit is all-or-nothing.
+// gradeRange is right when the answer is a number within the author's bounds,
+// stored as the single pair Accepted[0] = [min, max].
+func gradeRange(q Question, r Response) bool {
+	if r.Number == nil || len(q.Accepted) != 1 || len(q.Accepted[0]) != 2 {
+		return false
+	}
+	lo, err1 := strconv.ParseFloat(strings.TrimSpace(q.Accepted[0][0]), 64)
+	hi, err2 := strconv.ParseFloat(strings.TrimSpace(q.Accepted[0][1]), 64)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	return *r.Number >= lo && *r.Number <= hi
+}
+
 func gradeBlanks(q Question, typed []string) bool {
 	if len(q.Accepted) == 0 || len(typed) != len(q.Accepted) {
 		return false

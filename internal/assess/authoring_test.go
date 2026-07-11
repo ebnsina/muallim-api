@@ -41,6 +41,7 @@ func TestNewQuestionValidation(t *testing.T) {
 		},
 		"short answer": {Type: TypeShortAnswer, Prompt: "Capital?", Points: 1, Accepted: [][]string{{"Paris"}}},
 		"fill blanks":  {Type: TypeFillBlanks, Prompt: "__ and __.", Points: 1, Accepted: [][]string{{"a"}, {"b"}}},
+		"range":        {Type: TypeRange, Prompt: "Boiling point?", Points: 2, Accepted: [][]string{{"99.5", "100.5"}}},
 		"open ended":   {Type: TypeOpenEnded, Prompt: "Discuss.", Points: 10},
 		"zero points":  {Type: TypeOpenEnded, Prompt: "Ungraded reflection.", Points: 0},
 		"an explanation": {
@@ -139,6 +140,19 @@ func TestNewQuestionValidation(t *testing.T) {
 		"an essay with options": {
 			Type: TypeOpenEnded, Prompt: "Discuss.", Points: 1,
 			Options: []NewOption{opt("A", false), opt("B", false)},
+		},
+		"range with one bound": {
+			Type: TypeRange, Prompt: "How much?", Points: 1, Accepted: [][]string{{"5"}},
+		},
+		"range with non-numeric bounds": {
+			Type: TypeRange, Prompt: "How much?", Points: 1, Accepted: [][]string{{"a", "b"}},
+		},
+		"range with low above high": {
+			Type: TypeRange, Prompt: "How much?", Points: 1, Accepted: [][]string{{"10", "5"}},
+		},
+		"range with options": {
+			Type: TypeRange, Prompt: "How much?", Points: 1,
+			Accepted: [][]string{{"1", "2"}}, Options: []NewOption{opt("A", false)},
 		},
 	}
 

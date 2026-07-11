@@ -2,6 +2,7 @@ package assess
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -166,6 +167,23 @@ func (n NewQuestion) validate() error {
 		if len(n.Options) > 0 {
 			return fmt.Errorf("%w: an essay has nothing to choose from", ErrInvalidQuestion)
 		}
+
+	case TypeRange:
+		// One pair of numbers, low then high, and low no greater than high.
+		if len(n.Options) > 0 {
+			return fmt.Errorf("%w: a range question has nothing to choose from", ErrInvalidQuestion)
+		}
+		if len(n.Accepted) != 1 || len(n.Accepted[0]) != 2 {
+			return fmt.Errorf("%w: a range question needs one low and one high bound", ErrInvalidQuestion)
+		}
+		lo, err1 := strconv.ParseFloat(strings.TrimSpace(n.Accepted[0][0]), 64)
+		hi, err2 := strconv.ParseFloat(strings.TrimSpace(n.Accepted[0][1]), 64)
+		if err1 != nil || err2 != nil {
+			return fmt.Errorf("%w: a range's bounds must be numbers", ErrInvalidQuestion)
+		}
+		if lo > hi {
+			return fmt.Errorf("%w: a range's low bound cannot exceed its high bound", ErrInvalidQuestion)
+		}
 	}
 
 	// The typed types need spellings; the others must not carry any, or an author
@@ -182,6 +200,8 @@ func (n NewQuestion) validate() error {
 				}
 			}
 		}
+	case TypeRange:
+		// Its bounds are validated above; it is allowed to carry them.
 	default:
 		if len(n.Accepted) > 0 {
 			return fmt.Errorf("%w: a %s question has no blanks to accept answers for", ErrInvalidQuestion, n.Type)

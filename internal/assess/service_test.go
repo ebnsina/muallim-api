@@ -1010,3 +1010,37 @@ func TestMarkingAnEssayNotifiesTheLearnerOnce(t *testing.T) {
 		t.Fatalf("link = %q", n.Link)
 	}
 }
+
+// A range question is authored, stored, and auto-graded from a numeric answer.
+func TestRangeQuestionRoundTripsAndGrades(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+	f.quiz(t, assess.NewQuiz{PassingPercent: 50})
+
+	rangeQ, err := f.svc.AddQuestion(t.Context(), f.tenant, f.lesson, assess.NewQuestion{
+		Type: assess.TypeRange, Prompt: "Boiling point of water in °C?", Points: 2,
+		Accepted: [][]string{{"99.5", "100.5"}},
+	}, f.author)
+	if err != nil {
+		t.Fatalf("add range question: %v", err)
+	}
+
+	if _, err := f.svc.StartAttempt(t.Context(), f.tenant, f.lesson, f.learner, assess.Author{UserID: f.learner}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	n := 100.0
+	if err := f.svc.SaveAnswer(t.Context(), f.tenant, f.lesson, f.learner, rangeQ.ID, assess.Response{Number: &n}); err != nil {
+		t.Fatalf("save range answer: %v", err)
+	}
+	submitted, _ := f.svc.SubmitAttempt(t.Context(), f.tenant, f.lesson, f.learner, assess.Author{UserID: f.learner})
+	graded, err := f.svc.GradeAttempt(t.Context(), f.tenant, submitted.ID)
+	if err != nil {
+		t.Fatalf("grade: %v", err)
+	}
+
+	// The range is worth 2 of the quiz's points, and 100 is in [99.5, 100.5].
+	if graded.Points < 2 {
+		t.Fatalf("range answer earned no points: scored %d/%d", graded.Points, graded.MaxPoints)
+	}
+}

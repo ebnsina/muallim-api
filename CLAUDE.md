@@ -36,6 +36,8 @@ behind it is a download that 404s. Upload a real file as `student@` instead —
 
 ## Rules that are easy to violate
 
+**Comments are one line, two at most.** Say the one thing the code cannot. No multi-paragraph essays above a function, however tempting — trim to the load-bearing sentence.
+
 **Never assume a library API.** Query Context7 (`resolve-library-id` → `query-docs`) before writing against any dependency. Verify with `go doc`. Training data lags releases.
 
 **The dependency rule.** `platform` imports nothing from the project. Domain packages (`tenant`, `auth`, `catalog`, `assess`, `enroll`, `commerce`, `media`, `learn`, `comms`) may import `platform` but never `internal/httpapi`, and never each other — cross-domain needs go through an interface the *caller* defines, wired in `cmd/`. `internal/httpapi` imports domains; nothing imports it.
