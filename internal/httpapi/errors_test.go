@@ -407,8 +407,10 @@ func TestLearnSentinelsMapToADeliberateStatus(t *testing.T) {
 	t.Parallel()
 
 	tests := map[error]int{
-		learn.ErrLessonNotFound: http.StatusNotFound,
-		learn.ErrNoteTooLong:    http.StatusUnprocessableEntity,
+		learn.ErrLessonNotFound:    http.StatusNotFound,
+		learn.ErrHighlightNotFound: http.StatusNotFound,
+		learn.ErrInvalidHighlight:  http.StatusUnprocessableEntity,
+		learn.ErrNoteTooLong:       http.StatusUnprocessableEntity,
 	}
 
 	for err, want := range tests {

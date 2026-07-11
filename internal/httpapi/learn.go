@@ -101,12 +101,174 @@ func registerNotes(api huma.API, svc *learn.Service) {
 	})
 }
 
+// HighlightView is one of a learner's marks as a client reads it.
+type HighlightView struct {
+	ID        string    `json:"id" format:"uuid"`
+	Quote     string    `json:"quote"`
+	Note      string    `json:"note"`
+	Start     int       `json:"start"`
+	End       int       `json:"end"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// HighlightsOutput carries a learner's marks on a lesson. Private, so shared with
+// no cache.
+type HighlightsOutput struct {
+	CacheControl string `header:"Cache-Control"`
+	Body         struct {
+		Highlights []HighlightView `json:"highlights"`
+	}
+}
+
+// HighlightOutput carries one mark, for the create and edit responses.
+type HighlightOutput struct {
+	CacheControl string `header:"Cache-Control"`
+	Body         struct {
+		Highlight HighlightView `json:"highlight"`
+	}
+}
+
+func highlightView(h learn.Highlight) HighlightView {
+	return HighlightView{
+		ID:        h.ID.String(),
+		Quote:     h.Quote,
+		Note:      h.Note,
+		Start:     h.Start,
+		End:       h.End,
+		CreatedAt: h.CreatedAt,
+	}
+}
+
+// registerHighlights wires a learner's marks on a lesson. Like the note, every
+// route takes the caller from the session: a mark is read, changed, and removed
+// only by the person who made it.
+func registerHighlights(api huma.API, svc *learn.Service) {
+	huma.Register(api, huma.Operation{
+		OperationID: "my-lesson-highlights",
+		Method:      http.MethodGet,
+		Path:        "/v1/lessons/{id}/highlights",
+		Summary:     "The passages you have marked in a lesson",
+		Tags:        []string{"Learn"},
+		Security:    []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, in *struct {
+		ID uuid.UUID `path:"id" format:"uuid"`
+	}) (*HighlightsOutput, error) {
+		p, err := requirePrincipal(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		highlights, err := svc.Highlights(ctx, p.TenantID, p.UserID, in.ID)
+		if err != nil {
+			return nil, learnError(err)
+		}
+
+		out := &HighlightsOutput{CacheControl: "private, no-store"}
+		out.Body.Highlights = make([]HighlightView, 0, len(highlights))
+		for _, h := range highlights {
+			out.Body.Highlights = append(out.Body.Highlights, highlightView(h))
+		}
+		return out, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "add-lesson-highlight",
+		Method:        http.MethodPost,
+		Path:          "/v1/lessons/{id}/highlights",
+		Summary:       "Mark a passage in a lesson",
+		DefaultStatus: http.StatusCreated,
+		Description: "The offsets are character positions into the lesson's text, end exclusive; the " +
+			"quote is the text they cover, kept so the passage can be recognised after the lesson is edited.",
+		Tags:     []string{"Learn"},
+		Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, in *struct {
+		ID   uuid.UUID `path:"id" format:"uuid"`
+		Body struct {
+			Quote string `json:"quote" minLength:"1" maxLength:"2000"`
+			Note  string `json:"note,omitempty" maxLength:"10000"`
+			Start int    `json:"start" minimum:"0"`
+			End   int    `json:"end" minimum:"1"`
+		}
+	}) (*HighlightOutput, error) {
+		p, err := requirePrincipal(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		created, err := svc.AddHighlight(ctx, p.TenantID, p.UserID, in.ID, learn.Highlight{
+			Quote: in.Body.Quote,
+			Note:  in.Body.Note,
+			Start: in.Body.Start,
+			End:   in.Body.End,
+		})
+		if err != nil {
+			return nil, learnError(err)
+		}
+
+		out := &HighlightOutput{CacheControl: "private, no-store"}
+		out.Body.Highlight = highlightView(created)
+		return out, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "edit-lesson-highlight-note",
+		Method:      http.MethodPatch,
+		Path:        "/v1/highlights/{id}",
+		Summary:     "Change the note on a marked passage",
+		Tags:        []string{"Learn"},
+		Security:    []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, in *struct {
+		ID   uuid.UUID `path:"id" format:"uuid"`
+		Body struct {
+			Note string `json:"note" maxLength:"10000"`
+		}
+	}) (*struct{}, error) {
+		p, err := requirePrincipal(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		if err := svc.EditHighlightNote(ctx, p.TenantID, p.UserID, in.ID, in.Body.Note); err != nil {
+			return nil, learnError(err)
+		}
+		return nil, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "delete-lesson-highlight",
+		Method:        http.MethodDelete,
+		Path:          "/v1/highlights/{id}",
+		Summary:       "Remove a marked passage",
+		DefaultStatus: http.StatusNoContent,
+		Tags:          []string{"Learn"},
+		Security:      []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, in *struct {
+		ID uuid.UUID `path:"id" format:"uuid"`
+	}) (*struct{}, error) {
+		p, err := requirePrincipal(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		if err := svc.RemoveHighlight(ctx, p.TenantID, p.UserID, in.ID); err != nil {
+			return nil, learnError(err)
+		}
+		return nil, nil
+	})
+}
+
 // learnError maps the learn package's sentinels onto status codes. This is the
 // only place that translation happens; the domain never imports net/http.
 func learnError(err error) error {
 	switch {
 	case errors.Is(err, learn.ErrLessonNotFound):
 		return huma.Error404NotFound("That lesson does not exist.")
+
+	case errors.Is(err, learn.ErrHighlightNotFound):
+		return huma.Error404NotFound("That highlight does not exist.")
+
+	case errors.Is(err, learn.ErrInvalidHighlight):
+		return huma.Error422UnprocessableEntity("That is not a valid selection.")
 
 	case errors.Is(err, learn.ErrNoteTooLong):
 		return huma.Error422UnprocessableEntity("That note is too long.")

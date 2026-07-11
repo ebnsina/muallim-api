@@ -103,6 +103,7 @@ func New(opts Options) (http.Handler, huma.API) {
 	registerGrades(api, opts.Grades)
 	registerCertificates(api, opts.Certify)
 	registerNotes(api, opts.Learn)
+	registerHighlights(api, opts.Learn)
 
 	// Order matters, outermost first.
 	//

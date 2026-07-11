@@ -254,3 +254,111 @@ func TestANoteOnAMissingLessonIsRefused(t *testing.T) {
 		t.Errorf("saving against a missing lesson returned %v, want ErrLessonNotFound", err)
 	}
 }
+
+// Marks are added, come back in reading order, and each carries its own note.
+func TestHighlightsAreListedInReadingOrder(t *testing.T) {
+	t.Parallel()
+
+	db := testDB(t)
+	svc := newService(db)
+	tenantID := seedTenant(t, db)
+	userID := seedUser(t, db, tenantID)
+	lessonID := seedLesson(t, db, tenantID)
+
+	// Added out of order; listed in the order they sit in the text.
+	if _, err := svc.AddHighlight(t.Context(), tenantID, userID, lessonID,
+		learn.Highlight{Quote: "second", Note: "later in the text", Start: 20, End: 26}); err != nil {
+		t.Fatalf("AddHighlight: %v", err)
+	}
+	first, err := svc.AddHighlight(t.Context(), tenantID, userID, lessonID,
+		learn.Highlight{Quote: "first", Note: "earlier", Start: 3, End: 8})
+	if err != nil {
+		t.Fatalf("AddHighlight: %v", err)
+	}
+	if first.ID == uuid.Nil || first.CreatedAt.IsZero() {
+		t.Error("a created highlight has no id or timestamp")
+	}
+
+	highlights, err := svc.Highlights(t.Context(), tenantID, userID, lessonID)
+	if err != nil {
+		t.Fatalf("Highlights: %v", err)
+	}
+	if len(highlights) != 2 {
+		t.Fatalf("got %d highlights, want 2", len(highlights))
+	}
+	if highlights[0].Quote != "first" || highlights[1].Quote != "second" {
+		t.Errorf("highlights out of reading order: %q then %q", highlights[0].Quote, highlights[1].Quote)
+	}
+	if highlights[0].Note != "earlier" {
+		t.Errorf("first note = %q, want %q", highlights[0].Note, "earlier")
+	}
+}
+
+// The note on a mark can be changed, and the mark removed; both refuse a mark that
+// is not the caller's, with the same not-found either way.
+func TestEditingAndRemovingHighlights(t *testing.T) {
+	t.Parallel()
+
+	db := testDB(t)
+	svc := newService(db)
+	tenantID := seedTenant(t, db)
+	mine := seedUser(t, db, tenantID)
+	other := seedUser(t, db, tenantID)
+	lessonID := seedLesson(t, db, tenantID)
+
+	h, err := svc.AddHighlight(t.Context(), tenantID, mine, lessonID,
+		learn.Highlight{Quote: "a passage", Start: 0, End: 9})
+	if err != nil {
+		t.Fatalf("AddHighlight: %v", err)
+	}
+
+	if err := svc.EditHighlightNote(t.Context(), tenantID, mine, h.ID, "  a second thought  "); err != nil {
+		t.Fatalf("EditHighlightNote: %v", err)
+	}
+	got, _ := svc.Highlights(t.Context(), tenantID, mine, lessonID)
+	if got[0].Note != "a second thought" {
+		t.Errorf("edited note = %q, want %q", got[0].Note, "a second thought")
+	}
+
+	// Another learner cannot touch it: not theirs reads as not found.
+	if err := svc.EditHighlightNote(t.Context(), tenantID, other, h.ID, "hijack"); !errors.Is(err, learn.ErrHighlightNotFound) {
+		t.Errorf("editing another learner's mark returned %v, want ErrHighlightNotFound", err)
+	}
+	if err := svc.RemoveHighlight(t.Context(), tenantID, other, h.ID); !errors.Is(err, learn.ErrHighlightNotFound) {
+		t.Errorf("removing another learner's mark returned %v, want ErrHighlightNotFound", err)
+	}
+
+	// The owner removes it, and it is gone.
+	if err := svc.RemoveHighlight(t.Context(), tenantID, mine, h.ID); err != nil {
+		t.Fatalf("RemoveHighlight: %v", err)
+	}
+	if got, _ := svc.Highlights(t.Context(), tenantID, mine, lessonID); len(got) != 0 {
+		t.Errorf("after removal, %d highlights remain, want 0", len(got))
+	}
+	// Removing it again is a not-found, not a silent success.
+	if err := svc.RemoveHighlight(t.Context(), tenantID, mine, h.ID); !errors.Is(err, learn.ErrHighlightNotFound) {
+		t.Errorf("removing a gone mark returned %v, want ErrHighlightNotFound", err)
+	}
+}
+
+// A mark that could not have come from a selection is refused before the database.
+func TestAnInvalidHighlightIsRefused(t *testing.T) {
+	t.Parallel()
+
+	db := testDB(t)
+	svc := newService(db)
+	tenantID := seedTenant(t, db)
+	userID := seedUser(t, db, tenantID)
+	lessonID := seedLesson(t, db, tenantID)
+
+	cases := map[string]learn.Highlight{
+		"empty quote":      {Quote: "", Start: 0, End: 5},
+		"end before start": {Quote: "x", Start: 9, End: 3},
+		"zero-width":       {Quote: "x", Start: 4, End: 4},
+	}
+	for name, h := range cases {
+		if _, err := svc.AddHighlight(t.Context(), tenantID, userID, lessonID, h); !errors.Is(err, learn.ErrInvalidHighlight) {
+			t.Errorf("%s: returned %v, want ErrInvalidHighlight", name, err)
+		}
+	}
+}
