@@ -31,6 +31,7 @@ import (
 	"github.com/ebnsina/lms-api/internal/grade"
 	"github.com/ebnsina/lms-api/internal/httpapi"
 	"github.com/ebnsina/lms-api/internal/learn"
+	"github.com/ebnsina/lms-api/internal/notify"
 	"github.com/ebnsina/lms-api/internal/platform/cache"
 	"github.com/ebnsina/lms-api/internal/platform/config"
 	"github.com/ebnsina/lms-api/internal/platform/database"
@@ -176,7 +177,12 @@ func run() error {
 	// declare; the adapters are in gradebook.go, and neither domain has heard of it.
 	grades := grade.NewService(db, grade.NewPostgresRepository())
 
-	notes := learn.NewService(db, learn.NewPostgresRepository())
+	notifications := notify.NewService(db, notify.NewPostgresRepository())
+
+	// `notes` (the learn service) notifies the author of a question when it is
+	// answered. The Notifier interface is learn's; the adapter over notify is in
+	// notifiers.go, so neither domain imports the other.
+	notes := learn.NewService(db, learn.NewPostgresRepository(), learnNotifier{notifications})
 
 	// `learning` satisfies assess.Completions: passing a quiz completes its lesson,
 	// in the transaction that recorded the grade. The interface is declared by
@@ -205,6 +211,7 @@ func run() error {
 		Grades:      grades,
 		Certify:     credentials,
 		Learn:       notes,
+		Notify:      notifications,
 		Auth:        identities,
 		Enrol:       learning,
 		Assess:      quizzes,

@@ -399,3 +399,29 @@ func (r *PostgresRepository) DeleteAnswer(ctx context.Context, tx pgx.Tx, tenant
 	}
 	return tag.RowsAffected() == 1, nil
 }
+
+const answerTargetSQL = `
+	SELECT COALESCE(q.author_id, '00000000-0000-0000-0000-000000000000'::uuid),
+	       l.id, c.slug
+	FROM lesson_questions q
+	JOIN lessons l ON l.id = q.lesson_id
+	JOIN topics t  ON t.id = l.topic_id
+	JOIN courses c ON c.id = t.course_id
+	WHERE q.tenant_id = $1 AND q.id = $2`
+
+// AnswerTarget returns who to notify about an answer and where it links. It runs
+// after the answer is written, in the same transaction, so the question is known
+// to exist. A question with no author (the account was erased) reports the nil
+// uuid, and the service sends nobody a notification.
+func (r *PostgresRepository) AnswerTarget(ctx context.Context, tx pgx.Tx, tenantID, questionID uuid.UUID) (AnswerTarget, error) {
+	var t AnswerTarget
+	err := tx.QueryRow(ctx, answerTargetSQL, tenantID, questionID).
+		Scan(&t.QuestionAuthorID, &t.LessonID, &t.CourseSlug)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return AnswerTarget{}, ErrQuestionNotFound
+		}
+		return AnswerTarget{}, fmt.Errorf("learn: answer target: %w", err)
+	}
+	return t, nil
+}

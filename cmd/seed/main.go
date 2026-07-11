@@ -39,6 +39,7 @@ import (
 	"github.com/ebnsina/lms-api/internal/catalog"
 	"github.com/ebnsina/lms-api/internal/certify"
 	"github.com/ebnsina/lms-api/internal/enroll"
+	"github.com/ebnsina/lms-api/internal/notify"
 	"github.com/ebnsina/lms-api/internal/platform/database"
 )
 
@@ -155,6 +156,7 @@ type counts struct {
 	enrolments, progress, attempts, answers              int
 	grades, certificates                                 int
 	reviews, discussions, announcements                  int
+	notifications                                        int
 }
 
 func (c *counts) add(other counts) {
@@ -174,6 +176,7 @@ func (c *counts) add(other counts) {
 	c.reviews += other.reviews
 	c.discussions += other.discussions
 	c.announcements += other.announcements
+	c.notifications += other.notifications
 }
 
 func subdomain(index int) string {
@@ -322,6 +325,7 @@ func seedWorkspace(ctx context.Context, db *database.DB, cfg config, index int, 
 		got.reviews = learning.reviews
 		got.discussions = learning.discussions
 		got.announcements = learning.announcements
+		got.notifications = learning.notifications
 
 		return nil
 	})
@@ -754,6 +758,7 @@ type learningCounts struct {
 	enrolments, progress, attempts, answers int
 	grades, certificates                    int
 	reviews, discussions, announcements     int
+	notifications                           int
 }
 
 func seedLearning(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg config, catalogue []seededCourse, students, demo []uuid.UUID, instructor uuid.UUID, names map[uuid.UUID]string, rng *rand.Rand) (learningCounts, error) {
@@ -771,6 +776,7 @@ func seedLearning(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg config
 		questions     [][]any
 		qaAnswers     [][]any
 		announcements [][]any
+		notifications [][]any
 	)
 
 	now := time.Now()
@@ -934,15 +940,31 @@ func seedLearning(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg config
 			if len(course.lessons) > 0 && rng.Float64() < 0.2 {
 				qID := id("question", "discussion", course.id, student)
 				askedAt := enrolledAt.Add(2 * 24 * time.Hour)
+				answerBody := discussionAnswers[rng.IntN(len(discussionAnswers))]
+				answeredAt := askedAt.Add(6 * time.Hour)
 				questions = append(questions, []any{
 					qID, tenantID, course.lessons[0], student,
 					discussionQuestions[rng.IntN(len(discussionQuestions))], askedAt,
 				})
 				qaAnswers = append(qaAnswers, []any{
 					id("answer", "discussion", qID), tenantID, qID, instructor,
-					discussionAnswers[rng.IntN(len(discussionAnswers))], true, askedAt.Add(6 * time.Hour),
+					answerBody, true, answeredAt,
 				})
 				got.discussions++
+
+				// The answer notifies the asker, the way the running app does. A few are
+				// left unread so a demo bell has a number on it.
+				readAt := any(answeredAt.Add(2 * time.Hour))
+				if rng.Float64() < 0.4 {
+					readAt = nil
+				}
+				notifications = append(notifications, []any{
+					id("notification", "answer", qID), tenantID, student, notify.KindAnswer,
+					"New answer to your question", answerBody,
+					"/courses/" + course.slug + "/lessons/" + course.lessons[0].String(),
+					readAt, answeredAt,
+				})
+				got.notifications++
 			}
 
 			if course.quiz == nil || rng.Float64() >= cfg.attemptRate {
@@ -984,6 +1006,7 @@ func seedLearning(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg config
 		{"course_reviews", []string{"id", "tenant_id", "course_id", "user_id", "rating", "body", "created_at"}, reviews},
 		{"lesson_questions", []string{"id", "tenant_id", "lesson_id", "author_id", "body", "created_at"}, questions},
 		{"lesson_answers", []string{"id", "tenant_id", "question_id", "author_id", "body", "by_instructor", "created_at"}, qaAnswers},
+		{"notifications", []string{"id", "tenant_id", "user_id", "kind", "title", "body", "link", "read_at", "created_at"}, notifications},
 	}
 
 	for _, c := range copies {
@@ -1137,7 +1160,7 @@ func databaseName(url string) string {
 func report(cfg config, url string, got counts, took time.Duration) {
 	rows := got.users + got.courses + got.lessons + got.quizzes + got.questions +
 		got.assignments + got.enrolments + got.progress + got.attempts + got.answers +
-		got.grades + got.certificates + got.reviews + got.discussions + got.announcements
+		got.grades + got.certificates + got.reviews + got.discussions + got.announcements + got.notifications
 
 	fmt.Printf("seeded %d rows in %s\n\n", rows, took.Round(time.Millisecond))
 	fmt.Printf("  workspaces  %d\n  people      %d\n  courses     %d\n  lessons     %d\n",
@@ -1146,8 +1169,8 @@ func report(cfg config, url string, got counts, took time.Duration) {
 		got.quizzes, got.questions, got.assignments, got.enrolments, got.progress)
 	fmt.Printf("  attempts    %d (%d answers)\n  grades      %d\n  certificates %d\n",
 		got.attempts, got.answers, got.grades, got.certificates)
-	fmt.Printf("  reviews     %d\n  discussions %d\n  announcements %d\n\n",
-		got.reviews, got.discussions, got.announcements)
+	fmt.Printf("  reviews     %d\n  discussions %d\n  announcements %d\n  notifications %d\n\n",
+		got.reviews, got.discussions, got.announcements, got.notifications)
 
 	// Which database, because these accounts are only in this one. `pnpm test:e2e`
 	// runs against `lms_test`, which has no demo accounts at all — and an API left

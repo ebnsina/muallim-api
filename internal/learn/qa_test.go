@@ -196,3 +196,54 @@ func TestQuestionsAreNotNPlusOne(t *testing.T) {
 		t.Fatalf("discussion read issued %d queries, want 2", large)
 	}
 }
+
+// captureNotifier records the notifications learn asks to send, so a test can
+// assert an answer notifies the asker.
+type captureNotifier struct{ sent []learn.Notification }
+
+func (c *captureNotifier) Notify(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, n learn.Notification) error {
+	c.sent = append(c.sent, n)
+	return nil
+}
+
+func TestAnsweringNotifiesTheAsker(t *testing.T) {
+	t.Parallel()
+
+	db := testDB(t)
+	cap := &captureNotifier{}
+	svc := learn.NewService(db, learn.NewPostgresRepository(), cap)
+	tenantID := seedTenant(t, db)
+	courseID, lessonID := seedLessonInCourse(t, db, tenantID, true)
+
+	asker := seedUser(t, db, tenantID)
+	helper := seedUser(t, db, tenantID)
+	enrolLearner(t, db, tenantID, courseID, asker)
+	enrolLearner(t, db, tenantID, courseID, helper)
+
+	q, err := svc.Ask(t.Context(), tenantID, lessonID, learn.Participant{UserID: asker}, "why?")
+	if err != nil {
+		t.Fatalf("ask: %v", err)
+	}
+
+	// Someone else answering notifies the asker.
+	if _, err := svc.Answer(t.Context(), tenantID, q.ID, learn.Participant{UserID: helper}, "because."); err != nil {
+		t.Fatalf("answer: %v", err)
+	}
+	if len(cap.sent) != 1 {
+		t.Fatalf("expected one notification, got %d", len(cap.sent))
+	}
+	if cap.sent[0].UserID != asker {
+		t.Fatalf("notified %v, want the asker %v", cap.sent[0].UserID, asker)
+	}
+	if cap.sent[0].Kind != learn.KindAnswer {
+		t.Fatalf("kind = %q, want %q", cap.sent[0].Kind, learn.KindAnswer)
+	}
+
+	// The asker answering their own question notifies nobody new.
+	if _, err := svc.Answer(t.Context(), tenantID, q.ID, learn.Participant{UserID: asker}, "figured it out."); err != nil {
+		t.Fatalf("self-answer: %v", err)
+	}
+	if len(cap.sent) != 1 {
+		t.Fatalf("self-answer should not notify: now %d", len(cap.sent))
+	}
+}

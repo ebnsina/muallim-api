@@ -68,6 +68,19 @@ type Repository interface {
 
 	// DeleteAnswer removes an answer the caller authored, or any when they moderate.
 	DeleteAnswer(ctx context.Context, tx pgx.Tx, tenantID, answerID uuid.UUID, actor Participant) (bool, error)
+
+	// AnswerTarget returns who to notify when a question is answered — its author —
+	// and where the notification links: the question's lesson and its course slug.
+	// It is a small read after the answer is written, in the same transaction.
+	AnswerTarget(ctx context.Context, tx pgx.Tx, tenantID, questionID uuid.UUID) (AnswerTarget, error)
+}
+
+// AnswerTarget is what a notification about an answer needs: the question's
+// author, and the lesson and course to link them to.
+type AnswerTarget struct {
+	QuestionAuthorID uuid.UUID
+	LessonID         uuid.UUID
+	CourseSlug       string
 }
 
 // CourseAnnotations gathers everything a learner has kept across a course — their
@@ -94,13 +107,16 @@ func (s *Service) CourseAnnotations(ctx context.Context, tenantID, userID uuid.U
 
 // Service holds the rules and owns the transaction boundaries.
 type Service struct {
-	db   *database.DB
-	repo Repository
+	db       *database.DB
+	repo     Repository
+	notifier Notifier
 }
 
-// NewService returns a Service.
-func NewService(db *database.DB, repo Repository) *Service {
-	return &Service{db: db, repo: repo}
+// NewService returns a Service. The notifier delivers "your question was
+// answered" notices; a nil one is allowed and simply sends nothing, which is what
+// the spec-only build and tests that do not care about notifications pass.
+func NewService(db *database.DB, repo Repository, notifier Notifier) *Service {
+	return &Service{db: db, repo: repo, notifier: notifier}
 }
 
 // Note reads a learner's own note on a lesson. A lesson they have never noted
@@ -270,7 +286,30 @@ func (s *Service) Answer(ctx context.Context, tenantID, questionID uuid.UUID, au
 	err := s.db.WithTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		answer, err = s.repo.Answer(ctx, tx, tenantID, questionID, author, trimmed)
-		return err
+		if err != nil {
+			return err
+		}
+
+		// Tell the asker, unless they answered their own question. The notice commits
+		// in this transaction, so an answer without its notification cannot happen —
+		// and neither can the reverse. A nil notifier sends nothing.
+		if s.notifier == nil {
+			return nil
+		}
+		target, err := s.repo.AnswerTarget(ctx, tx, tenantID, questionID)
+		if err != nil {
+			return err
+		}
+		if target.QuestionAuthorID == uuid.Nil || target.QuestionAuthorID == author.UserID {
+			return nil
+		}
+		return s.notifier.Notify(ctx, tx, tenantID, Notification{
+			UserID: target.QuestionAuthorID,
+			Kind:   KindAnswer,
+			Title:  "New answer to your question",
+			Body:   trimmed,
+			Link:   "/courses/" + target.CourseSlug + "/lessons/" + target.LessonID.String(),
+		})
 	})
 	return answer, err
 }

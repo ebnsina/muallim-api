@@ -140,7 +140,7 @@ func seedCourseWithLessons(t *testing.T, db *database.DB, tenantID uuid.UUID) (s
 }
 
 func newService(db *database.DB) *learn.Service {
-	return learn.NewService(db, learn.NewPostgresRepository())
+	return learn.NewService(db, learn.NewPostgresRepository(), nil)
 }
 
 // A lesson a learner has never noted reads as an empty note, not an error: the

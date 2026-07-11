@@ -10,10 +10,12 @@
 package learn
 
 import (
+	"context"
 	"errors"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 // The sentinels. `internal/httpapi` maps them; nothing else does.
@@ -56,6 +58,27 @@ const MaxPostLength = 5_000
 // MaxQuestionsPerPage bounds a lesson's discussion read. A busy lesson shows a
 // page of threads, not every question ever asked, in one response.
 const MaxQuestionsPerPage = 50
+
+// Notification is a message this package asks to send someone — for now, the
+// author of a question when it is answered. Restated here rather than imported: a
+// domain package may not depend on a sibling, and cmd wires an adapter over the
+// notify service. Empty UserID means nobody to tell, and the send is skipped.
+type Notification struct {
+	UserID uuid.UUID
+	Kind   string
+	Title  string
+	Body   string
+	Link   string
+}
+
+// Notifier delivers a Notification inside the caller's transaction, so the notice
+// and the answer that prompted it commit together. Declared here, by the consumer.
+type Notifier interface {
+	Notify(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, n Notification) error
+}
+
+// KindAnswer names the "your question was answered" notification.
+const KindAnswer = "answer"
 
 // Participant is who is reading or writing in a lesson's discussion.
 //

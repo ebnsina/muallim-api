@@ -18,6 +18,7 @@ import (
 	"github.com/ebnsina/lms-api/internal/enroll"
 	"github.com/ebnsina/lms-api/internal/grade"
 	"github.com/ebnsina/lms-api/internal/learn"
+	"github.com/ebnsina/lms-api/internal/notify"
 	"github.com/ebnsina/lms-api/internal/platform/blob"
 )
 
@@ -437,6 +438,35 @@ func TestAnUnmappedLearnErrorIsFiveHundred(t *testing.T) {
 
 	if got := statusOf(learnError(errors.New("learn: something new"))); got != http.StatusInternalServerError {
 		t.Errorf("an unmapped learn error mapped to %d, want 500", got)
+	}
+}
+
+// The notify sentinels go through their own mapper.
+func TestNotifySentinelsMapToADeliberateStatus(t *testing.T) {
+	t.Parallel()
+
+	tests := map[error]int{
+		notify.ErrNotFound:    http.StatusNotFound,
+		notify.ErrInvalidPage: http.StatusUnprocessableEntity,
+	}
+
+	for err, want := range tests {
+		if got := statusOf(notifyError(err)); got != want {
+			t.Errorf("%v mapped to %d, want %d", err, got, want)
+		}
+
+		wrapped := fmt.Errorf("notify: doing a thing: %w", err)
+		if got := statusOf(notifyError(wrapped)); got != want {
+			t.Errorf("wrapped %v mapped to %d, want %d", err, got, want)
+		}
+	}
+}
+
+func TestAnUnmappedNotifyErrorIsFiveHundred(t *testing.T) {
+	t.Parallel()
+
+	if got := statusOf(notifyError(errors.New("notify: something new"))); got != http.StatusInternalServerError {
+		t.Errorf("an unmapped notify error mapped to %d, want 500", got)
 	}
 }
 
