@@ -28,14 +28,20 @@ func (r *PostgresRepository) Insert(ctx context.Context, tx pgx.Tx, tenantID uui
 	return nil
 }
 
-// listSQL is a keyset page over (created_at, id) descending, scoped to one
-// recipient. The row comparison is a single seek on notifications_recipient_idx.
-const listSQL = `
+// ListSQL is a keyset page scoped to one recipient, and is exported for a
+// query-plan test that EXPLAINs it to prove the list is an ordered index scan.
+//
+// The tie-break is id ascending, to match notifications_recipient_idx —
+// (tenant_id, user_id, created_at DESC, id) — exactly; a descending tie-break
+// costs an incremental sort within same-instant groups (a fan-out stamps a whole
+// batch with one now()). The keyset predicate follows the mixed direction: a
+// later row is older, or same-instant with a larger id.
+const ListSQL = `
 	SELECT id, user_id, kind, title, body, link, read_at, created_at
 	FROM notifications
 	WHERE tenant_id = $1 AND user_id = $2
-	  AND ($3::timestamptz IS NULL OR (created_at, id) < ($3, $4))
-	ORDER BY created_at DESC, id DESC
+	  AND ($3::timestamptz IS NULL OR created_at < $3 OR (created_at = $3 AND id > $4))
+	ORDER BY created_at DESC, id
 	LIMIT $5`
 
 // List returns one keyset page.
@@ -49,7 +55,7 @@ func (r *PostgresRepository) List(ctx context.Context, tx pgx.Tx, tenantID, user
 		beforeID = before.ID
 	}
 
-	rows, err := tx.Query(ctx, listSQL, tenantID, userID, beforeTime, beforeID, limit)
+	rows, err := tx.Query(ctx, ListSQL, tenantID, userID, beforeTime, beforeID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("notify: list: %w", err)
 	}

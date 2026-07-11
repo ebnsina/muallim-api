@@ -122,7 +122,7 @@ func (r *PostgresRepository) CreateSpace(ctx context.Context, tx pgx.Tx, tenantI
 	return s, nil
 }
 
-const threadsSQL = `
+const ThreadsSQL = `
 	SELECT t.id, t.space_id, COALESCE(t.author_id, ` + nilUUID + `), COALESCE(u.name, ''),
 	       t.title, t.body, t.pinned, t.locked, t.reply_count, t.last_activity_at, t.created_at
 	FROM forum_threads t
@@ -145,7 +145,7 @@ func (r *PostgresRepository) Threads(ctx context.Context, tx pgx.Tx, tenantID, s
 		id = before.ID
 	}
 
-	rows, err := tx.Query(ctx, threadsSQL, tenantID, spaceID, pinned, act, id, limit)
+	rows, err := tx.Query(ctx, ThreadsSQL, tenantID, spaceID, pinned, act, id, limit)
 	if err != nil {
 		return nil, fmt.Errorf("forum: list threads: %w", err)
 	}
@@ -205,7 +205,7 @@ func (r *PostgresRepository) CreateThread(ctx context.Context, tx pgx.Tx, tenant
 	return t, nil
 }
 
-const postsSQL = `
+const PostsSQL = `
 	SELECT p.id, p.thread_id, COALESCE(p.author_id, ` + nilUUID + `), COALESCE(u.name, ''),
 	       p.body, p.created_at
 	FROM forum_posts p
@@ -226,7 +226,7 @@ func (r *PostgresRepository) Posts(ctx context.Context, tx pgx.Tx, tenantID, thr
 		id = before.ID
 	}
 
-	rows, err := tx.Query(ctx, postsSQL, tenantID, threadID, ts, id, limit)
+	rows, err := tx.Query(ctx, PostsSQL, tenantID, threadID, ts, id, limit)
 	if err != nil {
 		return nil, fmt.Errorf("forum: list posts: %w", err)
 	}

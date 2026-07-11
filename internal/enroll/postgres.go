@@ -437,7 +437,7 @@ func (r *PostgresRepository) ReviewFor(ctx context.Context, tx pgx.Tx, tenantID,
 	return rev, nil
 }
 
-const listReviewsSQL = `
+const ListReviewsSQL = `
 	SELECT r.id, r.user_id, r.rating, r.body, COALESCE(u.name, ''), r.created_at, r.updated_at
 	FROM course_reviews r
 	LEFT JOIN users u ON u.id = r.user_id
@@ -447,7 +447,7 @@ const listReviewsSQL = `
 
 // ListReviews returns a course's reviews, newest first, with author names.
 func (r *PostgresRepository) ListReviews(ctx context.Context, tx pgx.Tx, tenantID, courseID uuid.UUID, limit int) ([]Review, error) {
-	rows, err := tx.Query(ctx, listReviewsSQL, tenantID, courseID, limit)
+	rows, err := tx.Query(ctx, ListReviewsSQL, tenantID, courseID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("enroll: list reviews: %w", err)
 	}
@@ -476,7 +476,9 @@ func (r *PostgresRepository) ReviewSummary(ctx context.Context, tx pgx.Tx, tenan
 	return s, nil
 }
 
-const courseStatsSQL = `
+// CourseStatsSQL is exported for a query-plan test: the per-course analytics must
+// seek enrolments on (tenant_id, course_id), never scan the whole table.
+const CourseStatsSQL = `
 	SELECT
 		count(*),
 		count(*) FILTER (WHERE e.status = 'active'),
@@ -492,7 +494,7 @@ const courseStatsSQL = `
 // in one aggregate query. Reviews are summed separately by the caller.
 func (r *PostgresRepository) CourseStats(ctx context.Context, tx pgx.Tx, tenantID, courseID uuid.UUID) (CourseAnalytics, error) {
 	var a CourseAnalytics
-	err := tx.QueryRow(ctx, courseStatsSQL, tenantID, courseID).
+	err := tx.QueryRow(ctx, CourseStatsSQL, tenantID, courseID).
 		Scan(&a.Total, &a.Active, &a.Completed, &a.Inactive, &a.AvgProgress)
 	if err != nil {
 		return CourseAnalytics{}, fmt.Errorf("enroll: course stats: %w", err)

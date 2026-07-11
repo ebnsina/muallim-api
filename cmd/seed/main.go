@@ -410,8 +410,15 @@ func seedCommunity(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, catalogue
 		now     = time.Now()
 	)
 
-	// A pool of authors: the demo learner, the instructor, and a few students.
-	student := people.demo[len(people.demo)-1] // the last named account is student@
+	// A pool of authors: a learner to lead threads, the instructor, and a few
+	// students. The named demo accounts only exist in the first workspace, so a
+	// later workspace has none — fall back to a real student there.
+	student := people.instructor
+	if len(people.demo) > 0 {
+		student = people.demo[len(people.demo)-1] // the last named account is student@
+	} else if len(people.students) > 0 {
+		student = people.students[0]
+	}
 	authors := append([]uuid.UUID{student, people.instructor}, people.students[:min(4, len(people.students))]...)
 	author := func(i int) uuid.UUID { return authors[i%len(authors)] }
 

@@ -185,7 +185,7 @@ const announcementsSQL = `
 	SELECT id, title, body, created_at
 	FROM announcements
 	WHERE tenant_id = $1 AND course_id = $2
-	ORDER BY created_at DESC, id DESC`
+	ORDER BY created_at DESC, id`
 
 // Announcements lists a course's notices, walking announcements_course_idx newest
 // first.

@@ -115,17 +115,24 @@ func (r *PostgresRepository) Standing(ctx context.Context, tx pgx.Tx, tenantID, 
 	return points, rank, outOf, nil
 }
 
-const leaderboardSQL = `
+// LeaderboardSQL is exported for a query-plan test that EXPLAINs this exact
+// statement to prove the leaderboard is an ordered index scan.
+//
+// The tie-break is user_id ascending, to match user_points_leaderboard_idx —
+// (tenant_id, points DESC, user_id) — exactly. Ordering it the other way costs an
+// incremental sort for nothing: within one points value the order is arbitrary,
+// so long as it is stable.
+const LeaderboardSQL = `
 	SELECT up.user_id, COALESCE(u.name, ''), up.points
 	FROM user_points up
 	JOIN users u ON u.id = up.user_id
 	WHERE up.tenant_id = $1
-	ORDER BY up.points DESC, up.user_id DESC
+	ORDER BY up.points DESC, up.user_id
 	LIMIT $2`
 
 // Leaderboard returns the top learners, highest first. Rank is the row's position.
 func (r *PostgresRepository) Leaderboard(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, limit int) ([]LeaderboardEntry, error) {
-	rows, err := tx.Query(ctx, leaderboardSQL, tenantID, limit)
+	rows, err := tx.Query(ctx, LeaderboardSQL, tenantID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("gamify: leaderboard: %w", err)
 	}
