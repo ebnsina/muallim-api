@@ -120,3 +120,29 @@ func (r *PostgresRepository) MarkAllRead(ctx context.Context, tx pgx.Tx, tenantI
 	}
 	return nil
 }
+
+// fanOutSQL notifies every enrolled learner of a course in one idempotent
+// statement. The notification id is derived from the announcement and the
+// recipient, so a retried job — River retries on failure — inserts nothing new
+// rather than a duplicate bell for everyone it already reached.
+//
+// It reads the enrolments table directly, the shared-schema read the learn and
+// forum packages also use; notify still imports no sibling. A learner who enrols
+// after the job has run does not get the old announcement, which is correct: an
+// announcement reaches those enrolled when it was posted.
+const fanOutSQL = `
+	INSERT INTO notifications (id, tenant_id, user_id, kind, title, body, link)
+	SELECT md5($3::text || e.user_id::text)::uuid, $1, e.user_id, $4, $5, $6, $7
+	FROM enrolments e
+	WHERE e.tenant_id = $1 AND e.course_id = $2 AND e.status IN ('active', 'completed')
+	ON CONFLICT (id) DO NOTHING`
+
+// FanOutAnnouncement writes one notification per enrolled learner, returning how
+// many were newly created.
+func (r *PostgresRepository) FanOutAnnouncement(ctx context.Context, tx pgx.Tx, tenantID, courseID, announcementID uuid.UUID, title, body, link string) (int, error) {
+	tag, err := tx.Exec(ctx, fanOutSQL, tenantID, courseID, announcementID, KindAnnouncement, title, body, link)
+	if err != nil {
+		return 0, fmt.Errorf("notify: fan out announcement: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}

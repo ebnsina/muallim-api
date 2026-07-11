@@ -175,3 +175,68 @@ func TestListPagesByKeyset(t *testing.T) {
 		t.Fatalf("a bad cursor should error")
 	}
 }
+
+// seedCourseWithLearners makes a published course with two active enrolments and
+// one cancelled one, and returns the course id and the two active learners.
+func seedCourseWithLearners(t *testing.T, db *database.DB, tenantID uuid.UUID) (courseID uuid.UUID, active []uuid.UUID) {
+	t.Helper()
+	err := db.WithTenant(t.Context(), tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx,
+			`INSERT INTO courses (tenant_id, slug, title, status) VALUES ($1, $2, 'C', 'published') RETURNING id`,
+			tenantID, "c-"+uuid.NewString()[:8]).Scan(&courseID); err != nil {
+			return err
+		}
+		for _, status := range []string{"active", "completed", "cancelled"} {
+			u := seedUser(t, db, tenantID)
+			if _, err := tx.Exec(ctx,
+				`INSERT INTO enrolments (tenant_id, course_id, user_id, source, status) VALUES ($1, $2, $3, 'self', $4)`,
+				tenantID, courseID, u, status); err != nil {
+				return err
+			}
+			if status != "cancelled" {
+				active = append(active, u)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("seed course with learners: %v", err)
+	}
+	return courseID, active
+}
+
+func TestFanOutReachesActiveLearnersOnceAndIsIdempotent(t *testing.T) {
+	t.Parallel()
+
+	db := testDB(t)
+	svc := newService(db)
+	tenantID := seedTenant(t, db)
+	courseID, active := seedCourseWithLearners(t, db, tenantID)
+	announcementID := uuid.New()
+
+	created, err := svc.FanOutAnnouncement(t.Context(), tenantID, courseID, announcementID,
+		"Exam moved", "It's next Friday.", "/courses/c")
+	if err != nil {
+		t.Fatalf("fan out: %v", err)
+	}
+	// Two active/completed learners; the cancelled one is not reached.
+	if created != 2 {
+		t.Fatalf("fan-out created %d notifications, want 2", created)
+	}
+	for _, learner := range active {
+		count, _ := svc.UnreadCount(t.Context(), tenantID, learner)
+		if count != 1 {
+			t.Fatalf("learner %v has %d unread, want 1", learner, count)
+		}
+	}
+
+	// Running the same fan-out again — as a retried job would — creates nothing new.
+	again, err := svc.FanOutAnnouncement(t.Context(), tenantID, courseID, announcementID,
+		"Exam moved", "It's next Friday.", "/courses/c")
+	if err != nil {
+		t.Fatalf("re-run fan out: %v", err)
+	}
+	if again != 0 {
+		t.Fatalf("idempotent fan-out created %d on re-run, want 0", again)
+	}
+}

@@ -145,7 +145,7 @@ func newVideos() testVideos {
 
 func newService(db *database.DB) *catalog.Service {
 	repo := catalog.NewPostgresRepository()
-	return catalog.NewService(db, repo, repo, repo, testAuditor{audit.NewRecorder()}, newVideos())
+	return catalog.NewService(db, repo, repo, repo, testAuditor{audit.NewRecorder()}, newVideos(), nil)
 }
 
 // The regression guard. Loading a curriculum must cost a fixed number of queries

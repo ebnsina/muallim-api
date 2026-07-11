@@ -27,6 +27,7 @@ import (
 	"github.com/ebnsina/lms-api/internal/comms"
 	"github.com/ebnsina/lms-api/internal/enroll"
 	"github.com/ebnsina/lms-api/internal/grade"
+	"github.com/ebnsina/lms-api/internal/notify"
 	"github.com/ebnsina/lms-api/internal/platform/config"
 	"github.com/ebnsina/lms-api/internal/platform/database"
 	"github.com/ebnsina/lms-api/internal/platform/logging"
@@ -147,12 +148,19 @@ func run() error {
 		return err
 	}
 
+	// Fanning a course announcement out to every enrolled learner's bell.
+	fanout, err := notify.NewAnnouncementFanoutWorker(notify.NewService(db, notify.NewPostgresRepository()))
+	if err != nil {
+		return err
+	}
+
 	workers := river.NewWorkers()
 	river.AddWorker(workers, emails)
 	river.AddWorker(workers, orphans)
 	river.AddWorker(workers, revocations)
 	river.AddWorker(workers, grading)
 	river.AddWorker(workers, deletions)
+	river.AddWorker(workers, fanout)
 
 	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Logger:  log,

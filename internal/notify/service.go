@@ -29,6 +29,10 @@ type Repository interface {
 
 	// MarkAllRead marks every unread notification of a person read.
 	MarkAllRead(ctx context.Context, tx pgx.Tx, tenantID, userID uuid.UUID) error
+
+	// FanOutAnnouncement writes one notification per enrolled learner of a course,
+	// idempotently, returning how many were newly created.
+	FanOutAnnouncement(ctx context.Context, tx pgx.Tx, tenantID, courseID, announcementID uuid.UUID, title, body, link string) (int, error)
 }
 
 // Service holds the rules and owns the transaction boundaries.
@@ -118,4 +122,18 @@ func (s *Service) MarkAllRead(ctx context.Context, tenantID, userID uuid.UUID) e
 	return s.db.WithTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
 		return s.repo.MarkAllRead(ctx, tx, tenantID, userID)
 	})
+}
+
+// FanOutAnnouncement notifies every enrolled learner of a course that an
+// announcement was posted. It owns its own transaction: the job worker runs it
+// out of band, after the announcement has already committed, so a slow fan-out
+// never holds up the instructor's request. Returns how many were newly notified.
+func (s *Service) FanOutAnnouncement(ctx context.Context, tenantID, courseID, announcementID uuid.UUID, title, body, link string) (int, error) {
+	var created int
+	err := s.db.WithTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		created, err = s.repo.FanOutAnnouncement(ctx, tx, tenantID, courseID, announcementID, title, body, link)
+		return err
+	})
+	return created, err
 }

@@ -161,8 +161,16 @@ func run() error {
 		return err
 	}
 
+	// Posting a course announcement fans out a notification to every enrolled
+	// learner. That is a job — enqueued in the announcement's own transaction — so
+	// catalog declares an interface and this enqueuer satisfies it.
+	notifyJobs, err := notify.NewRiverEnqueuer(jobs)
+	if err != nil {
+		return err
+	}
+
 	catalogRepo := catalog.NewPostgresRepository()
-	courses := catalog.NewService(db, catalogRepo, catalogRepo, catalogRepo, catalogAuditor{recorder}, videos)
+	courses := catalog.NewService(db, catalogRepo, catalogRepo, catalogRepo, catalogAuditor{recorder}, videos, notifyJobs)
 	// Certificates are issued in the transaction that finishes a course. `enroll`
 	// declares the interface; certify satisfies it; neither has heard of the other.
 	credentials := certify.NewService(db, certify.NewPostgresRepository(), certifyAuditor{recorder})

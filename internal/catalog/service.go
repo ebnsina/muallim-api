@@ -23,6 +23,16 @@ type Repository interface {
 	DeleteAnnouncement(ctx context.Context, tx pgx.Tx, tenantID, id uuid.UUID) (bool, error)
 }
 
+// AnnouncementNotifier queues, on the caller's transaction, the fan-out that
+// tells a course's enrolled learners a notice was posted. Declared here, by its
+// consumer, and satisfied in cmd by the notify service's enqueuer — the fan-out
+// is a job because a busy course has too many learners to notify inline. A nil
+// notifier posts the announcement and tells no one, which is what the spec-only
+// build passes.
+type AnnouncementNotifier interface {
+	NotifyAnnouncement(ctx context.Context, tx pgx.Tx, tenantID, courseID, announcementID uuid.UUID, title, body, link string) error
+}
+
 // Service holds the business rules and owns transaction boundaries.
 type Service struct {
 	db        *database.DB
@@ -31,11 +41,12 @@ type Service struct {
 	prereqs   PrerequisiteRepository
 	audit     AuditRecorder
 	video     VideoResolver
+	announce  AnnouncementNotifier
 }
 
 // NewService returns a Service.
-func NewService(db *database.DB, repo Repository, authoring AuthoringRepository, prereqs PrerequisiteRepository, recorder AuditRecorder, video VideoResolver) *Service {
-	return &Service{db: db, repo: repo, authoring: authoring, prereqs: prereqs, audit: recorder, video: video}
+func NewService(db *database.DB, repo Repository, authoring AuthoringRepository, prereqs PrerequisiteRepository, recorder AuditRecorder, video VideoResolver, announce AnnouncementNotifier) *Service {
+	return &Service{db: db, repo: repo, authoring: authoring, prereqs: prereqs, audit: recorder, video: video, announce: announce}
 }
 
 // ListCourses returns one page of a tenant's courses.
@@ -126,7 +137,18 @@ func (s *Service) PostAnnouncement(ctx context.Context, tenantID uuid.UUID, slug
 			return err
 		}
 		created, err = s.repo.CreateAnnouncement(ctx, tx, tenantID, course.ID, authorID, title, body)
-		return err
+		if err != nil {
+			return err
+		}
+
+		// Notify the course's enrolled learners, on this transaction. The fan-out is
+		// a job, enqueued here so it exists iff the announcement committed — post the
+		// notice and enqueue nothing, or roll both back together.
+		if s.announce != nil {
+			link := "/courses/" + slug
+			return s.announce.NotifyAnnouncement(ctx, tx, tenantID, course.ID, created.ID, title, body, link)
+		}
+		return nil
 	})
 
 	return created, err
