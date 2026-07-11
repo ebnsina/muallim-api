@@ -16,6 +16,7 @@ import (
 	"github.com/ebnsina/lms-api/internal/catalog"
 	"github.com/ebnsina/lms-api/internal/certify"
 	"github.com/ebnsina/lms-api/internal/enroll"
+	"github.com/ebnsina/lms-api/internal/forum"
 	"github.com/ebnsina/lms-api/internal/grade"
 	"github.com/ebnsina/lms-api/internal/learn"
 	"github.com/ebnsina/lms-api/internal/notify"
@@ -467,6 +468,41 @@ func TestAnUnmappedNotifyErrorIsFiveHundred(t *testing.T) {
 
 	if got := statusOf(notifyError(errors.New("notify: something new"))); got != http.StatusInternalServerError {
 		t.Errorf("an unmapped notify error mapped to %d, want 500", got)
+	}
+}
+
+// The forum sentinels go through their own mapper.
+func TestForumSentinelsMapToADeliberateStatus(t *testing.T) {
+	t.Parallel()
+
+	tests := map[error]int{
+		forum.ErrSpaceNotFound:  http.StatusNotFound,
+		forum.ErrThreadNotFound: http.StatusNotFound,
+		forum.ErrPostNotFound:   http.StatusNotFound,
+		forum.ErrLocked:         http.StatusConflict,
+		forum.ErrEmpty:          http.StatusUnprocessableEntity,
+		forum.ErrTooLong:        http.StatusUnprocessableEntity,
+		forum.ErrForbidden:      http.StatusForbidden,
+		forum.ErrInvalidPage:    http.StatusUnprocessableEntity,
+	}
+
+	for err, want := range tests {
+		if got := statusOf(forumError(err)); got != want {
+			t.Errorf("%v mapped to %d, want %d", err, got, want)
+		}
+
+		wrapped := fmt.Errorf("forum: doing a thing: %w", err)
+		if got := statusOf(forumError(wrapped)); got != want {
+			t.Errorf("wrapped %v mapped to %d, want %d", err, got, want)
+		}
+	}
+}
+
+func TestAnUnmappedForumErrorIsFiveHundred(t *testing.T) {
+	t.Parallel()
+
+	if got := statusOf(forumError(errors.New("forum: something new"))); got != http.StatusInternalServerError {
+		t.Errorf("an unmapped forum error mapped to %d, want 500", got)
 	}
 }
 

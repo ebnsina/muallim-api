@@ -157,6 +157,7 @@ type counts struct {
 	grades, certificates                                 int
 	reviews, discussions, announcements                  int
 	notifications                                        int
+	spaces, threads, posts                               int
 }
 
 func (c *counts) add(other counts) {
@@ -177,6 +178,9 @@ func (c *counts) add(other counts) {
 	c.discussions += other.discussions
 	c.announcements += other.announcements
 	c.notifications += other.notifications
+	c.spaces += other.spaces
+	c.threads += other.threads
+	c.posts += other.posts
 }
 
 func subdomain(index int) string {
@@ -327,10 +331,125 @@ func seedWorkspace(ctx context.Context, db *database.DB, cfg config, index int, 
 		got.announcements = learning.announcements
 		got.notifications = learning.notifications
 
+		community, err := seedCommunity(ctx, tx, tenantID, catalogue, people, rng)
+		if err != nil {
+			return fmt.Errorf("community: %w", err)
+		}
+		got.spaces = community.spaces
+		got.threads = community.threads
+		got.posts = community.posts
+		got.notifications += community.notifications
+
 		return nil
 	})
 
 	return got, err
+}
+
+type communityCounts struct {
+	spaces, threads, posts, notifications int
+}
+
+// seedCommunity fills the forum: a workspace-wide board and one course board,
+// each with a few threads and replies — including one thread a demo learner
+// started and the instructor answered, so signing in as student@ shows a live
+// community and a reply notification.
+func seedCommunity(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, catalogue []seededCourse, people people, rng *rand.Rand) (communityCounts, error) {
+	var (
+		got     communityCounts
+		spaces  [][]any
+		threads [][]any
+		posts   [][]any
+		notifs  [][]any
+		now     = time.Now()
+	)
+
+	// A pool of authors: the demo learner, the instructor, and a few students.
+	student := people.demo[len(people.demo)-1] // the last named account is student@
+	authors := append([]uuid.UUID{student, people.instructor}, people.students[:min(4, len(people.students))]...)
+	author := func(i int) uuid.UUID { return authors[i%len(authors)] }
+
+	// The workspace board.
+	general := id("space", "general", tenantID)
+	spaces = append(spaces, []any{general, tenantID, nil, "General discussion", "Introduce yourself and ask anything.", 0})
+	got.spaces++
+
+	// One course board, on the first course.
+	if len(catalogue) > 0 {
+		course := catalogue[0]
+		cspace := id("space", "course", course.id)
+		spaces = append(spaces, []any{cspace, tenantID, course.id, course.title + " — discussion", "For learners taking this course.", 1})
+		got.spaces++
+	}
+
+	// A thread helper: writes a thread and n replies, keeping the roll-up honest.
+	addThread := func(space uuid.UUID, key string, authorID uuid.UUID, title, body string, pinned bool, replies int, at time.Time) uuid.UUID {
+		tid := id("thread", space, key)
+		last := at
+		for r := range replies {
+			rt := at.Add(time.Duration(r+1) * 3 * time.Hour)
+			posts = append(posts, []any{
+				id("post", tid, r), tenantID, tid, author(r + 1),
+				forumReplies[(int(tid[0])+r)%len(forumReplies)], rt,
+			})
+			last = rt
+			got.posts++
+		}
+		threads = append(threads, []any{
+			tid, tenantID, space, authorID, title, body, pinned, false, replies, last, at,
+		})
+		got.threads++
+		return tid
+	}
+
+	addThread(general, "welcome", people.instructor,
+		"Welcome to the community", "Say hello, share what you're studying, and be kind. Questions about a specific course belong on its board.",
+		true, 3, now.Add(-20*24*time.Hour))
+
+	// The demo learner's thread, answered by the instructor — the one that
+	// produces a notification for student@.
+	studyThread := id("thread", general, "study")
+	studyAt := now.Add(-4 * 24 * time.Hour)
+	replyAt := studyAt.Add(6 * time.Hour)
+	threads = append(threads, []any{
+		studyThread, tenantID, general, student, "Anyone up for a study group?",
+		"I'm working through the first few courses and would love to compare notes. Reply if you're keen.",
+		false, false, 1, replyAt, studyAt,
+	})
+	got.threads++
+	posts = append(posts, []any{
+		id("post", studyThread, 0), tenantID, studyThread, people.instructor,
+		"Great idea — I'll pin a schedule once a few of you have signed up.", replyAt,
+	})
+	got.posts++
+	notifs = append(notifs, []any{
+		id("notification", "forum", studyThread), tenantID, student, "reply",
+		"New reply in your thread", "Great idea — I'll pin a schedule once a few of you have signed up.",
+		"/forum/threads/" + studyThread.String(), nil, replyAt,
+	})
+	got.notifications++
+
+	if len(catalogue) > 0 {
+		cspace := id("space", "course", catalogue[0].id)
+		addThread(cspace, "q1", author(2), "Stuck on the second topic", "Did anyone else find the jump in the second topic steep? How did you approach it?", false, 2, now.Add(-8*24*time.Hour))
+	}
+
+	copies := []struct {
+		table string
+		cols  []string
+		rows  [][]any
+	}{
+		{"forum_spaces", []string{"id", "tenant_id", "course_id", "title", "description", "position"}, spaces},
+		{"forum_threads", []string{"id", "tenant_id", "space_id", "author_id", "title", "body", "pinned", "locked", "reply_count", "last_activity_at", "created_at"}, threads},
+		{"forum_posts", []string{"id", "tenant_id", "thread_id", "author_id", "body", "created_at"}, posts},
+		{"notifications", []string{"id", "tenant_id", "user_id", "kind", "title", "body", "link", "read_at", "created_at"}, notifs},
+	}
+	for _, c := range copies {
+		if err := bulkInsert(ctx, tx, c.table, c.cols, c.rows); err != nil {
+			return communityCounts{}, err
+		}
+	}
+	return got, nil
 }
 
 // ---------------------------------------------------------------------- people
@@ -1185,7 +1304,7 @@ func databaseName(url string) string {
 func report(cfg config, url string, got counts, took time.Duration) {
 	rows := got.users + got.courses + got.lessons + got.quizzes + got.questions +
 		got.assignments + got.enrolments + got.progress + got.attempts + got.answers +
-		got.grades + got.certificates + got.reviews + got.discussions + got.announcements + got.notifications
+		got.grades + got.certificates + got.reviews + got.discussions + got.announcements + got.notifications + got.spaces + got.threads + got.posts
 
 	fmt.Printf("seeded %d rows in %s\n\n", rows, took.Round(time.Millisecond))
 	fmt.Printf("  workspaces  %d\n  people      %d\n  courses     %d\n  lessons     %d\n",
@@ -1194,8 +1313,10 @@ func report(cfg config, url string, got counts, took time.Duration) {
 		got.quizzes, got.questions, got.assignments, got.enrolments, got.progress)
 	fmt.Printf("  attempts    %d (%d answers)\n  grades      %d\n  certificates %d\n",
 		got.attempts, got.answers, got.grades, got.certificates)
-	fmt.Printf("  reviews     %d\n  discussions %d\n  announcements %d\n  notifications %d\n\n",
+	fmt.Printf("  reviews     %d\n  discussions %d\n  announcements %d\n  notifications %d\n",
 		got.reviews, got.discussions, got.announcements, got.notifications)
+	fmt.Printf("  forum       %d spaces, %d threads, %d posts\n\n",
+		got.spaces, got.threads, got.posts)
 
 	// Which database, because these accounts are only in this one. `pnpm test:e2e`
 	// runs against `lms_test`, which has no demo accounts at all — and an API left
@@ -1283,6 +1404,14 @@ var (
 		"When the remainder is non-zero you carry it into the next step; the worked example in lesson three shows exactly that.",
 		"Yes — the further-reading note at the end of the topic lists two. Start with the shorter one.",
 		"The intuition is in the diagram: each step preserves the balance, so nothing is lost from one line to the next.",
+	}
+
+	forumReplies = []string{
+		"Same here — the worked examples in the third lesson finally made it click for me.",
+		"I'd start with the summary at the end and work backwards. It helped me see where it was going.",
+		"Count me in. I usually study in the evenings, if that suits anyone.",
+		"Thanks for starting this. I thought I was the only one finding it tricky.",
+		"There's a good note in the further-reading section that covers exactly this.",
 	}
 
 	announcementHeadlines = []struct{ title, body string }{

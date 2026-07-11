@@ -45,6 +45,13 @@ func TestRolePermissions(t *testing.T) {
 		{RoleAdmin, PermSubmissionGrade, true},
 		{RoleInstructor, PermSubmissionGrade, true},
 		{RoleStudent, PermSubmissionGrade, false},
+
+		// Moderating the community: every teaching role, never a student. A student
+		// posts and starts threads; pinning and locking are a moderator's.
+		{RoleOwner, PermForumModerate, true},
+		{RoleAdmin, PermForumModerate, true},
+		{RoleInstructor, PermForumModerate, true},
+		{RoleStudent, PermForumModerate, false},
 	}
 
 	for _, tt := range tests {

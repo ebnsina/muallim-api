@@ -19,6 +19,7 @@ import (
 	"github.com/ebnsina/lms-api/internal/catalog"
 	"github.com/ebnsina/lms-api/internal/certify"
 	"github.com/ebnsina/lms-api/internal/enroll"
+	"github.com/ebnsina/lms-api/internal/forum"
 	"github.com/ebnsina/lms-api/internal/grade"
 	"github.com/ebnsina/lms-api/internal/learn"
 	"github.com/ebnsina/lms-api/internal/notify"
@@ -54,6 +55,7 @@ type Options struct {
 	Certify *certify.Service
 	Learn   *learn.Service
 	Notify  *notify.Service
+	Forum   *forum.Service
 	DB      Pinger
 
 	// AuthLimiter throttles credential-verifying endpoints. Nil disables it, which
@@ -112,6 +114,7 @@ func New(opts Options) (http.Handler, huma.API) {
 	registerCourseAnnotations(api, opts.Learn)
 	registerQA(api, opts.Learn)
 	registerNotifications(api, opts.Notify)
+	registerForum(api, opts.Forum)
 
 	// Order matters, outermost first.
 	//

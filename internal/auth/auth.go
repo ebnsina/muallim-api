@@ -61,6 +61,11 @@ const (
 	PermUserRead        = "user:read"
 	PermUserManage      = "user:manage"
 	PermTenantManage    = "tenant:manage"
+
+	// PermForumModerate creates community spaces and pins, locks, or removes any
+	// thread or post. Separate from course:write: moderating the community is not
+	// the same job as authoring a course, though the same roles happen to do both.
+	PermForumModerate = "forum:moderate"
 )
 
 // rolePermissions is the entire authorisation model. It is a map rather than a
@@ -71,16 +76,19 @@ var rolePermissions = map[string]map[string]bool{
 		PermCourseRead: true, PermCourseWrite: true, PermCoursePublish: true,
 		PermSubmissionGrade: true,
 		PermUserRead:        true, PermUserManage: true, PermTenantManage: true,
+		PermForumModerate: true,
 	},
 	RoleAdmin: {
 		PermCourseRead: true, PermCourseWrite: true, PermCoursePublish: true,
 		PermSubmissionGrade: true,
 		PermUserRead:        true, PermUserManage: true,
+		PermForumModerate: true,
 	},
 	RoleInstructor: {
 		PermCourseRead: true, PermCourseWrite: true, PermCoursePublish: true,
 		PermSubmissionGrade: true,
 		PermUserRead:        true,
+		PermForumModerate:   true,
 	},
 	RoleStudent: {
 		PermCourseRead: true,

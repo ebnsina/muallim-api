@@ -28,6 +28,7 @@ import (
 	"github.com/ebnsina/lms-api/internal/certify"
 	"github.com/ebnsina/lms-api/internal/comms"
 	"github.com/ebnsina/lms-api/internal/enroll"
+	"github.com/ebnsina/lms-api/internal/forum"
 	"github.com/ebnsina/lms-api/internal/grade"
 	"github.com/ebnsina/lms-api/internal/httpapi"
 	"github.com/ebnsina/lms-api/internal/learn"
@@ -184,6 +185,8 @@ func run() error {
 	// notifiers.go, so neither domain imports the other.
 	notes := learn.NewService(db, learn.NewPostgresRepository(), learnNotifier{notifications})
 
+	community := forum.NewService(db, forum.NewPostgresRepository(), forumNotifier{notifications})
+
 	// `learning` satisfies assess.Completions: passing a quiz completes its lesson,
 	// in the transaction that recorded the grade. The interface is declared by
 	// assess and satisfied by enroll, which have never heard of each other.
@@ -212,6 +215,7 @@ func run() error {
 		Certify:     credentials,
 		Learn:       notes,
 		Notify:      notifications,
+		Forum:       community,
 		Auth:        identities,
 		Enrol:       learning,
 		Assess:      quizzes,
