@@ -165,6 +165,59 @@ func (r *PostgresRepository) lessonCounts(ctx context.Context, tx pgx.Tx, tenant
 	return counts, nil
 }
 
+const createAnnouncementSQL = `
+	INSERT INTO announcements (tenant_id, course_id, author_id, title, body)
+	VALUES ($1, $2, $3, $4, $5)
+	RETURNING id, title, body, created_at`
+
+// CreateAnnouncement pins a notice to a course.
+func (r *PostgresRepository) CreateAnnouncement(ctx context.Context, tx pgx.Tx, tenantID, courseID, authorID uuid.UUID, title, body string) (Announcement, error) {
+	var a Announcement
+	err := tx.QueryRow(ctx, createAnnouncementSQL, tenantID, courseID, authorID, title, body).
+		Scan(&a.ID, &a.Title, &a.Body, &a.CreatedAt)
+	if err != nil {
+		return Announcement{}, fmt.Errorf("catalog: create announcement: %w", err)
+	}
+	return a, nil
+}
+
+const announcementsSQL = `
+	SELECT id, title, body, created_at
+	FROM announcements
+	WHERE tenant_id = $1 AND course_id = $2
+	ORDER BY created_at DESC, id DESC`
+
+// Announcements lists a course's notices, walking announcements_course_idx newest
+// first.
+func (r *PostgresRepository) Announcements(ctx context.Context, tx pgx.Tx, tenantID, courseID uuid.UUID) ([]Announcement, error) {
+	rows, err := tx.Query(ctx, announcementsSQL, tenantID, courseID)
+	if err != nil {
+		return nil, fmt.Errorf("catalog: list announcements: %w", err)
+	}
+	defer rows.Close()
+
+	announcements, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Announcement, error) {
+		var a Announcement
+		err := row.Scan(&a.ID, &a.Title, &a.Body, &a.CreatedAt)
+		return a, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("catalog: scan announcements: %w", err)
+	}
+	return announcements, nil
+}
+
+const deleteAnnouncementSQL = `DELETE FROM announcements WHERE tenant_id = $1 AND id = $2`
+
+// DeleteAnnouncement removes a notice, reporting whether one was there.
+func (r *PostgresRepository) DeleteAnnouncement(ctx context.Context, tx pgx.Tx, tenantID, id uuid.UUID) (bool, error) {
+	tag, err := tx.Exec(ctx, deleteAnnouncementSQL, tenantID, id)
+	if err != nil {
+		return false, fmt.Errorf("catalog: delete announcement: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
 // courseBySlugSQL hides unpublished courses unless the caller may see drafts.
 //
 // The filter is in the query, not in a check after the fact. A draft that is

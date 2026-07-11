@@ -19,7 +19,26 @@ var (
 	ErrSlugTaken     = errors.New("catalog: slug is already used in this workspace")
 	ErrInvalidSlug   = errors.New("catalog: slug must be lowercase letters, digits, and hyphens")
 	ErrInvalidLesson = errors.New("catalog: lesson is not valid")
+
+	// ErrInvalidAnnouncement is an announcement with no title or no body, or one
+	// past the length either should hold.
+	ErrInvalidAnnouncement = errors.New("catalog: announcement is not valid")
 )
+
+// An announcement's bounds. A title is a headline, a body is a notice, and
+// neither is a novel; both are bounded so a per-request write cannot fill a disk.
+const (
+	MaxAnnouncementTitle = 200
+	MaxAnnouncementBody  = 5_000
+)
+
+// Announcement is a notice an instructor posts to a course.
+type Announcement struct {
+	ID        uuid.UUID
+	Title     string
+	Body      string
+	CreatedAt time.Time
+}
 
 // ActionCourseCreated is the audit action this package emits.
 const ActionCourseCreated = "course.created"

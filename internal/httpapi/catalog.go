@@ -333,6 +333,9 @@ func catalogError(err error) error {
 	case errors.Is(err, catalog.ErrInvalidLesson):
 		return huma.Error422UnprocessableEntity(err.Error())
 
+	case errors.Is(err, catalog.ErrInvalidAnnouncement):
+		return huma.Error422UnprocessableEntity("An announcement needs a title and a body.")
+
 	case errors.Is(err, catalog.ErrInvalidVideo):
 		// 422, and the sentence names the URL's problem: this is the one lesson field
 		// whose validity depends on how the workspace is configured, so an author who

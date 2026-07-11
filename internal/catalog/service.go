@@ -17,6 +17,10 @@ type Repository interface {
 	CourseBySlug(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, slug string, includeDrafts bool) (Course, error)
 	CurriculumFor(ctx context.Context, tx pgx.Tx, tenantID, courseID uuid.UUID) ([]Topic, error)
 	CreateCourse(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, n NewCourse) (Course, error)
+
+	CreateAnnouncement(ctx context.Context, tx pgx.Tx, tenantID, courseID, authorID uuid.UUID, title, body string) (Announcement, error)
+	Announcements(ctx context.Context, tx pgx.Tx, tenantID, courseID uuid.UUID) ([]Announcement, error)
+	DeleteAnnouncement(ctx context.Context, tx pgx.Tx, tenantID, id uuid.UUID) (bool, error)
 }
 
 // Service holds the business rules and owns transaction boundaries.
@@ -103,6 +107,64 @@ func (s *Service) Curriculum(ctx context.Context, tenantID uuid.UUID, slug strin
 		return Curriculum{}, err
 	}
 	return out, nil
+}
+
+// PostAnnouncement pins a notice to a course. The course is resolved with drafts
+// visible, because the caller holds course:write and may post to a course before
+// they publish it. Title and body are trimmed and bounded; empty is refused.
+func (s *Service) PostAnnouncement(ctx context.Context, tenantID uuid.UUID, slug string, authorID uuid.UUID, title, body string) (Announcement, error) {
+	title = strings.TrimSpace(title)
+	body = strings.TrimSpace(body)
+	if title == "" || body == "" || len(title) > MaxAnnouncementTitle || len(body) > MaxAnnouncementBody {
+		return Announcement{}, ErrInvalidAnnouncement
+	}
+
+	var created Announcement
+	err := s.db.WithTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		course, err := s.repo.CourseBySlug(ctx, tx, tenantID, slug, true)
+		if err != nil {
+			return err
+		}
+		created, err = s.repo.CreateAnnouncement(ctx, tx, tenantID, course.ID, authorID, title, body)
+		return err
+	})
+
+	return created, err
+}
+
+// Announcements lists a course's notices, newest first. Whether a reader may see
+// them follows the course's own visibility: a published course's notices are for
+// anyone who can reach it, a draft's for the author, and `includeDrafts` carries
+// that decision from the transport layer, never from a request.
+func (s *Service) Announcements(ctx context.Context, tenantID uuid.UUID, slug string, includeDrafts bool) ([]Announcement, error) {
+	var announcements []Announcement
+
+	err := s.db.WithTenantReadOnly(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		course, err := s.repo.CourseBySlug(ctx, tx, tenantID, slug, includeDrafts)
+		if err != nil {
+			return err
+		}
+		announcements, err = s.repo.Announcements(ctx, tx, tenantID, course.ID)
+		return err
+	})
+
+	return announcements, err
+}
+
+// DeleteAnnouncement removes a notice. Scoped to the workspace by id; a notice
+// that is not there — or belongs to another tenant, which is the same thing under
+// RLS — is ErrNotFound.
+func (s *Service) DeleteAnnouncement(ctx context.Context, tenantID, id uuid.UUID) error {
+	return s.db.WithTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		found, err := s.repo.DeleteAnnouncement(ctx, tx, tenantID, id)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return ErrNotFound
+		}
+		return nil
+	})
 }
 
 // normalise applies defaults and bounds. It never silently truncates a caller's

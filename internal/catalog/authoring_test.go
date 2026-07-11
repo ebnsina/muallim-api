@@ -547,3 +547,57 @@ func TestListingFiltersBySearchAndDifficulty(t *testing.T) {
 		t.Errorf("an unknown difficulty returned %d courses, want all 3", len(got))
 	}
 }
+
+// Announcements post, list newest-first, and delete; a draft's board is hidden
+// from a reader who may not see drafts, and an empty notice is refused.
+func TestAnnouncementsPostListAndDelete(t *testing.T) {
+	t.Parallel()
+
+	db := testDB(t)
+	svc := newService(db)
+	tenantID := seedTenant(t, db)
+	a := seedAuthor(t, db, tenantID)
+	slug := draftCourse(t, svc, tenantID, a)
+
+	first, err := svc.PostAnnouncement(t.Context(), tenantID, slug, a.UserID, "  First  ", "Body one")
+	if err != nil {
+		t.Fatalf("PostAnnouncement: %v", err)
+	}
+	if first.Title != "First" {
+		t.Errorf("title = %q, want trimmed %q", first.Title, "First")
+	}
+	if _, err := svc.PostAnnouncement(t.Context(), tenantID, slug, a.UserID, "Second", "Body two"); err != nil {
+		t.Fatalf("PostAnnouncement: %v", err)
+	}
+
+	// The author, who may see the draft, reads its board newest-first.
+	list, err := svc.Announcements(t.Context(), tenantID, slug, true)
+	if err != nil {
+		t.Fatalf("Announcements: %v", err)
+	}
+	if len(list) != 2 || list[0].Title != "Second" {
+		t.Fatalf("list = %+v, want [Second, First]", list)
+	}
+
+	// A reader who may not see the draft sees no board at all — the course itself
+	// is not found, so neither are its notices.
+	if _, err := svc.Announcements(t.Context(), tenantID, slug, false); !errors.Is(err, catalog.ErrNotFound) {
+		t.Errorf("a draft's board without drafts returned %v, want ErrNotFound", err)
+	}
+
+	// Delete one, and it is gone; deleting a missing one is a not-found.
+	if err := svc.DeleteAnnouncement(t.Context(), tenantID, first.ID); err != nil {
+		t.Fatalf("DeleteAnnouncement: %v", err)
+	}
+	if list, _ := svc.Announcements(t.Context(), tenantID, slug, true); len(list) != 1 {
+		t.Errorf("after delete, %d announcements remain, want 1", len(list))
+	}
+	if err := svc.DeleteAnnouncement(t.Context(), tenantID, uuid.New()); !errors.Is(err, catalog.ErrNotFound) {
+		t.Errorf("deleting a missing announcement returned %v, want ErrNotFound", err)
+	}
+
+	// A notice with no title or no body is refused.
+	if _, err := svc.PostAnnouncement(t.Context(), tenantID, slug, a.UserID, "", "body"); !errors.Is(err, catalog.ErrInvalidAnnouncement) {
+		t.Errorf("an empty title returned %v, want ErrInvalidAnnouncement", err)
+	}
+}

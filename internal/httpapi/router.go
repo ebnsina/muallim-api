@@ -89,6 +89,7 @@ func New(opts Options) (http.Handler, huma.API) {
 	registerMembers(api, opts.Auth)
 	registerCatalog(api, opts.Catalog)
 	registerCatalogWrites(api, opts.Catalog)
+	registerAnnouncements(api, opts.Catalog)
 	registerAuthoring(api, opts.Catalog)
 	registerPrerequisites(api, opts.Catalog)
 	registerEnrolment(api, opts.Enrol)

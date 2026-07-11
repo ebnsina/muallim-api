@@ -64,6 +64,7 @@ func TestEveryDomainSentinelMapsToADeliberateStatus(t *testing.T) {
 		{"invalid slug", catalog.ErrInvalidSlug, http.StatusUnprocessableEntity},
 		{"slug taken", catalog.ErrSlugTaken, http.StatusConflict},
 		{"invalid lesson", catalog.ErrInvalidLesson, http.StatusUnprocessableEntity},
+		{"invalid announcement", catalog.ErrInvalidAnnouncement, http.StatusUnprocessableEntity},
 		{"invalid video", catalog.ErrInvalidVideo, http.StatusUnprocessableEntity},
 		{"incomplete order", catalog.ErrIncompleteOrder, http.StatusUnprocessableEntity},
 		{"empty course", catalog.ErrEmptyCourse, http.StatusConflict},
@@ -79,7 +80,7 @@ func TestEveryDomainSentinelMapsToADeliberateStatus(t *testing.T) {
 			for _, catalogErr := range []error{
 				catalog.ErrNotFound, catalog.ErrInvalidPage, catalog.ErrInvalidLimit,
 				catalog.ErrInvalidSlug, catalog.ErrSlugTaken, catalog.ErrInvalidLesson,
-				catalog.ErrInvalidVideo,
+				catalog.ErrInvalidAnnouncement, catalog.ErrInvalidVideo,
 				catalog.ErrIncompleteOrder, catalog.ErrEmptyCourse, catalog.ErrAlreadyPublished,
 				catalog.ErrPrerequisiteCycle, catalog.ErrPrerequisiteExists,
 				catalog.ErrInvalidDripMode,
