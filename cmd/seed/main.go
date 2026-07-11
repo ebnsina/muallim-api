@@ -154,6 +154,7 @@ type counts struct {
 	assignments                                          int
 	enrolments, progress, attempts, answers              int
 	grades, certificates                                 int
+	reviews, discussions, announcements                  int
 }
 
 func (c *counts) add(other counts) {
@@ -170,6 +171,9 @@ func (c *counts) add(other counts) {
 	c.answers += other.answers
 	c.grades += other.grades
 	c.certificates += other.certificates
+	c.reviews += other.reviews
+	c.discussions += other.discussions
+	c.announcements += other.announcements
 }
 
 func subdomain(index int) string {
@@ -305,7 +309,7 @@ func seedWorkspace(ctx context.Context, db *database.DB, cfg config, index int, 
 			}
 		}
 
-		learning, err := seedLearning(ctx, tx, tenantID, cfg, catalogue, people.students, people.demo, people.names, rng)
+		learning, err := seedLearning(ctx, tx, tenantID, cfg, catalogue, people.students, people.demo, people.instructor, people.names, rng)
 		if err != nil {
 			return fmt.Errorf("learning: %w", err)
 		}
@@ -315,6 +319,9 @@ func seedWorkspace(ctx context.Context, db *database.DB, cfg config, index int, 
 		got.answers = learning.answers
 		got.grades = learning.grades
 		got.certificates = learning.certificates
+		got.reviews = learning.reviews
+		got.discussions = learning.discussions
+		got.announcements = learning.announcements
 
 		return nil
 	})
@@ -746,19 +753,24 @@ func seedCatalogue(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg confi
 type learningCounts struct {
 	enrolments, progress, attempts, answers int
 	grades, certificates                    int
+	reviews, discussions, announcements     int
 }
 
-func seedLearning(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg config, catalogue []seededCourse, students, demo []uuid.UUID, names map[uuid.UUID]string, rng *rand.Rand) (learningCounts, error) {
+func seedLearning(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg config, catalogue []seededCourse, students, demo []uuid.UUID, instructor uuid.UUID, names map[uuid.UUID]string, rng *rand.Rand) (learningCounts, error) {
 	var got learningCounts
 
 	var (
-		enrolments   [][]any
-		progress     [][]any
-		rollups      [][]any
-		attempts     [][]any
-		answers      [][]any
-		gradeEntries [][]any
-		certificates [][]any
+		enrolments    [][]any
+		progress      [][]any
+		rollups       [][]any
+		attempts      [][]any
+		answers       [][]any
+		gradeEntries  [][]any
+		certificates  [][]any
+		reviews       [][]any
+		questions     [][]any
+		qaAnswers     [][]any
+		announcements [][]any
 	)
 
 	now := time.Now()
@@ -831,6 +843,18 @@ func seedLearning(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg config
 	}
 
 	for _, course := range catalogue {
+		// One or two notices per course, pinned by the instructor. Announcements are
+		// read by whoever may see the course, so they land on the course page.
+		for a := range 1 + rng.IntN(2) {
+			posted := now.Add(-time.Duration(3+a*5) * 24 * time.Hour)
+			headline := announcementHeadlines[(int(course.id[0])+a)%len(announcementHeadlines)]
+			announcements = append(announcements, []any{
+				id("announcement", course.id, a), tenantID, course.id, instructor,
+				headline.title, headline.body, posted,
+			})
+			got.announcements++
+		}
+
 		for _, student := range students {
 			if rng.Float64() >= cfg.enrolRate {
 				continue
@@ -888,6 +912,39 @@ func seedLearning(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg config
 				got.certificates++
 			}
 
+			// A learner who has got somewhere in the course may leave a review. Ratings
+			// lean high — most people who bother to rate a course they stuck with liked
+			// it — so the average is a believable 4-ish, not a flat 3.
+			if done > 0 && rng.Float64() < 0.45 {
+				rating := 3 + rng.IntN(3) // 3..5
+				if rng.Float64() < 0.15 {
+					rating = 1 + rng.IntN(2) // an occasional 1..2 keeps it honest
+				}
+				body := reviewBodies[rng.IntN(len(reviewBodies))]
+				reviewedAt := enrolledAt.Add(time.Duration(done) * 24 * time.Hour)
+				reviews = append(reviews, []any{
+					id("review", course.id, student), tenantID, course.id, student,
+					rating, body, reviewedAt,
+				})
+				got.reviews++
+			}
+
+			// Some enrolled learners ask a question on the first lesson, and the
+			// instructor answers it — so a lesson's discussion is not always empty.
+			if len(course.lessons) > 0 && rng.Float64() < 0.2 {
+				qID := id("question", "discussion", course.id, student)
+				askedAt := enrolledAt.Add(2 * 24 * time.Hour)
+				questions = append(questions, []any{
+					qID, tenantID, course.lessons[0], student,
+					discussionQuestions[rng.IntN(len(discussionQuestions))], askedAt,
+				})
+				qaAnswers = append(qaAnswers, []any{
+					id("answer", "discussion", qID), tenantID, qID, instructor,
+					discussionAnswers[rng.IntN(len(discussionAnswers))], true, askedAt.Add(6 * time.Hour),
+				})
+				got.discussions++
+			}
+
 			if course.quiz == nil || rng.Float64() >= cfg.attemptRate {
 				continue
 			}
@@ -923,6 +980,10 @@ func seedLearning(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg config
 		{"attempt_answers", []string{"id", "tenant_id", "attempt_id", "question_id", "response", "graded", "correct", "points", "feedback", "graded_at"}, answers},
 		{"grade_entries", []string{"id", "tenant_id", "grade_item_id", "user_id", "points", "max_points"}, gradeEntries},
 		{"certificates", []string{"id", "tenant_id", "course_id", "user_id", "serial", "learner_name", "course_title", "issued_at", "title", "body", "signatory"}, certificates},
+		{"announcements", []string{"id", "tenant_id", "course_id", "author_id", "title", "body", "created_at"}, announcements},
+		{"course_reviews", []string{"id", "tenant_id", "course_id", "user_id", "rating", "body", "created_at"}, reviews},
+		{"lesson_questions", []string{"id", "tenant_id", "lesson_id", "author_id", "body", "created_at"}, questions},
+		{"lesson_answers", []string{"id", "tenant_id", "question_id", "author_id", "body", "by_instructor", "created_at"}, qaAnswers},
 	}
 
 	for _, c := range copies {
@@ -1076,15 +1137,17 @@ func databaseName(url string) string {
 func report(cfg config, url string, got counts, took time.Duration) {
 	rows := got.users + got.courses + got.lessons + got.quizzes + got.questions +
 		got.assignments + got.enrolments + got.progress + got.attempts + got.answers +
-		got.grades + got.certificates
+		got.grades + got.certificates + got.reviews + got.discussions + got.announcements
 
 	fmt.Printf("seeded %d rows in %s\n\n", rows, took.Round(time.Millisecond))
 	fmt.Printf("  workspaces  %d\n  people      %d\n  courses     %d\n  lessons     %d\n",
 		got.tenants, got.users, got.courses, got.lessons)
 	fmt.Printf("  quizzes     %d (%d questions)\n  assignments %d\n  enrolments  %d\n  progress    %d\n",
 		got.quizzes, got.questions, got.assignments, got.enrolments, got.progress)
-	fmt.Printf("  attempts    %d (%d answers)\n  grades      %d\n  certificates %d\n\n",
+	fmt.Printf("  attempts    %d (%d answers)\n  grades      %d\n  certificates %d\n",
 		got.attempts, got.answers, got.grades, got.certificates)
+	fmt.Printf("  reviews     %d\n  discussions %d\n  announcements %d\n\n",
+		got.reviews, got.discussions, got.announcements)
 
 	// Which database, because these accounts are only in this one. `pnpm test:e2e`
 	// runs against `lms_test`, which has no demo accounts at all — and an API left
@@ -1147,6 +1210,38 @@ var (
 		"Which instrument measures the altitude of a star above the horizon?",
 		"Which statement about refraction is true?",
 		"Explain, in your own words, why the method matters more than the answer.",
+	}
+
+	reviewBodies = []string{
+		"Clear from the first lesson. The worked examples are what made it click.",
+		"Dense, but worth it. I came back to the middle section twice.",
+		"Exactly the pace I needed — nothing skipped, nothing laboured.",
+		"The instructor answers questions properly. That is rarer than it should be.",
+		"Good throughout, though the last topic could use another example.",
+		"I have taken three courses on this and only this one made me confident.",
+		"Practical and honest about where the method breaks down.",
+		"", // some reviewers rate without writing a word
+	}
+
+	discussionQuestions = []string{
+		"In the second lesson, is the step from the definition to the lemma assumed, or is it proved somewhere?",
+		"How does this apply when the remainder is not zero? The example only covers the clean case.",
+		"Could you recommend something to read alongside this? I want to go deeper on the middle section.",
+		"I follow the method but not why it works. Is there an intuition behind it?",
+	}
+
+	discussionAnswers = []string{
+		"Good question — it is proved in the appendix to that lesson, which is easy to miss. I have added a note pointing to it.",
+		"When the remainder is non-zero you carry it into the next step; the worked example in lesson three shows exactly that.",
+		"Yes — the further-reading note at the end of the topic lists two. Start with the shorter one.",
+		"The intuition is in the diagram: each step preserves the balance, so nothing is lost from one line to the next.",
+	}
+
+	announcementHeadlines = []struct{ title, body string }{
+		{"Welcome to the course", "Start with the first lesson and take your time. Ask questions on any lesson — I read them."},
+		{"Live session this week", "I will hold an optional walkthrough of the middle topic. A recording follows for anyone who cannot attend."},
+		{"New examples added", "I have added two worked examples to the section people asked about most. They are in the lesson notes."},
+		{"A note on the assignment", "Read the brief twice before you start. Partial working earns partial credit, so show your steps."},
 	}
 
 	optionContents = []string{
