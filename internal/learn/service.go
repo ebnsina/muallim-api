@@ -39,6 +39,36 @@ type Repository interface {
 
 	// DeleteHighlight removes the caller's own mark, returning whether one was there.
 	DeleteHighlight(ctx context.Context, tx pgx.Tx, tenantID, userID, highlightID uuid.UUID) (bool, error)
+
+	// NotesForCourse lists the caller's notes across every lesson of one course,
+	// resolved by the course's slug.
+	NotesForCourse(ctx context.Context, tx pgx.Tx, tenantID, userID uuid.UUID, slug string) ([]Note, error)
+
+	// HighlightsForCourse lists the caller's marks across every lesson of one
+	// course, in reading order within each lesson.
+	HighlightsForCourse(ctx context.Context, tx pgx.Tx, tenantID, userID uuid.UUID, slug string) ([]Highlight, error)
+}
+
+// CourseAnnotations gathers everything a learner has kept across a course — their
+// notes and their marks — for a page they review before an exam. Both reads run
+// in one read-only transaction; a slug that resolves to no course simply yields
+// nothing, which is what an unenrolled or mistyped page should show.
+func (s *Service) CourseAnnotations(ctx context.Context, tenantID, userID uuid.UUID, slug string) ([]Note, []Highlight, error) {
+	var (
+		notes      []Note
+		highlights []Highlight
+	)
+
+	err := s.db.WithTenantReadOnly(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		if notes, err = s.repo.NotesForCourse(ctx, tx, tenantID, userID, slug); err != nil {
+			return err
+		}
+		highlights, err = s.repo.HighlightsForCourse(ctx, tx, tenantID, userID, slug)
+		return err
+	})
+
+	return notes, highlights, err
 }
 
 // Service holds the rules and owns the transaction boundaries.

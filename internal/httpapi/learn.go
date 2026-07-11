@@ -257,6 +257,82 @@ func registerHighlights(api huma.API, svc *learn.Service) {
 	})
 }
 
+// CourseNoteView and CourseHighlightView carry the lesson id, which the per-lesson
+// views leave out: on a course-wide page the client groups by lesson, so it must
+// know which lesson each belongs to.
+type CourseNoteView struct {
+	LessonID  string    `json:"lesson_id" format:"uuid"`
+	Body      string    `json:"body"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type CourseHighlightView struct {
+	ID        string    `json:"id" format:"uuid"`
+	LessonID  string    `json:"lesson_id" format:"uuid"`
+	Quote     string    `json:"quote"`
+	Note      string    `json:"note"`
+	Start     int       `json:"start"`
+	End       int       `json:"end"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// AnnotationsOutput is everything a learner has kept across a course.
+type AnnotationsOutput struct {
+	CacheControl string `header:"Cache-Control"`
+	Body         struct {
+		Notes      []CourseNoteView      `json:"notes"`
+		Highlights []CourseHighlightView `json:"highlights"`
+	}
+}
+
+// registerCourseAnnotations wires the learner's revision page: their notes and
+// marks across a whole course, in one read.
+func registerCourseAnnotations(api huma.API, svc *learn.Service) {
+	huma.Register(api, huma.Operation{
+		OperationID: "my-course-annotations",
+		Method:      http.MethodGet,
+		Path:        "/v1/courses/{slug}/annotations",
+		Summary:     "Every note and highlight you have kept in a course",
+		Description: "For a revision page. The caller is the learner; no user id is taken from the " +
+			"request. Grouping by lesson is the client's to do — it has the curriculum and its titles.",
+		Tags:     []string{"Learn"},
+		Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, in *struct {
+		Slug string `path:"slug" maxLength:"100"`
+	}) (*AnnotationsOutput, error) {
+		p, err := requirePrincipal(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		notes, highlights, err := svc.CourseAnnotations(ctx, p.TenantID, p.UserID, in.Slug)
+		if err != nil {
+			return nil, learnError(err)
+		}
+
+		out := &AnnotationsOutput{CacheControl: "private, no-store"}
+		out.Body.Notes = make([]CourseNoteView, 0, len(notes))
+		for _, n := range notes {
+			out.Body.Notes = append(out.Body.Notes, CourseNoteView{
+				LessonID: n.LessonID.String(), Body: n.Body, UpdatedAt: n.UpdatedAt,
+			})
+		}
+		out.Body.Highlights = make([]CourseHighlightView, 0, len(highlights))
+		for _, h := range highlights {
+			out.Body.Highlights = append(out.Body.Highlights, CourseHighlightView{
+				ID:        h.ID.String(),
+				LessonID:  h.LessonID.String(),
+				Quote:     h.Quote,
+				Note:      h.Note,
+				Start:     h.Start,
+				End:       h.End,
+				CreatedAt: h.CreatedAt,
+			})
+		}
+		return out, nil
+	})
+}
+
 // learnError maps the learn package's sentinels onto status codes. This is the
 // only place that translation happens; the domain never imports net/http.
 func learnError(err error) error {

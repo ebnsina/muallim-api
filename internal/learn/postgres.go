@@ -157,3 +157,61 @@ func (r *PostgresRepository) DeleteHighlight(ctx context.Context, tx pgx.Tx, ten
 	}
 	return tag.RowsAffected() == 1, nil
 }
+
+// The course-wide reads resolve the course by slug and walk to its lessons
+// through topics — reading the catalog's tables, not importing its package, the
+// way certify reads users and courses to copy a name onto a certificate.
+const notesForCourseSQL = `
+	SELECT n.lesson_id, n.body, n.updated_at
+	FROM lesson_notes n
+	JOIN lessons l ON l.id = n.lesson_id
+	JOIN topics t  ON t.id = l.topic_id
+	JOIN courses c ON c.id = t.course_id
+	WHERE n.tenant_id = $1 AND n.user_id = $2 AND lower(c.slug) = lower($3)`
+
+// NotesForCourse lists the caller's notes across a course's lessons.
+func (r *PostgresRepository) NotesForCourse(ctx context.Context, tx pgx.Tx, tenantID, userID uuid.UUID, slug string) ([]Note, error) {
+	rows, err := tx.Query(ctx, notesForCourseSQL, tenantID, userID, slug)
+	if err != nil {
+		return nil, fmt.Errorf("learn: notes for course: %w", err)
+	}
+	defer rows.Close()
+
+	notes, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Note, error) {
+		var n Note
+		err := row.Scan(&n.LessonID, &n.Body, &n.UpdatedAt)
+		return n, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("learn: scan course notes: %w", err)
+	}
+	return notes, nil
+}
+
+const highlightsForCourseSQL = `
+	SELECT h.id, h.lesson_id, h.quote, h.note, h.start_offset, h.end_offset, h.created_at, h.updated_at
+	FROM lesson_highlights h
+	JOIN lessons l ON l.id = h.lesson_id
+	JOIN topics t  ON t.id = l.topic_id
+	JOIN courses c ON c.id = t.course_id
+	WHERE h.tenant_id = $1 AND h.user_id = $2 AND lower(c.slug) = lower($3)
+	ORDER BY h.lesson_id, h.start_offset, h.id`
+
+// HighlightsForCourse lists the caller's marks across a course's lessons.
+func (r *PostgresRepository) HighlightsForCourse(ctx context.Context, tx pgx.Tx, tenantID, userID uuid.UUID, slug string) ([]Highlight, error) {
+	rows, err := tx.Query(ctx, highlightsForCourseSQL, tenantID, userID, slug)
+	if err != nil {
+		return nil, fmt.Errorf("learn: highlights for course: %w", err)
+	}
+	defer rows.Close()
+
+	highlights, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Highlight, error) {
+		var h Highlight
+		err := row.Scan(&h.ID, &h.LessonID, &h.Quote, &h.Note, &h.Start, &h.End, &h.CreatedAt, &h.UpdatedAt)
+		return h, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("learn: scan course highlights: %w", err)
+	}
+	return highlights, nil
+}

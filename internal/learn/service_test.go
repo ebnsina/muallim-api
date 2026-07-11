@@ -104,6 +104,41 @@ func seedLesson(t *testing.T, db *database.DB, tenantID uuid.UUID) uuid.UUID {
 	return lessonID
 }
 
+// seedCourseWithLessons creates a course under a topic with two lessons, and
+// returns the course slug and both lesson ids — enough for a course-wide read.
+func seedCourseWithLessons(t *testing.T, db *database.DB, tenantID uuid.UUID) (string, uuid.UUID, uuid.UUID) {
+	t.Helper()
+
+	slug := "c-" + uuid.NewString()[:8]
+	var lessonA, lessonB uuid.UUID
+	err := db.WithTenant(t.Context(), tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		var courseID, topicID uuid.UUID
+		if err := tx.QueryRow(ctx,
+			`INSERT INTO courses (tenant_id, slug, title, status)
+			 VALUES ($1, $2, 'Course', 'published') RETURNING id`,
+			tenantID, slug).Scan(&courseID); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx,
+			`INSERT INTO topics (tenant_id, course_id, title, position) VALUES ($1, $2, 'T', 0) RETURNING id`,
+			tenantID, courseID).Scan(&topicID); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx,
+			`INSERT INTO lessons (tenant_id, topic_id, title, content_type, position)
+			 VALUES ($1, $2, 'A', 'text', 0) RETURNING id`, tenantID, topicID).Scan(&lessonA); err != nil {
+			return err
+		}
+		return tx.QueryRow(ctx,
+			`INSERT INTO lessons (tenant_id, topic_id, title, content_type, position)
+			 VALUES ($1, $2, 'B', 'text', 1) RETURNING id`, tenantID, topicID).Scan(&lessonB)
+	})
+	if err != nil {
+		t.Fatalf("seed course with lessons: %v", err)
+	}
+	return slug, lessonA, lessonB
+}
+
 func newService(db *database.DB) *learn.Service {
 	return learn.NewService(db, learn.NewPostgresRepository())
 }
@@ -360,5 +395,50 @@ func TestAnInvalidHighlightIsRefused(t *testing.T) {
 		if _, err := svc.AddHighlight(t.Context(), tenantID, userID, lessonID, h); !errors.Is(err, learn.ErrInvalidHighlight) {
 			t.Errorf("%s: returned %v, want ErrInvalidHighlight", name, err)
 		}
+	}
+}
+
+// The revision read gathers a learner's notes and marks from across a course's
+// lessons, resolved by slug, and only their own.
+func TestCourseAnnotationsGathersAcrossLessons(t *testing.T) {
+	t.Parallel()
+
+	db := testDB(t)
+	svc := newService(db)
+	tenantID := seedTenant(t, db)
+	mine := seedUser(t, db, tenantID)
+	other := seedUser(t, db, tenantID)
+	slug, lessonA, lessonB := seedCourseWithLessons(t, db, tenantID)
+
+	if _, err := svc.Save(t.Context(), tenantID, mine, lessonA, "note on A"); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if _, err := svc.AddHighlight(t.Context(), tenantID, mine, lessonB,
+		learn.Highlight{Quote: "a mark on B", Start: 0, End: 11}); err != nil {
+		t.Fatalf("AddHighlight: %v", err)
+	}
+	// Another learner's note on the same course must not leak in.
+	if _, err := svc.Save(t.Context(), tenantID, other, lessonA, "someone else's"); err != nil {
+		t.Fatalf("Save other: %v", err)
+	}
+
+	notes, highlights, err := svc.CourseAnnotations(t.Context(), tenantID, mine, slug)
+	if err != nil {
+		t.Fatalf("CourseAnnotations: %v", err)
+	}
+	if len(notes) != 1 || notes[0].Body != "note on A" || notes[0].LessonID != lessonA {
+		t.Errorf("notes = %+v, want one on lesson A", notes)
+	}
+	if len(highlights) != 1 || highlights[0].LessonID != lessonB {
+		t.Errorf("highlights = %+v, want one on lesson B", highlights)
+	}
+
+	// A slug that is not a course yields nothing rather than erroring.
+	notes, highlights, err = svc.CourseAnnotations(t.Context(), tenantID, mine, "no-such-course")
+	if err != nil {
+		t.Fatalf("CourseAnnotations(unknown): %v", err)
+	}
+	if len(notes) != 0 || len(highlights) != 0 {
+		t.Errorf("an unknown slug yielded %d notes and %d highlights, want none", len(notes), len(highlights))
 	}
 }
