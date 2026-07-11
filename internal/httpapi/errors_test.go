@@ -17,6 +17,7 @@ import (
 	"github.com/ebnsina/lms-api/internal/certify"
 	"github.com/ebnsina/lms-api/internal/enroll"
 	"github.com/ebnsina/lms-api/internal/grade"
+	"github.com/ebnsina/lms-api/internal/learn"
 	"github.com/ebnsina/lms-api/internal/platform/blob"
 )
 
@@ -398,6 +399,35 @@ func TestCertifySentinelsMapToADeliberateStatus(t *testing.T) {
 		if got := statusOf(certifyError(wrapped)); got != want {
 			t.Errorf("wrapped %v mapped to %d, want %d", err, got, want)
 		}
+	}
+}
+
+// The learn sentinels go through their own mapper.
+func TestLearnSentinelsMapToADeliberateStatus(t *testing.T) {
+	t.Parallel()
+
+	tests := map[error]int{
+		learn.ErrLessonNotFound: http.StatusNotFound,
+		learn.ErrNoteTooLong:    http.StatusUnprocessableEntity,
+	}
+
+	for err, want := range tests {
+		if got := statusOf(learnError(err)); got != want {
+			t.Errorf("%v mapped to %d, want %d", err, got, want)
+		}
+
+		wrapped := fmt.Errorf("learn: doing a thing: %w", err)
+		if got := statusOf(learnError(wrapped)); got != want {
+			t.Errorf("wrapped %v mapped to %d, want %d", err, got, want)
+		}
+	}
+}
+
+func TestAnUnmappedLearnErrorIsFiveHundred(t *testing.T) {
+	t.Parallel()
+
+	if got := statusOf(learnError(errors.New("learn: something new"))); got != http.StatusInternalServerError {
+		t.Errorf("an unmapped learn error mapped to %d, want 500", got)
 	}
 }
 

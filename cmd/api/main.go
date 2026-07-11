@@ -30,6 +30,7 @@ import (
 	"github.com/ebnsina/lms-api/internal/enroll"
 	"github.com/ebnsina/lms-api/internal/grade"
 	"github.com/ebnsina/lms-api/internal/httpapi"
+	"github.com/ebnsina/lms-api/internal/learn"
 	"github.com/ebnsina/lms-api/internal/platform/cache"
 	"github.com/ebnsina/lms-api/internal/platform/config"
 	"github.com/ebnsina/lms-api/internal/platform/database"
@@ -175,6 +176,8 @@ func run() error {
 	// declare; the adapters are in gradebook.go, and neither domain has heard of it.
 	grades := grade.NewService(db, grade.NewPostgresRepository())
 
+	notes := learn.NewService(db, learn.NewPostgresRepository())
+
 	// `learning` satisfies assess.Completions: passing a quiz completes its lesson,
 	// in the transaction that recorded the grade. The interface is declared by
 	// assess and satisfied by enroll, which have never heard of each other.
@@ -201,6 +204,7 @@ func run() error {
 		Catalog:     courses,
 		Grades:      grades,
 		Certify:     credentials,
+		Learn:       notes,
 		Auth:        identities,
 		Enrol:       learning,
 		Assess:      quizzes,
