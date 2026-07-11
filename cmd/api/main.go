@@ -199,7 +199,7 @@ func run() error {
 	// in the transaction that recorded the grade. The interface is declared by
 	// assess and satisfied by enroll, which have never heard of each other.
 	quizzes := assess.NewService(db, assess.NewPostgresRepository(), assessAuditor{recorder},
-		grading, learning, quizGrades{grades})
+		grading, learning, quizGrades{grades}, assessNotifier{notifications})
 
 	store, err := newObjectStore(cfg, log)
 	if err != nil {
@@ -211,7 +211,7 @@ func run() error {
 		return err
 	}
 	assignments := assign.NewService(db, assign.NewPostgresRepository(), store,
-		assignAuditor{recorder}, deletions, learning, assignmentGrades{grades})
+		assignAuditor{recorder}, deletions, learning, assignmentGrades{grades}, assignNotifier{notifications})
 
 	handler, _ := httpapi.New(httpapi.Options{
 		Version:     cfg.Version,

@@ -20,6 +20,10 @@ type Repository interface {
 	CreateAssignment(ctx context.Context, tx pgx.Tx, tenantID, lessonID uuid.UUID, n NewAssignment) (Assignment, error)
 	AssignmentByLesson(ctx context.Context, tx pgx.Tx, tenantID, lessonID uuid.UUID) (Assignment, error)
 	AssignmentByID(ctx context.Context, tx pgx.Tx, tenantID, assignmentID uuid.UUID) (Assignment, error)
+
+	// CourseSlugForLesson resolves the course a lesson belongs to, for a
+	// notification's link.
+	CourseSlugForLesson(ctx context.Context, tx pgx.Tx, tenantID, lessonID uuid.UUID) (string, error)
 	UpdateAssignment(ctx context.Context, tx pgx.Tx, tenantID, assignmentID uuid.UUID, a NewAssignment) (Assignment, error)
 	DeleteAssignment(ctx context.Context, tx pgx.Tx, tenantID, lessonID uuid.UUID) (uuid.UUID, []string, error)
 
@@ -113,16 +117,17 @@ type Service struct {
 	jobs        Enqueuer
 	completions Completions
 	grades      Grades
+	notifier    Notifier
 
 	now func() time.Time
 }
 
 // NewService returns a Service.
 func NewService(db *database.DB, repo Repository, store blob.Store, recorder AuditRecorder,
-	jobs Enqueuer, completions Completions, grades Grades) *Service {
+	jobs Enqueuer, completions Completions, grades Grades, notifier Notifier) *Service {
 	return &Service{
 		db: db, repo: repo, store: store, audit: recorder, jobs: jobs,
-		completions: completions, grades: grades,
+		completions: completions, grades: grades, notifier: notifier,
 		now: time.Now,
 	}
 }
@@ -698,6 +703,23 @@ func (s *Service) Mark(ctx context.Context, tenantID, submissionID uuid.UUID, po
 
 		if marked.Passed(assignment) {
 			if _, err := s.completions.TryCompleteLesson(ctx, tx, tenantID, assignment.LessonID, submission.UserID); err != nil {
+				return err
+			}
+		}
+
+		// Tell the learner their work was marked. The marker is never the learner.
+		if s.notifier != nil && submission.UserID != uuid.Nil && submission.UserID != marker.UserID {
+			slug, err := s.repo.CourseSlugForLesson(ctx, tx, tenantID, assignment.LessonID)
+			if err != nil {
+				return err
+			}
+			if err := s.notifier.Notify(ctx, tx, tenantID, Notification{
+				UserID: submission.UserID,
+				Kind:   KindGrade,
+				Title:  "Your assignment was graded",
+				Body:   fmt.Sprintf("You scored %d of %d on %q.", points, assignment.Points, assignment.Title),
+				Link:   "/courses/" + slug + "/grades",
+			}); err != nil {
 				return err
 			}
 		}

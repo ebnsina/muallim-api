@@ -6,6 +6,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/ebnsina/lms-api/internal/assess"
+	"github.com/ebnsina/lms-api/internal/assign"
 	"github.com/ebnsina/lms-api/internal/forum"
 	"github.com/ebnsina/lms-api/internal/learn"
 	"github.com/ebnsina/lms-api/internal/notify"
@@ -43,5 +45,28 @@ func (n forumNotifier) Notify(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID
 		Title:  m.Title,
 		Body:   m.Body,
 		Link:   m.Link,
+	})
+}
+
+// assessNotifier and assignNotifier adapt the notify service to the Notifier
+// interfaces the grading domains declare. A marked essay or assignment tells the
+// learner, in the transaction that recorded the grade.
+type assessNotifier struct{ svc *notify.Service }
+
+var _ assess.Notifier = assessNotifier{}
+
+func (n assessNotifier) Notify(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, m assess.Notification) error {
+	return n.svc.Record(ctx, tx, tenantID, notify.Notification{
+		UserID: m.UserID, Kind: m.Kind, Title: m.Title, Body: m.Body, Link: m.Link,
+	})
+}
+
+type assignNotifier struct{ svc *notify.Service }
+
+var _ assign.Notifier = assignNotifier{}
+
+func (n assignNotifier) Notify(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, m assign.Notification) error {
+	return n.svc.Record(ctx, tx, tenantID, notify.Notification{
+		UserID: m.UserID, Kind: m.Kind, Title: m.Title, Body: m.Body, Link: m.Link,
 	})
 }

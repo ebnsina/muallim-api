@@ -122,12 +122,21 @@ type fixture struct {
 	jobs     *recordingEnqueuer
 	learning *enroll.Service
 	grades   *grade.Service
+	notifier *captureNotifier
 
 	tenant  uuid.UUID
 	lesson  uuid.UUID
 	course  string
 	learner uuid.UUID
 	author  assign.Author
+}
+
+// captureNotifier records the notifications a marking asks to send.
+type captureNotifier struct{ sent []assign.Notification }
+
+func (c *captureNotifier) Notify(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, n assign.Notification) error {
+	c.sent = append(c.sent, n)
+	return nil
 }
 
 // assignmentGrades adapts the real gradebook to `assign.Grades`, as cmd/ does.
@@ -159,11 +168,12 @@ func newFixture(t *testing.T) fixture {
 	learning := enroll.NewService(db, enroll.NewPostgresRepository(), enrolAuditor{audit.NewRecorder()}, newIssuer(db))
 
 	grades := grade.NewService(db, grade.NewPostgresRepository())
+	notifier := &captureNotifier{}
 
 	return fixture{
-		db: db, store: store, jobs: jobs, learning: learning, grades: grades,
+		db: db, store: store, jobs: jobs, learning: learning, grades: grades, notifier: notifier,
 		svc: assign.NewService(db, assign.NewPostgresRepository(), store,
-			assignAuditor{audit.NewRecorder()}, jobs, learning, assignmentGrades{grades}),
+			assignAuditor{audit.NewRecorder()}, jobs, learning, assignmentGrades{grades}, notifier),
 		tenant: tenantID, lesson: lessonID, course: slug,
 		learner: seedUser(t, db, tenantID),
 		author:  assign.Author{UserID: seedUser(t, db, tenantID)},
@@ -362,6 +372,15 @@ func TestTheSubmissionLoop(t *testing.T) {
 	// Passing completes the lesson, in the transaction that recorded the mark.
 	if progress := f.progress(t); progress.LessonsCompleted != 1 {
 		t.Errorf("passing the assignment did not complete the lesson: %+v", progress)
+	}
+
+	// And the learner is notified their work was marked, once, linked to grades.
+	if len(f.notifier.sent) != 1 {
+		t.Fatalf("marking notified %d, want 1", len(f.notifier.sent))
+	}
+	if n := f.notifier.sent[0]; n.UserID != f.learner || n.Kind != assign.KindGrade ||
+		n.Link != "/courses/"+f.course+"/grades" {
+		t.Fatalf("grade notification: %+v", n)
 	}
 
 	// And the learner can fetch their own file back.

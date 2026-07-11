@@ -110,8 +110,20 @@ func (g quizGrades) RecordScore(ctx context.Context, tx pgx.Tx, tenantID, lesson
 }
 
 func newService(db *database.DB, jobs assess.Enqueuer) *assess.Service {
+	return newServiceWith(db, jobs, nil)
+}
+
+// captureNotifier records the notifications a marking asks to send.
+type captureNotifier struct{ sent []assess.Notification }
+
+func (c *captureNotifier) Notify(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, n assess.Notification) error {
+	c.sent = append(c.sent, n)
+	return nil
+}
+
+func newServiceWith(db *database.DB, jobs assess.Enqueuer, notifier assess.Notifier) *assess.Service {
 	return assess.NewService(db, assess.NewPostgresRepository(), assessAuditor{audit.NewRecorder()},
-		jobs, newCompletions(db), quizGrades{grade.NewService(db, grade.NewPostgresRepository())})
+		jobs, newCompletions(db), quizGrades{grade.NewService(db, grade.NewPostgresRepository())}, notifier)
 }
 
 func seedTenant(t *testing.T, db *database.DB) uuid.UUID {
@@ -193,6 +205,7 @@ type fixture struct {
 	learning *enroll.Service
 	grades   *grade.Service
 	jobs     *recordingEnqueuer
+	notifier *captureNotifier
 	tenant   uuid.UUID
 	lesson   uuid.UUID
 	course   string
@@ -207,11 +220,13 @@ func newFixture(t *testing.T) fixture {
 	jobs := &recordingEnqueuer{}
 	tenantID := seedTenant(t, db)
 	lessonID, slug := seedLesson(t, db, tenantID)
+	notifier := &captureNotifier{}
 
 	return fixture{
-		db: db, svc: newService(db, jobs), learning: newCompletions(db), jobs: jobs,
-		grades: grade.NewService(db, grade.NewPostgresRepository()),
-		tenant: tenantID, lesson: lessonID, course: slug,
+		db: db, svc: newServiceWith(db, jobs, notifier), learning: newCompletions(db), jobs: jobs,
+		notifier: notifier,
+		grades:   grade.NewService(db, grade.NewPostgresRepository()),
+		tenant:   tenantID, lesson: lessonID, course: slug,
 		learner: seedUser(t, db, tenantID),
 		author:  assess.Author{UserID: seedUser(t, db, tenantID)},
 	}
@@ -941,4 +956,57 @@ func (a certifyAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUI
 
 func newIssuer(db *database.DB) issuer {
 	return issuer{certify.NewService(db, certify.NewPostgresRepository(), certifyAuditor{audit.NewRecorder()})}
+}
+
+// Marking the last essay finishes the attempt, and only then does the learner get
+// one "your quiz was graded" notification — not one per essay marked.
+func TestMarkingAnEssayNotifiesTheLearnerOnce(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+	_, choiceID, _ := f.quiz(t, assess.NewQuiz{PassingPercent: 60})
+
+	essay, err := f.svc.AddQuestion(t.Context(), f.tenant, f.lesson, assess.NewQuestion{
+		Type: assess.TypeOpenEnded, Prompt: "Discuss.", Points: 5,
+	}, f.author)
+	if err != nil {
+		t.Fatalf("add essay: %v", err)
+	}
+
+	if _, err := f.svc.StartAttempt(t.Context(), f.tenant, f.lesson, f.learner, assess.Author{UserID: f.learner}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if err := f.svc.SaveAnswer(t.Context(), f.tenant, f.lesson, f.learner, choiceID,
+		assess.Response{Choices: []uuid.UUID{f.correctOption(t, choiceID)}}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	submitted, _ := f.svc.SubmitAttempt(t.Context(), f.tenant, f.lesson, f.learner, assess.Author{UserID: f.learner})
+	if _, err := f.svc.GradeAttempt(t.Context(), f.tenant, submitted.ID); err != nil {
+		t.Fatalf("auto-grade: %v", err)
+	}
+
+	// Auto-grading the machine part notifies no one — the essay is still open.
+	if len(f.notifier.sent) != 0 {
+		t.Fatalf("auto-grade notified %d, want 0 while an essay is unmarked", len(f.notifier.sent))
+	}
+
+	// Marking the essay finishes the attempt and notifies the learner exactly once.
+	marker := assess.Author{UserID: f.author.UserID}
+	graded, err := f.svc.MarkAnswer(t.Context(), f.tenant, submitted.ID, essay.ID, assess.Mark{Points: 5}, marker)
+	if err != nil {
+		t.Fatalf("mark: %v", err)
+	}
+	if graded.Status != assess.StatusGraded {
+		t.Fatalf("status = %q, want graded", graded.Status)
+	}
+	if len(f.notifier.sent) != 1 {
+		t.Fatalf("marking notified %d, want 1", len(f.notifier.sent))
+	}
+	n := f.notifier.sent[0]
+	if n.UserID != f.learner || n.Kind != assess.KindGrade {
+		t.Fatalf("notification: %+v", n)
+	}
+	if n.Link != "/courses/"+f.course+"/grades" {
+		t.Fatalf("link = %q", n.Link)
+	}
 }

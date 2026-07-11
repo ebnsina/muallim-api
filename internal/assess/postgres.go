@@ -95,6 +95,25 @@ func (r *PostgresRepository) QuizByID(ctx context.Context, tx pgx.Tx, tenantID, 
 	return quiz, nil
 }
 
+// CourseSlugForLesson walks a lesson to its course, for a notification's link.
+func (r *PostgresRepository) CourseSlugForLesson(ctx context.Context, tx pgx.Tx, tenantID, lessonID uuid.UUID) (string, error) {
+	var slug string
+	err := tx.QueryRow(ctx,
+		`SELECT c.slug
+		 FROM lessons l
+		 JOIN topics t  ON t.id = l.topic_id
+		 JOIN courses c ON c.id = t.course_id
+		 WHERE l.tenant_id = $1 AND l.id = $2`,
+		tenantID, lessonID).Scan(&slug)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", ErrNotFound
+		}
+		return "", fmt.Errorf("assess: course slug for lesson: %w", err)
+	}
+	return slug, nil
+}
+
 // UpdateQuiz applies a patch. COALESCE leaves a nil field alone.
 func (r *PostgresRepository) UpdateQuiz(ctx context.Context, tx pgx.Tx, tenantID, quizID uuid.UUID, p QuizPatch) (Quiz, error) {
 	quiz, err := scanQuiz(tx.QueryRow(ctx,

@@ -127,8 +127,10 @@ func run() error {
 	// transaction, through the same adapter the API uses.
 	grades := grade.NewService(db, grade.NewPostgresRepository())
 
+	// A nil notifier: an auto-graded quiz notifies no one, because the learner who
+	// just submitted it is already watching the result.
 	quizzes := assess.NewService(db, assess.NewPostgresRepository(), assessAuditor{audit.NewRecorder()},
-		refusingEnqueuer{}, learning, quizGrades{grades})
+		refusingEnqueuer{}, learning, quizGrades{grades}, nil)
 
 	grading, err := assess.NewGradeAttemptWorker(quizzes)
 	if err != nil {

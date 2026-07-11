@@ -987,6 +987,16 @@ func seedLearning(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg config
 					got.answers += len(answerRows)
 					gradeEntries = append(gradeEntries, gradeEntryRow(tenantID, course.quiz, person, points))
 					got.grades++
+
+					// A "your quiz was graded" bell, the way a marked essay produces one,
+					// so a demo account's notifications show a grade too. Left read — it
+					// is old news by the time anyone signs in.
+					notifications = append(notifications, []any{
+						id("notification", "grade", course.id, person), tenantID, person, notify.KindGrade,
+						"Your quiz was graded", fmt.Sprintf("You scored %d of %d.", points, course.quiz.maxPoints),
+						"/courses/" + course.slug + "/grades", submitted.Add(time.Hour), submitted.Add(time.Hour),
+					})
+					got.notifications++
 				}
 			}
 		}

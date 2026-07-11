@@ -17,6 +17,10 @@ type Repository interface {
 	CreateQuiz(ctx context.Context, tx pgx.Tx, tenantID, lessonID uuid.UUID, n NewQuiz) (Quiz, error)
 	QuizByLesson(ctx context.Context, tx pgx.Tx, tenantID, lessonID uuid.UUID) (Quiz, error)
 	QuizByID(ctx context.Context, tx pgx.Tx, tenantID, quizID uuid.UUID) (Quiz, error)
+
+	// CourseSlugForLesson resolves the course a lesson belongs to, for a
+	// notification's link. One join, read on the rare marking path.
+	CourseSlugForLesson(ctx context.Context, tx pgx.Tx, tenantID, lessonID uuid.UUID) (string, error)
 	UpdateQuiz(ctx context.Context, tx pgx.Tx, tenantID, quizID uuid.UUID, p QuizPatch) (Quiz, error)
 	DeleteQuiz(ctx context.Context, tx pgx.Tx, tenantID, lessonID uuid.UUID) (uuid.UUID, error)
 
@@ -84,16 +88,20 @@ type Service struct {
 	jobs        Enqueuer
 	completions Completions
 	grades      Grades
+	notifier    Notifier
 
 	now func() time.Time
 }
 
 // NewService returns a Service.
+// NewService returns a Service. A nil notifier sends nothing, which is what the
+// worker — where an auto-graded quiz notifies no one, because the learner who
+// just submitted it is watching the result — passes.
 func NewService(db *database.DB, repo Repository, recorder AuditRecorder, jobs Enqueuer,
-	completions Completions, grades Grades) *Service {
+	completions Completions, grades Grades, notifier Notifier) *Service {
 	return &Service{
 		db: db, repo: repo, audit: recorder, jobs: jobs,
-		completions: completions, grades: grades,
+		completions: completions, grades: grades, notifier: notifier,
 		now: time.Now,
 	}
 }

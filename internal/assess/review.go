@@ -179,6 +179,25 @@ func (s *Service) MarkAnswer(ctx context.Context, tenantID, attemptID, questionI
 			return err
 		}
 
+		// Tell the learner, but only once the marking has finished the attempt — a
+		// quiz with three essays is marked three times, and three "your quiz was
+		// graded" bells for one result is noise. The marker is never the learner.
+		if s.notifier != nil && attempt.Status == StatusGraded && attempt.UserID != uuid.Nil && attempt.UserID != marker.UserID {
+			slug, err := s.repo.CourseSlugForLesson(ctx, tx, tenantID, quiz.LessonID)
+			if err != nil {
+				return err
+			}
+			if err := s.notifier.Notify(ctx, tx, tenantID, Notification{
+				UserID: attempt.UserID,
+				Kind:   KindGrade,
+				Title:  "Your quiz was graded",
+				Body:   fmt.Sprintf("You scored %d of %d.", attempt.Points, attempt.MaxPoints),
+				Link:   "/courses/" + slug + "/grades",
+			}); err != nil {
+				return err
+			}
+		}
+
 		return s.audit.Record(ctx, tx, tenantID, AuditEntry{
 			ActorID: &marker.UserID, Action: ActionAnswerMarked,
 			TargetType: "attempt", TargetID: attemptID.String(),
