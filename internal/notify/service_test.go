@@ -59,7 +59,7 @@ func seedUser(t *testing.T, db *database.DB, tenantID uuid.UUID) uuid.UUID {
 }
 
 func newService(db *database.DB) *notify.Service {
-	return notify.NewService(db, notify.NewPostgresRepository())
+	return notify.NewService(db, notify.NewPostgresRepository(), nil)
 }
 
 // record writes a notification through the service's producer entry point, in a
@@ -238,5 +238,92 @@ func TestFanOutReachesActiveLearnersOnceAndIsIdempotent(t *testing.T) {
 	}
 	if again != 0 {
 		t.Fatalf("idempotent fan-out created %d on re-run, want 0", again)
+	}
+}
+
+// seedUserEmail seeds a user with a chosen email, so a digest test can assert who
+// was mailed by address.
+func seedUserEmail(t *testing.T, db *database.DB, tenantID uuid.UUID, email string) uuid.UUID {
+	t.Helper()
+	id := uuid.New()
+	err := db.WithTenant(t.Context(), tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO users (id, email, password_hash, name) VALUES ($1, $2, 'x', 'Learner')`,
+			id, email); err != nil {
+			return err
+		}
+		// The user must be a member of the tenant to be visible under its RLS — the
+		// same as every real account the digest would mail.
+		_, err := tx.Exec(ctx,
+			`INSERT INTO memberships (tenant_id, user_id, role) VALUES ($1, $2, 'student')`, tenantID, id)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	return id
+}
+
+type captureMailer struct {
+	sent []struct{ to, subject, text string }
+}
+
+func (m *captureMailer) SendRendered(ctx context.Context, tx pgx.Tx, to, subject, text string) error {
+	m.sent = append(m.sent, struct{ to, subject, text string }{to, subject, text})
+	return nil
+}
+
+func (m *captureMailer) to(addr string) (int, string) {
+	n, subject := 0, ""
+	for _, e := range m.sent {
+		if e.to == addr {
+			n++
+			subject = e.subject
+		}
+	}
+	return n, subject
+}
+
+func TestDigestMailsUnreadRespectsOptOutAndIsIdempotent(t *testing.T) {
+	t.Parallel()
+
+	db := testDB(t)
+	tenantID := seedTenant(t, db)
+
+	mailer := &captureMailer{}
+	svc := notify.NewService(db, notify.NewPostgresRepository(), mailer)
+	plain := notify.NewService(db, notify.NewPostgresRepository(), nil)
+
+	inAddr := "digest-in-" + uuid.NewString()[:8] + "@example.test"
+	outAddr := "digest-out-" + uuid.NewString()[:8] + "@example.test"
+	optedIn := seedUserEmail(t, db, tenantID, inAddr)
+	optedOut := seedUserEmail(t, db, tenantID, outAddr)
+
+	record(t, db, plain, tenantID, optedIn, "first")
+	record(t, db, plain, tenantID, optedIn, "second")
+	record(t, db, plain, tenantID, optedOut, "for the opted-out one")
+
+	// The opted-out learner turns the digest off.
+	if err := plain.SetPreferences(t.Context(), tenantID, optedOut, notify.Preferences{EmailDigest: false}); err != nil {
+		t.Fatalf("set prefs: %v", err)
+	}
+
+	if _, err := svc.SendDigests(t.Context()); err != nil {
+		t.Fatalf("send digests: %v", err)
+	}
+
+	if n, subject := mailer.to(inAddr); n != 1 || subject != "You have 2 new notifications" {
+		t.Fatalf("opted-in got %d mails, subject %q", n, subject)
+	}
+	if n, _ := mailer.to(outAddr); n != 0 {
+		t.Fatalf("opted-out got %d mails, want 0", n)
+	}
+
+	// Running again mails no one who was already digested.
+	if _, err := svc.SendDigests(t.Context()); err != nil {
+		t.Fatalf("second sweep: %v", err)
+	}
+	if n, _ := mailer.to(inAddr); n != 1 {
+		t.Fatalf("idempotent digest mailed %d times, want 1", n)
 	}
 }

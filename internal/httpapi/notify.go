@@ -42,6 +42,14 @@ type UnreadCountOutput struct {
 	}
 }
 
+// NotificationPreferencesOutput carries a person's notification settings.
+type NotificationPreferencesOutput struct {
+	CacheControl string `header:"Cache-Control"`
+	Body         struct {
+		EmailDigest bool `json:"email_digest"`
+	}
+}
+
 func notificationView(n notify.Notification) NotificationView {
 	return NotificationView{
 		ID:        n.ID.String(),
@@ -131,6 +139,52 @@ func registerNotifications(api huma.API, svc *notify.Service) {
 			return nil, notifyError(err)
 		}
 		return nil, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "get-notification-preferences",
+		Method:      http.MethodGet,
+		Path:        "/v1/notifications/preferences",
+		Summary:     "My notification settings",
+		Tags:        []string{"Notifications"},
+		Security:    []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, in *struct{}) (*NotificationPreferencesOutput, error) {
+		p, err := requirePrincipal(ctx)
+		if err != nil {
+			return nil, err
+		}
+		prefs, err := svc.Preferences(ctx, p.TenantID, p.UserID)
+		if err != nil {
+			return nil, notifyError(err)
+		}
+		out := &NotificationPreferencesOutput{CacheControl: "private, no-store"}
+		out.Body.EmailDigest = prefs.EmailDigest
+		return out, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "set-notification-preferences",
+		Method:      http.MethodPut,
+		Path:        "/v1/notifications/preferences",
+		Summary:     "Change my notification settings",
+		Description: "Turn the daily email digest of unread notifications on or off. On by default.",
+		Tags:        []string{"Notifications"},
+		Security:    []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, in *struct {
+		Body struct {
+			EmailDigest bool `json:"email_digest"`
+		}
+	}) (*NotificationPreferencesOutput, error) {
+		p, err := requirePrincipal(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if err := svc.SetPreferences(ctx, p.TenantID, p.UserID, notify.Preferences{EmailDigest: in.Body.EmailDigest}); err != nil {
+			return nil, notifyError(err)
+		}
+		out := &NotificationPreferencesOutput{CacheControl: "private, no-store"}
+		out.Body.EmailDigest = in.Body.EmailDigest
+		return out, nil
 	})
 
 	huma.Register(api, huma.Operation{

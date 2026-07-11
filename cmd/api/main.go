@@ -186,7 +186,8 @@ func run() error {
 	// declare; the adapters are in gradebook.go, and neither domain has heard of it.
 	grades := grade.NewService(db, grade.NewPostgresRepository())
 
-	notifications := notify.NewService(db, notify.NewPostgresRepository())
+	// No mailer here: the digest sweep runs only in the worker.
+	notifications := notify.NewService(db, notify.NewPostgresRepository(), nil)
 
 	// `notes` (the learn service) notifies the author of a question when it is
 	// answered. The Notifier interface is learn's; the adapter over notify is in

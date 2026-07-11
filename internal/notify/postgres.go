@@ -146,3 +146,115 @@ func (r *PostgresRepository) FanOutAnnouncement(ctx context.Context, tx pgx.Tx, 
 	}
 	return int(tag.RowsAffected()), nil
 }
+
+// AllTenantIDs lists every tenant, read unbound. The tenants table is not
+// tenant-scoped, so this is legible without binding — which the digest needs,
+// since it then binds each tenant in turn to read its notifications.
+func (r *PostgresRepository) AllTenantIDs(ctx context.Context, tx pgx.Tx) ([]uuid.UUID, error) {
+	rows, err := tx.Query(ctx, `SELECT id FROM tenants ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("notify: list tenants: %w", err)
+	}
+	defer rows.Close()
+
+	ids, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (uuid.UUID, error) {
+		var id uuid.UUID
+		err := row.Scan(&id)
+		return id, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("notify: scan tenants: %w", err)
+	}
+	return ids, nil
+}
+
+const pendingDigestSQL = `
+	SELECT n.user_id, COALESCE(u.email, ''), COALESCE(u.name, ''),
+	       n.id, n.kind, n.title, n.body, n.link, n.read_at, n.created_at
+	FROM notifications n
+	JOIN users u ON u.id = n.user_id
+	LEFT JOIN notification_preferences p ON p.tenant_id = n.tenant_id AND p.user_id = n.user_id
+	WHERE n.tenant_id = $1 AND n.read_at IS NULL AND n.digested_at IS NULL
+	  AND COALESCE(p.email_digest, true)
+	ORDER BY n.user_id, n.created_at`
+
+// PendingDigests returns a tenant's unread, not-yet-digested notifications grouped
+// by recipient — one query, grouped in Go, so a hundred waiting people is not a
+// hundred queries. Anyone who has turned the digest off is left out by the join.
+func (r *PostgresRepository) PendingDigests(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) ([]DigestGroup, error) {
+	rows, err := tx.Query(ctx, pendingDigestSQL, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("notify: pending digests: %w", err)
+	}
+	defer rows.Close()
+
+	var (
+		groups []DigestGroup
+		byUser = map[uuid.UUID]int{} // user id -> index into groups
+	)
+	for rows.Next() {
+		var (
+			userID      uuid.UUID
+			email, name string
+			n           Notification
+		)
+		if err := rows.Scan(&userID, &email, &name, &n.ID, &n.Kind, &n.Title, &n.Body, &n.Link, &n.ReadAt, &n.CreatedAt); err != nil {
+			return nil, fmt.Errorf("notify: scan pending digest: %w", err)
+		}
+		n.UserID = userID
+		idx, ok := byUser[userID]
+		if !ok {
+			byUser[userID] = len(groups)
+			groups = append(groups, DigestGroup{UserID: userID, Email: email, Name: name})
+			idx = len(groups) - 1
+		}
+		groups[idx].Notifications = append(groups[idx].Notifications, n)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("notify: iterate pending digests: %w", err)
+	}
+	return groups, nil
+}
+
+// MarkDigested stamps the given notifications, so a retried sweep re-mails no one.
+func (r *PostgresRepository) MarkDigested(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, ids []uuid.UUID) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	_, err := tx.Exec(ctx,
+		`UPDATE notifications SET digested_at = now()
+		 WHERE tenant_id = $1 AND id = ANY($2) AND digested_at IS NULL`,
+		tenantID, ids)
+	if err != nil {
+		return fmt.Errorf("notify: mark digested: %w", err)
+	}
+	return nil
+}
+
+// Preferences reads a person's settings, or the defaults when they have no row.
+func (r *PostgresRepository) Preferences(ctx context.Context, tx pgx.Tx, tenantID, userID uuid.UUID) (Preferences, error) {
+	prefs := DefaultPreferences()
+	err := tx.QueryRow(ctx,
+		`SELECT email_digest FROM notification_preferences WHERE tenant_id = $1 AND user_id = $2`,
+		tenantID, userID).Scan(&prefs.EmailDigest)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return DefaultPreferences(), nil
+		}
+		return Preferences{}, fmt.Errorf("notify: read preferences: %w", err)
+	}
+	return prefs, nil
+}
+
+// SetPreferences upserts a person's settings.
+func (r *PostgresRepository) SetPreferences(ctx context.Context, tx pgx.Tx, tenantID, userID uuid.UUID, p Preferences) error {
+	_, err := tx.Exec(ctx,
+		`INSERT INTO notification_preferences (tenant_id, user_id, email_digest)
+		 VALUES ($1, $2, $3)
+		 ON CONFLICT (tenant_id, user_id) DO UPDATE SET email_digest = EXCLUDED.email_digest, updated_at = now()`,
+		tenantID, userID, p.EmailDigest)
+	if err != nil {
+		return fmt.Errorf("notify: write preferences: %w", err)
+	}
+	return nil
+}

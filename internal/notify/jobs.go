@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -87,6 +88,47 @@ func (e *RiverEnqueuer) NotifyAnnouncement(ctx context.Context, tx pgx.Tx, tenan
 	}
 	if _, err := e.client.InsertTx(ctx, tx, args, nil); err != nil {
 		return fmt.Errorf("notify: enqueue announcement fan-out %s: %w", announcementID, err)
+	}
+	return nil
+}
+
+// DigestArgs is the daily sweep that mails everyone a summary of their unread
+// notifications. It carries nothing: it visits every tenant itself.
+type DigestArgs struct{}
+
+// Kind is stored in every river_job row, so it is a name, not a label.
+func (DigestArgs) Kind() string { return "notify.digest" }
+
+// InsertOpts retries a few times. The sweep is idempotent — a notification rolled
+// into a digest is stamped, so a retry re-mails no one — so trying again is safe.
+func (DigestArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{MaxAttempts: 3}
+}
+
+// DigestWorker runs the daily digest.
+type DigestWorker struct {
+	river.WorkerDefaults[DigestArgs]
+
+	notify *Service
+	log    *slog.Logger
+}
+
+// NewDigestWorker returns a worker, refusing one it cannot run.
+func NewDigestWorker(service *Service, log *slog.Logger) (*DigestWorker, error) {
+	if service == nil || log == nil {
+		return nil, errors.New("notify: the digest worker needs a service and a logger")
+	}
+	return &DigestWorker{notify: service, log: log}, nil
+}
+
+// Work mails the digests.
+func (w *DigestWorker) Work(ctx context.Context, _ *river.Job[DigestArgs]) error {
+	sent, err := w.notify.SendDigests(ctx)
+	if err != nil {
+		return fmt.Errorf("notify: send digests: %w", err)
+	}
+	if sent > 0 {
+		w.log.InfoContext(ctx, "sent notification digests", slog.Int("people", sent))
 	}
 	return nil
 }

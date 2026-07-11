@@ -39,6 +39,8 @@ import (
 // that a sweep never meets itself.
 const erasureInterval = 24 * time.Hour
 
+const digestInterval = 24 * time.Hour
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "fatal: %v\n", err)
@@ -150,8 +152,28 @@ func run() error {
 		return err
 	}
 
-	// Fanning a course announcement out to every enrolled learner's bell.
-	fanout, err := notify.NewAnnouncementFanoutWorker(notify.NewService(db, notify.NewPostgresRepository()))
+	// The digest mails through the same outbox the API uses: an insert-only River
+	// client whose InsertTx enqueues an email job on the digest's own transaction,
+	// so the email and the "these are digested" stamp commit together. It has no
+	// pool, so it can only insert — a worker that could also work its own queue is
+	// a loop nobody meant to write.
+	outboxClient, err := river.NewClient(riverpgxv5.New(nil), &river.Config{Logger: log})
+	if err != nil {
+		return fmt.Errorf("worker: create outbox client: %w", err)
+	}
+	outbox, err := comms.NewEnqueuer(outboxClient, cfg.WebBaseURL)
+	if err != nil {
+		return err
+	}
+
+	// One notify service, its mailer wired for the digest, shared by both jobs.
+	notifications := notify.NewService(db, notify.NewPostgresRepository(), outbox)
+
+	fanout, err := notify.NewAnnouncementFanoutWorker(notifications)
+	if err != nil {
+		return err
+	}
+	digests, err := notify.NewDigestWorker(notifications, log)
 	if err != nil {
 		return err
 	}
@@ -163,6 +185,7 @@ func run() error {
 	river.AddWorker(workers, grading)
 	river.AddWorker(workers, deletions)
 	river.AddWorker(workers, fanout)
+	river.AddWorker(workers, digests)
 
 	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Logger:  log,
@@ -180,6 +203,14 @@ func run() error {
 				river.PeriodicInterval(erasureInterval),
 				func() (river.JobArgs, *river.InsertOpts) { return EraseOrphansArgs{}, nil },
 				&river.PeriodicJobOpts{ID: EraseOrphansArgs{}.Kind()},
+			),
+			// The notification digest, once a day. Missed runs are not backfilled, so
+			// a worker that was down does not wake to a queue of digests; the next run
+			// gathers whatever is still unread and undigested.
+			river.NewPeriodicJob(
+				river.PeriodicInterval(digestInterval),
+				func() (river.JobArgs, *river.InsertOpts) { return notify.DigestArgs{}, nil },
+				&river.PeriodicJobOpts{ID: notify.DigestArgs{}.Kind()},
 			),
 		},
 	})

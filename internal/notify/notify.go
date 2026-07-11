@@ -67,3 +67,22 @@ type Page struct {
 	Notifications []Notification
 	NextCursor    string
 }
+
+// Preferences is how a person wants to be notified. Absent means the defaults —
+// the digest is on — so a row exists only once someone opts out.
+type Preferences struct {
+	EmailDigest bool
+}
+
+// DefaultPreferences is what a person gets before they have chosen anything.
+func DefaultPreferences() Preferences { return Preferences{EmailDigest: true} }
+
+// DigestGroup is one person's worth of a digest: who to mail, and the unread,
+// not-yet-digested notifications to summarise for them.
+type DigestGroup struct {
+	UserID uuid.UUID
+	Email  string
+	Name   string
+
+	Notifications []Notification
+}

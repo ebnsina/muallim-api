@@ -120,6 +120,23 @@ func (e *Enqueuer) enqueue(ctx context.Context, tx pgx.Tx, args EmailArgs) error
 	return nil
 }
 
+// SendRendered enqueues an email whose subject and body a caller has already
+// composed — the notification digest, where the text is built from a person's own
+// notifications and there is no template for comms to own. The plain text is
+// wrapped into a minimal HTML body so a client that prefers HTML has one.
+func (e *Enqueuer) SendRendered(ctx context.Context, tx pgx.Tx, to, subject, text string) error {
+	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
+	for i, line := range lines {
+		lines[i] = html.EscapeString(line)
+	}
+	return e.enqueue(ctx, tx, EmailArgs{
+		To:      to,
+		Subject: subject,
+		Text:    text,
+		HTML:    paragraphs(strings.Join(lines, "<br>")),
+	})
+}
+
 // link builds an absolute URL into the web client, carrying the token as a query
 // parameter.
 func (e *Enqueuer) link(path, token string) string {
