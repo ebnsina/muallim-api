@@ -65,7 +65,7 @@ func grade(q Question, r Response) Verdict {
 
 	var correct bool
 	switch q.Type {
-	case TypeTrueFalse, TypeSingleChoice:
+	case TypeTrueFalse, TypeSingleChoice, TypeImageAnswering:
 		correct = gradeSingleChoice(q, r)
 	case TypeMultipleChoice:
 		correct = gradeMultipleChoice(q, r)
@@ -75,7 +75,7 @@ func grade(q Question, r Response) Verdict {
 		correct = gradeBlanks(q, r.Blanks)
 	case TypeOrdering:
 		correct = gradeOrdering(q, r)
-	case TypeMatching:
+	case TypeMatching, TypeImageMatching:
 		correct = gradeMatching(q, r)
 	case TypeRange:
 		correct = gradeRange(q, r)

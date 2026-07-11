@@ -43,7 +43,7 @@ type QuizView struct {
 // this layer a type that has nowhere to put them.
 type QuestionView struct {
 	ID       string `json:"id" format:"uuid"`
-	Type     string `json:"type" enum:"true_false,single_choice,multiple_choice,fill_blanks,short_answer,ordering,matching,open_ended,range"`
+	Type     string `json:"type" enum:"true_false,single_choice,multiple_choice,fill_blanks,short_answer,ordering,matching,open_ended,range,image_answering,image_matching"`
 	Prompt   string `json:"prompt"`
 	Points   int    `json:"points"`
 	Position int    `json:"position"`
@@ -529,7 +529,7 @@ func registerQuizAuthoring(api huma.API, svc *assess.Service) {
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id" format:"uuid"`
 		Body struct {
-			Type   string `json:"type" enum:"true_false,single_choice,multiple_choice,fill_blanks,short_answer,ordering,matching,open_ended,range"`
+			Type   string `json:"type" enum:"true_false,single_choice,multiple_choice,fill_blanks,short_answer,ordering,matching,open_ended,range,image_answering,image_matching"`
 			Prompt string `json:"prompt" minLength:"1" maxLength:"4000"`
 			Points int    `json:"points,omitempty" minimum:"0" maximum:"1000" default:"1"`
 

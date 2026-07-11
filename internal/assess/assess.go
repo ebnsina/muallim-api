@@ -114,6 +114,14 @@ const (
 	// TypeRange auto-accepts a number within the author's bounds, stored as the
 	// single pair Accepted[0] = [min, max].
 	TypeRange = "range"
+
+	// TypeImageAnswering grades exactly as single choice; each option's Content is
+	// an image URL the browser draws instead of text.
+	TypeImageAnswering = "image_answering"
+
+	// TypeImageMatching grades exactly as matching; the item and its match are
+	// image URLs. The grading mechanism is the same, only the widget differs.
+	TypeImageMatching = "image_matching"
 )
 
 // ValidQuestionType reports whether t is a type this system grades.
@@ -123,7 +131,8 @@ const (
 func ValidQuestionType(t string) bool {
 	switch t {
 	case TypeTrueFalse, TypeSingleChoice, TypeMultipleChoice, TypeFillBlanks,
-		TypeShortAnswer, TypeOrdering, TypeMatching, TypeOpenEnded, TypeRange:
+		TypeShortAnswer, TypeOrdering, TypeMatching, TypeOpenEnded, TypeRange,
+		TypeImageAnswering, TypeImageMatching:
 		return true
 	default:
 		return false

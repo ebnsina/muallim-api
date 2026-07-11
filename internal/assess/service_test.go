@@ -1045,6 +1045,56 @@ func TestRangeQuestionRoundTripsAndGrades(t *testing.T) {
 	}
 }
 
+// The two image types are stored, authored, and graded through the same paths as
+// their text cousins — the round trip proves the widened type check accepts them.
+func TestImageQuestionTypesRoundTripAndGrade(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+	f.quiz(t, assess.NewQuiz{PassingPercent: 50})
+
+	// image_answering grades as single choice; each option's image URL is its content.
+	img, err := f.svc.AddQuestion(t.Context(), f.tenant, f.lesson, assess.NewQuestion{
+		Type: assess.TypeImageAnswering, Prompt: "Which shape is a circle?", Points: 2,
+		Options: []assess.NewOption{
+			{Content: "https://cdn.test/square.png"},
+			{Content: "https://cdn.test/circle.png", IsCorrect: true},
+		},
+	}, f.author)
+	if err != nil {
+		t.Fatalf("add image_answering question: %v", err)
+	}
+
+	// image_matching grades as matching; both sides are image URLs.
+	if _, err := f.svc.AddQuestion(t.Context(), f.tenant, f.lesson, assess.NewQuestion{
+		Type: assess.TypeImageMatching, Prompt: "Match the country to its capital", Points: 1,
+		Options: []assess.NewOption{
+			{Content: "https://cdn.test/fr.png", MatchContent: "https://cdn.test/paris.png"},
+			{Content: "https://cdn.test/jp.png", MatchContent: "https://cdn.test/tokyo.png"},
+		},
+	}, f.author); err != nil {
+		t.Fatalf("add image_matching question: %v", err)
+	}
+
+	if _, err := f.svc.StartAttempt(t.Context(), f.tenant, f.lesson, f.learner, assess.Author{UserID: f.learner}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if err := f.svc.SaveAnswer(t.Context(), f.tenant, f.lesson, f.learner, img.ID,
+		assess.Response{Choices: []uuid.UUID{f.correctOption(t, img.ID)}}); err != nil {
+		t.Fatalf("save image_answering: %v", err)
+	}
+	submitted, _ := f.svc.SubmitAttempt(t.Context(), f.tenant, f.lesson, f.learner, assess.Author{UserID: f.learner})
+	graded, err := f.svc.GradeAttempt(t.Context(), f.tenant, submitted.ID)
+	if err != nil {
+		t.Fatalf("grade: %v", err)
+	}
+
+	// image_answering is worth 2 and was answered correctly.
+	if graded.Points < 2 {
+		t.Fatalf("image_answering earned no points: scored %d/%d", graded.Points, graded.MaxPoints)
+	}
+}
+
 // A question is saved to the bank, listed, and copied into another quiz — where
 // editing the copy leaves the bank original alone.
 func TestContentBankRoundTrip(t *testing.T) {

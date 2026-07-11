@@ -114,7 +114,7 @@ func (n NewQuestion) validate() error {
 			return fmt.Errorf("%w: a true/false question has exactly one correct option", ErrInvalidQuestion)
 		}
 
-	case TypeSingleChoice:
+	case TypeSingleChoice, TypeImageAnswering:
 		if len(n.Options) < 2 {
 			return fmt.Errorf("%w: a single-choice question needs at least two options", ErrInvalidQuestion)
 		}
@@ -143,7 +143,7 @@ func (n NewQuestion) validate() error {
 			return fmt.Errorf("%w: an ordering question's answer is the order, not a correct item", ErrInvalidQuestion)
 		}
 
-	case TypeMatching:
+	case TypeMatching, TypeImageMatching:
 		if len(n.Options) < 2 {
 			return fmt.Errorf("%w: a matching question needs at least two pairs", ErrInvalidQuestion)
 		}
@@ -206,7 +206,7 @@ func (n NewQuestion) validate() error {
 		if len(n.Accepted) > 0 {
 			return fmt.Errorf("%w: a %s question has no blanks to accept answers for", ErrInvalidQuestion, n.Type)
 		}
-		if n.Type != TypeMatching {
+		if n.Type != TypeMatching && n.Type != TypeImageMatching {
 			for _, o := range n.Options {
 				if strings.TrimSpace(o.MatchContent) != "" {
 					return fmt.Errorf("%w: only a matching question has matches", ErrInvalidQuestion)
