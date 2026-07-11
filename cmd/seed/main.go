@@ -826,6 +826,31 @@ func seedLearning(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg config
 			}
 			rollups = append(rollups, []any{tenantID, person, course.id, done, len(course.lessons), percent})
 
+			// On their in-progress course, a named demo account has asked a question the
+			// instructor answered — so signing in as demo@ or student@ lands on a bell
+			// with something in it, and a lesson with a live discussion. Left unread.
+			if i == 1 && len(course.lessons) > 0 {
+				qID := id("question", "demo", course.id, person)
+				askedAt := enrolledAt.Add(3 * 24 * time.Hour)
+				answerBody := discussionAnswers[i%len(discussionAnswers)]
+				questions = append(questions, []any{
+					qID, tenantID, course.lessons[0], person,
+					discussionQuestions[i%len(discussionQuestions)], askedAt,
+				})
+				qaAnswers = append(qaAnswers, []any{
+					id("answer", "demo", qID), tenantID, qID, instructor,
+					answerBody, true, askedAt.Add(5 * time.Hour),
+				})
+				got.discussions++
+				notifications = append(notifications, []any{
+					id("notification", "demo", qID), tenantID, person, notify.KindAnswer,
+					"New answer to your question", answerBody,
+					"/courses/" + course.slug + "/lessons/" + course.lessons[0].String(),
+					nil, askedAt.Add(5 * time.Hour),
+				})
+				got.notifications++
+			}
+
 			// A finished course earns a certificate and, if it has a quiz, a mark on
 			// it. The demo accounts do not sit quizzes elsewhere in the seed, so this is
 			// where `student@`'s own grades page gets something to show.
