@@ -349,6 +349,18 @@ func learnError(err error) error {
 	case errors.Is(err, learn.ErrNoteTooLong):
 		return huma.Error422UnprocessableEntity("That note is too long.")
 
+	case errors.Is(err, learn.ErrQuestionNotFound):
+		return huma.Error404NotFound("That question does not exist.")
+
+	case errors.Is(err, learn.ErrAnswerNotFound):
+		return huma.Error404NotFound("That answer does not exist.")
+
+	case errors.Is(err, learn.ErrEmptyPost):
+		return huma.Error422UnprocessableEntity("Write something first.")
+
+	case errors.Is(err, learn.ErrPostTooLong):
+		return huma.Error422UnprocessableEntity("That is too long.")
+
 	default:
 		// Unmapped: the error handler renders it as a 500 with a correlation id and
 		// leaks none of it. A new sentinel without a case here is caught by

@@ -215,3 +215,187 @@ func (r *PostgresRepository) HighlightsForCourse(ctx context.Context, tx pgx.Tx,
 	}
 	return highlights, nil
 }
+
+// lessonReadableGuard is true when (userID, canModerate) may read the lesson.
+//
+// A moderator always may. Otherwise the lesson must be a preview of a published
+// course — readable by anyone — or the user must hold a live enrolment in the
+// course that owns it. It reads lessons, topics, courses, and enrolments
+// directly, the same shared-schema read the course-wide lists use; it does not
+// gate on drip, because a released-later lesson is still one you may discuss.
+//
+// Parameterised as $tenant, $lesson, $user, $canModerate in that order, so a
+// caller substitutes the placeholder numbers to match its own query.
+const lessonReadableGuard = `
+	EXISTS (
+		SELECT 1 FROM lessons l
+		JOIN topics t  ON t.id = l.topic_id
+		JOIN courses c ON c.id = t.course_id
+		WHERE l.id = %[2]s AND l.tenant_id = %[1]s
+		  AND (
+		      %[4]s
+		      OR (l.is_preview AND c.status = 'published')
+		      OR EXISTS (
+		          SELECT 1 FROM enrolments e
+		          WHERE e.tenant_id = %[1]s AND e.course_id = c.id AND e.user_id = %[3]s
+		            AND e.status IN ('active', 'completed')
+		            AND (e.expires_at IS NULL OR e.expires_at > now())
+		      )
+		  )
+	)`
+
+// askQuestionSQL inserts only when the author may read the lesson: the SELECT
+// yields no row otherwise, and the INSERT writes nothing.
+var askQuestionSQL = fmt.Sprintf(`
+	INSERT INTO lesson_questions (tenant_id, lesson_id, author_id, body)
+	SELECT $1, $2, $3, $5
+	WHERE `+lessonReadableGuard+`
+	RETURNING id, lesson_id, author_id, body, created_at`,
+	"$1", "$2", "$3", "$4")
+
+// AskQuestion posts a question, or returns ErrLessonNotFound when the lesson is
+// absent or unreadable — one answer, so neither case reveals the other.
+func (r *PostgresRepository) AskQuestion(ctx context.Context, tx pgx.Tx, tenantID, lessonID uuid.UUID, author Participant, body string) (Question, error) {
+	var q Question
+	var authorID *uuid.UUID
+	err := tx.QueryRow(ctx, askQuestionSQL, tenantID, lessonID, author.UserID, author.CanModerate, body).
+		Scan(&q.ID, &q.LessonID, &authorID, &q.Body, &q.CreatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Question{}, ErrLessonNotFound
+		}
+		return Question{}, fmt.Errorf("learn: ask question: %w", err)
+	}
+	if authorID != nil {
+		q.AuthorID = *authorID
+	}
+	return q, nil
+}
+
+// answerSQL inserts only when the author may read the question's lesson, resolved
+// from the question row.
+var answerSQL = fmt.Sprintf(`
+	INSERT INTO lesson_answers (tenant_id, question_id, author_id, body, by_instructor)
+	SELECT $1, q.id, $3, $5, $4
+	FROM lesson_questions q
+	WHERE q.tenant_id = $1 AND q.id = $2
+	  AND `+lessonReadableGuard+`
+	RETURNING id, question_id, author_id, body, by_instructor, created_at`,
+	"$1", "q.lesson_id", "$3", "$4")
+
+// Answer posts a reply, or returns ErrQuestionNotFound when the question is
+// absent or its lesson unreadable.
+func (r *PostgresRepository) Answer(ctx context.Context, tx pgx.Tx, tenantID, questionID uuid.UUID, author Participant, body string) (Answer, error) {
+	var a Answer
+	var authorID *uuid.UUID
+	err := tx.QueryRow(ctx, answerSQL, tenantID, questionID, author.UserID, author.CanModerate, body).
+		Scan(&a.ID, &a.QuestionID, &authorID, &a.Body, &a.ByInstructor, &a.CreatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Answer{}, ErrQuestionNotFound
+		}
+		return Answer{}, fmt.Errorf("learn: answer: %w", err)
+	}
+	if authorID != nil {
+		a.AuthorID = *authorID
+	}
+	return a, nil
+}
+
+// questionsSQL lists a lesson's questions, newest first, but only when the reader
+// may read the lesson. An unreadable lesson yields no rows — an empty thread, not
+// a leak.
+var questionsSQL = fmt.Sprintf(`
+	SELECT q.id, q.lesson_id, COALESCE(q.author_id, '00000000-0000-0000-0000-000000000000'::uuid),
+	       COALESCE(u.name, ''), q.body, q.created_at
+	FROM lesson_questions q
+	LEFT JOIN users u ON u.id = q.author_id
+	WHERE q.tenant_id = $1 AND q.lesson_id = $2
+	  AND `+lessonReadableGuard+`
+	ORDER BY q.created_at DESC, q.id
+	LIMIT $5`,
+	"$1", "$2", "$3", "$4")
+
+// answersForSQL fetches every answer for a set of questions at once — the batch
+// that keeps a thread list from being one query per question.
+const answersForSQL = `
+	SELECT a.id, a.question_id, COALESCE(a.author_id, '00000000-0000-0000-0000-000000000000'::uuid),
+	       COALESCE(u.name, ''), a.body, a.by_instructor, a.created_at
+	FROM lesson_answers a
+	LEFT JOIN users u ON u.id = a.author_id
+	WHERE a.tenant_id = $1 AND a.question_id = ANY($2)
+	ORDER BY a.created_at, a.id`
+
+// Questions lists a lesson's threads: the questions in one query, then all their
+// answers in a second, stitched by a map. Two queries whatever the thread count.
+func (r *PostgresRepository) Questions(ctx context.Context, tx pgx.Tx, tenantID, lessonID uuid.UUID, reader Participant, limit int) ([]Question, error) {
+	rows, err := tx.Query(ctx, questionsSQL, tenantID, lessonID, reader.UserID, reader.CanModerate, limit)
+	if err != nil {
+		return nil, fmt.Errorf("learn: list questions: %w", err)
+	}
+	questions, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Question, error) {
+		var q Question
+		err := row.Scan(&q.ID, &q.LessonID, &q.AuthorID, &q.AuthorName, &q.Body, &q.CreatedAt)
+		return q, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("learn: scan questions: %w", err)
+	}
+	if len(questions) == 0 {
+		return questions, nil
+	}
+
+	ids := make([]uuid.UUID, len(questions))
+	for i, q := range questions {
+		ids[i] = q.ID
+	}
+
+	answerRows, err := tx.Query(ctx, answersForSQL, tenantID, ids)
+	if err != nil {
+		return nil, fmt.Errorf("learn: list answers: %w", err)
+	}
+	answers, err := pgx.CollectRows(answerRows, func(row pgx.CollectableRow) (Answer, error) {
+		var a Answer
+		err := row.Scan(&a.ID, &a.QuestionID, &a.AuthorID, &a.AuthorName, &a.Body, &a.ByInstructor, &a.CreatedAt)
+		return a, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("learn: scan answers: %w", err)
+	}
+
+	byQuestion := make(map[uuid.UUID][]Answer, len(questions))
+	for _, a := range answers {
+		byQuestion[a.QuestionID] = append(byQuestion[a.QuestionID], a)
+	}
+	for i := range questions {
+		questions[i].Answers = byQuestion[questions[i].ID]
+	}
+	return questions, nil
+}
+
+const deleteQuestionSQL = `
+	DELETE FROM lesson_questions
+	WHERE tenant_id = $1 AND id = $2 AND ($3 OR author_id = $4)`
+
+// DeleteQuestion removes a question the caller authored, or any when they
+// moderate. The predicate makes "not there" and "not yours" one row count: zero.
+func (r *PostgresRepository) DeleteQuestion(ctx context.Context, tx pgx.Tx, tenantID, questionID uuid.UUID, actor Participant) (bool, error) {
+	tag, err := tx.Exec(ctx, deleteQuestionSQL, tenantID, questionID, actor.CanModerate, actor.UserID)
+	if err != nil {
+		return false, fmt.Errorf("learn: delete question: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+const deleteAnswerSQL = `
+	DELETE FROM lesson_answers
+	WHERE tenant_id = $1 AND id = $2 AND ($3 OR author_id = $4)`
+
+// DeleteAnswer removes an answer under the same rule as a question.
+func (r *PostgresRepository) DeleteAnswer(ctx context.Context, tx pgx.Tx, tenantID, answerID uuid.UUID, actor Participant) (bool, error) {
+	tag, err := tx.Exec(ctx, deleteAnswerSQL, tenantID, answerID, actor.CanModerate, actor.UserID)
+	if err != nil {
+		return false, fmt.Errorf("learn: delete answer: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}

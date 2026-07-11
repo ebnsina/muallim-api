@@ -1,10 +1,12 @@
-// Package learn owns what a learner makes as they study — for now, the private
-// note they keep on a lesson.
+// Package learn owns what a learner makes as they study: the private note and
+// highlights they keep on a lesson, and the public questions they ask on it.
 //
-// It knows a lesson only by its id. A note references a lesson through a foreign
-// key, but the package never reads a course or a curriculum: whether a learner
-// may see a lesson is `catalog`'s and `enroll`'s decision, and a note is private
-// to the learner whatever the answer. So this package imports neither.
+// A note and a highlight are private, so they are answered by id alone. A
+// question is shared with everyone studying the course, so whether a reader may
+// see or post one follows whether they may read the lesson — checked in the
+// query by a join to enrolments, the same shared-schema read the course-wide
+// lists already use. The package still imports neither catalog nor enroll: it
+// reads their tables, it does not depend on their code.
 package learn
 
 import (
@@ -31,7 +33,63 @@ var (
 	// an empty quote, or a range that starts before the text or ends before it
 	// starts.
 	ErrInvalidHighlight = errors.New("learn: invalid highlight")
+
+	// ErrEmptyPost is a question or answer with no text. A blank post is not a
+	// contribution, and an empty column is not worth a row.
+	ErrEmptyPost = errors.New("learn: post is empty")
+
+	// ErrPostTooLong is a question or answer past the length a thread should hold.
+	ErrPostTooLong = errors.New("learn: post is too long")
+
+	// ErrQuestionNotFound is a question, or an answer's parent question, that is not
+	// there — or one the caller may neither see nor moderate. All read the same.
+	ErrQuestionNotFound = errors.New("learn: question not found")
+
+	// ErrAnswerNotFound is an answer another learner asked to delete, or one that
+	// was never there. Both read the same: it is not theirs to remove.
+	ErrAnswerNotFound = errors.New("learn: answer not found")
 )
+
+// MaxPostLength bounds a question or an answer. A paragraph or two, not an essay.
+const MaxPostLength = 5_000
+
+// MaxQuestionsPerPage bounds a lesson's discussion read. A busy lesson shows a
+// page of threads, not every question ever asked, in one response.
+const MaxQuestionsPerPage = 50
+
+// Participant is who is reading or writing in a lesson's discussion.
+//
+// CanModerate is an authorisation decision made by the transport layer — it maps
+// to course:write — never a request parameter. It lets an instructor answer with
+// a badge and delete any post, not only their own.
+type Participant struct {
+	UserID      uuid.UUID
+	CanModerate bool
+}
+
+// Question is a learner's public question on a lesson, with its answers.
+type Question struct {
+	ID         uuid.UUID
+	LessonID   uuid.UUID
+	AuthorID   uuid.UUID
+	AuthorName string
+	Body       string
+	CreatedAt  time.Time
+
+	Answers []Answer
+}
+
+// Answer is a reply to a question. ByInstructor is fixed at write time, so a
+// badge does not move when a role does.
+type Answer struct {
+	ID           uuid.UUID
+	QuestionID   uuid.UUID
+	AuthorID     uuid.UUID
+	AuthorName   string
+	Body         string
+	ByInstructor bool
+	CreatedAt    time.Time
+}
 
 // MaxNoteLength bounds a note. Generous — it is a page of thoughts, not a book —
 // but bounded, because an unbounded text column on a per-request write is a way

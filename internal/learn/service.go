@@ -47,6 +47,27 @@ type Repository interface {
 	// HighlightsForCourse lists the caller's marks across every lesson of one
 	// course, in reading order within each lesson.
 	HighlightsForCourse(ctx context.Context, tx pgx.Tx, tenantID, userID uuid.UUID, slug string) ([]Highlight, error)
+
+	// Questions lists a lesson's questions with their answers, but only if the
+	// reader may read the lesson — an enrolment join decides. A reader who may not
+	// gets an empty list, not another course's threads.
+	Questions(ctx context.Context, tx pgx.Tx, tenantID, lessonID uuid.UUID, reader Participant, limit int) ([]Question, error)
+
+	// AskQuestion posts a question, but only if the author may read the lesson.
+	// A lesson that is absent or unreadable is ErrLessonNotFound — the same 404,
+	// so neither reveals the other.
+	AskQuestion(ctx context.Context, tx pgx.Tx, tenantID, lessonID uuid.UUID, author Participant, body string) (Question, error)
+
+	// Answer posts a reply, but only if the author may read the question's lesson.
+	// An absent or unreadable question is ErrQuestionNotFound.
+	Answer(ctx context.Context, tx pgx.Tx, tenantID, questionID uuid.UUID, author Participant, body string) (Answer, error)
+
+	// DeleteQuestion removes a question the caller authored, or any question when
+	// they may moderate. Returns whether one was theirs to remove.
+	DeleteQuestion(ctx context.Context, tx pgx.Tx, tenantID, questionID uuid.UUID, actor Participant) (bool, error)
+
+	// DeleteAnswer removes an answer the caller authored, or any when they moderate.
+	DeleteAnswer(ctx context.Context, tx pgx.Tx, tenantID, answerID uuid.UUID, actor Participant) (bool, error)
 }
 
 // CourseAnnotations gathers everything a learner has kept across a course — their
@@ -194,6 +215,90 @@ func (s *Service) RemoveHighlight(ctx context.Context, tenantID, userID, highlig
 		}
 		if !found {
 			return ErrHighlightNotFound
+		}
+		return nil
+	})
+}
+
+// Questions lists a lesson's discussion. A reader who may not read the lesson
+// sees an empty thread rather than another course's, and the page they are on
+// has already refused them the lesson body.
+func (s *Service) Questions(ctx context.Context, tenantID, lessonID uuid.UUID, reader Participant, limit int) ([]Question, error) {
+	if limit <= 0 || limit > MaxQuestionsPerPage {
+		limit = MaxQuestionsPerPage
+	}
+
+	var questions []Question
+	err := s.db.WithTenantReadOnly(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		questions, err = s.repo.Questions(ctx, tx, tenantID, lessonID, reader, limit)
+		return err
+	})
+	return questions, err
+}
+
+// Ask posts a question on a lesson. An empty body is refused, not stored.
+func (s *Service) Ask(ctx context.Context, tenantID, lessonID uuid.UUID, author Participant, body string) (Question, error) {
+	trimmed := strings.TrimSpace(body)
+	if trimmed == "" {
+		return Question{}, ErrEmptyPost
+	}
+	if len(trimmed) > MaxPostLength {
+		return Question{}, ErrPostTooLong
+	}
+
+	var question Question
+	err := s.db.WithTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		question, err = s.repo.AskQuestion(ctx, tx, tenantID, lessonID, author, trimmed)
+		return err
+	})
+	return question, err
+}
+
+// Answer posts a reply to a question.
+func (s *Service) Answer(ctx context.Context, tenantID, questionID uuid.UUID, author Participant, body string) (Answer, error) {
+	trimmed := strings.TrimSpace(body)
+	if trimmed == "" {
+		return Answer{}, ErrEmptyPost
+	}
+	if len(trimmed) > MaxPostLength {
+		return Answer{}, ErrPostTooLong
+	}
+
+	var answer Answer
+	err := s.db.WithTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		answer, err = s.repo.Answer(ctx, tx, tenantID, questionID, author, trimmed)
+		return err
+	})
+	return answer, err
+}
+
+// DeleteQuestion removes a question. Not the caller's and not theirs to moderate
+// reads as ErrQuestionNotFound, the same answer as one that never existed.
+func (s *Service) DeleteQuestion(ctx context.Context, tenantID, questionID uuid.UUID, actor Participant) error {
+	return s.db.WithTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		removed, err := s.repo.DeleteQuestion(ctx, tx, tenantID, questionID, actor)
+		if err != nil {
+			return err
+		}
+		if !removed {
+			return ErrQuestionNotFound
+		}
+		return nil
+	})
+}
+
+// DeleteAnswer removes an answer under the same rule as a question.
+func (s *Service) DeleteAnswer(ctx context.Context, tenantID, answerID uuid.UUID, actor Participant) error {
+	return s.db.WithTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		removed, err := s.repo.DeleteAnswer(ctx, tx, tenantID, answerID, actor)
+		if err != nil {
+			return err
+		}
+		if !removed {
+			return ErrAnswerNotFound
 		}
 		return nil
 	})
