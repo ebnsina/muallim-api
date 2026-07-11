@@ -475,3 +475,27 @@ func (r *PostgresRepository) ReviewSummary(ctx context.Context, tx pgx.Tx, tenan
 	}
 	return s, nil
 }
+
+const courseStatsSQL = `
+	SELECT
+		count(*),
+		count(*) FILTER (WHERE e.status = 'active'),
+		count(*) FILTER (WHERE e.status = 'completed'),
+		count(*) FILTER (WHERE e.status IN ('expired', 'cancelled')),
+		COALESCE(avg(p.percent) FILTER (WHERE e.status IN ('active', 'completed')), 0)
+	FROM enrolments e
+	LEFT JOIN course_progress p
+		ON p.tenant_id = e.tenant_id AND p.user_id = e.user_id AND p.course_id = e.course_id
+	WHERE e.tenant_id = $1 AND e.course_id = $2`
+
+// CourseStats totals a course's enrolments by status and averages live progress,
+// in one aggregate query. Reviews are summed separately by the caller.
+func (r *PostgresRepository) CourseStats(ctx context.Context, tx pgx.Tx, tenantID, courseID uuid.UUID) (CourseAnalytics, error) {
+	var a CourseAnalytics
+	err := tx.QueryRow(ctx, courseStatsSQL, tenantID, courseID).
+		Scan(&a.Total, &a.Active, &a.Completed, &a.Inactive, &a.AvgProgress)
+	if err != nil {
+		return CourseAnalytics{}, fmt.Errorf("enroll: course stats: %w", err)
+	}
+	return a, nil
+}

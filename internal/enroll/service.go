@@ -39,6 +39,8 @@ type Repository interface {
 	ReviewFor(ctx context.Context, tx pgx.Tx, tenantID, courseID, userID uuid.UUID) (Review, error)
 	ListReviews(ctx context.Context, tx pgx.Tx, tenantID, courseID uuid.UUID, limit int) ([]Review, error)
 	ReviewSummary(ctx context.Context, tx pgx.Tx, tenantID, courseID uuid.UUID) (ReviewSummary, error)
+
+	CourseStats(ctx context.Context, tx pgx.Tx, tenantID, courseID uuid.UUID) (CourseAnalytics, error)
 }
 
 // AuditRecorder appends to the audit trail inside the caller's transaction.
@@ -603,4 +605,24 @@ func (s *Service) Reviews(ctx context.Context, tenantID uuid.UUID, slug string, 
 		return nil
 	})
 	return list, summary, mine, err
+}
+
+// Analytics summarises a course for the instructor who owns it: its enrolments by
+// status, mean progress, and rating — the enrolment stats and the review summary
+// gathered in one read-only transaction. It resolves any status, so a draft's
+// early numbers are visible to its author.
+func (s *Service) Analytics(ctx context.Context, tenantID uuid.UUID, slug string) (CourseAnalytics, error) {
+	var out CourseAnalytics
+	err := s.db.WithTenantReadOnly(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		courseID, _, err := s.repo.CourseBySlug(ctx, tx, tenantID, slug)
+		if err != nil {
+			return err
+		}
+		if out, err = s.repo.CourseStats(ctx, tx, tenantID, courseID); err != nil {
+			return err
+		}
+		out.Reviews, err = s.repo.ReviewSummary(ctx, tx, tenantID, courseID)
+		return err
+	})
+	return out, err
 }

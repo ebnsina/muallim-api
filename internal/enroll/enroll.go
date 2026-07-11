@@ -165,6 +165,31 @@ type ReviewSummary struct {
 	Average float64
 }
 
+// CourseAnalytics is a course's standing at a glance, for the instructor who
+// owns it: how many have enrolled and where they are, and how it has been rated.
+type CourseAnalytics struct {
+	Total     int // every enrolment ever, whatever its status
+	Active    int
+	Completed int
+	Inactive  int // expired or cancelled
+
+	// AvgProgress is the mean course-progress percent across live enrolments,
+	// zero when nobody has enrolled.
+	AvgProgress float64
+
+	Reviews ReviewSummary
+}
+
+// CompletionRate is the share of live enrolments that finished, 0..1. A course
+// nobody active is studying has a rate of zero rather than a division by nobody.
+func (a CourseAnalytics) CompletionRate() float64 {
+	live := a.Active + a.Completed
+	if live == 0 {
+		return 0
+	}
+	return float64(a.Completed) / float64(live)
+}
+
 // LessonContent is a lesson as a learner reads it.
 type LessonContent struct {
 	ID       uuid.UUID

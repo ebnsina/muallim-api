@@ -7,6 +7,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/ebnsina/lms-api/internal/auth"
 	"github.com/ebnsina/lms-api/internal/enroll"
 )
 
@@ -141,5 +142,59 @@ func registerReviews(api huma.API, svc *enroll.Service) {
 			return nil, enrolError(err)
 		}
 		return nil, nil
+	})
+}
+
+// AnalyticsOutput is a course's summary for its instructor. Private to the
+// author, so it is never shared by a cache.
+type AnalyticsOutput struct {
+	CacheControl string `header:"Cache-Control"`
+	Body         struct {
+		Total          int     `json:"total_enrolments"`
+		Active         int     `json:"active"`
+		Completed      int     `json:"completed"`
+		Inactive       int     `json:"inactive"`
+		AvgProgress    float64 `json:"average_progress"`
+		CompletionRate float64 `json:"completion_rate"`
+		Reviews        struct {
+			Count   int     `json:"count"`
+			Average float64 `json:"average"`
+		} `json:"reviews"`
+	}
+}
+
+func registerAnalytics(api huma.API, svc *enroll.Service) {
+	huma.Register(api, huma.Operation{
+		OperationID: "course-analytics",
+		Method:      http.MethodGet,
+		Path:        "/v1/courses/{slug}/analytics",
+		Summary:     "How a course you teach is doing",
+		Description: "Enrolments by status, mean progress, completion rate, and rating. Requires course:write — " +
+			"it is the instructor's view, and shows a draft's early numbers too.",
+		Tags:     []string{"Learning"},
+		Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, in *struct {
+		Slug string `path:"slug" maxLength:"200"`
+	}) (*AnalyticsOutput, error) {
+		p, err := requirePermission(ctx, auth.PermCourseWrite)
+		if err != nil {
+			return nil, err
+		}
+
+		a, err := svc.Analytics(ctx, p.TenantID, in.Slug)
+		if err != nil {
+			return nil, enrolError(err)
+		}
+
+		out := &AnalyticsOutput{CacheControl: lessonCacheControl}
+		out.Body.Total = a.Total
+		out.Body.Active = a.Active
+		out.Body.Completed = a.Completed
+		out.Body.Inactive = a.Inactive
+		out.Body.AvgProgress = a.AvgProgress
+		out.Body.CompletionRate = a.CompletionRate()
+		out.Body.Reviews.Count = a.Reviews.Count
+		out.Body.Reviews.Average = a.Reviews.Average
+		return out, nil
 	})
 }
