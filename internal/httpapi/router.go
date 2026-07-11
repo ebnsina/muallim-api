@@ -105,6 +105,7 @@ func New(opts Options) (http.Handler, huma.API) {
 	// Assessment takes the enrolment service too: whether a person may see a quiz
 	// is decided by whether they may see its lesson, and that rule lives there.
 	registerAssessment(api, opts.Assess, opts.Enrol)
+	registerBank(api, opts.Assess)
 
 	// Assignments take the enrolment service for the same reason: whether a person
 	// may see one is whether they may see its lesson.

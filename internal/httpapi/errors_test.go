@@ -261,6 +261,7 @@ func TestAssessmentSentinelsMapToADeliberateStatus(t *testing.T) {
 		assess.ErrNotFound:       http.StatusNotFound,
 		assess.ErrNotYourAttempt: http.StatusNotFound,
 
+		assess.ErrInvalidPage:       http.StatusUnprocessableEntity,
 		assess.ErrQuizExists:        http.StatusConflict,
 		assess.ErrAttemptsExhausted: http.StatusConflict,
 		assess.ErrAttemptClosed:     http.StatusConflict,

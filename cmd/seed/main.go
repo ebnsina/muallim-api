@@ -344,10 +344,50 @@ func seedWorkspace(ctx context.Context, db *database.DB, cfg config, index int, 
 			return fmt.Errorf("gamification: %w", err)
 		}
 
+		if err := seedBank(ctx, tx, tenantID); err != nil {
+			return fmt.Errorf("bank: %w", err)
+		}
+
 		return nil
 	})
 
 	return got, err
+}
+
+// seedBank fills the question bank with a few reusable questions, so an author
+// signing in finds something to add to a quiz.
+func seedBank(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) error {
+	type bq struct {
+		category, prompt, right, wrong string
+	}
+	items := []bq{
+		{"Mathematics", "Which is a prime number?", "7", "9"},
+		{"Mathematics", "What is 12 × 12?", "144", "124"},
+		{"History", "Where was the House of Wisdom?", "Baghdad", "Cairo"},
+		{"Astronomy", "Which instrument measures a star's altitude?", "Astrolabe", "Compass"},
+	}
+	var questions, options [][]any
+	for i, it := range items {
+		qid := id("bank", tenantID, i)
+		questions = append(questions, []any{qid, tenantID, "single_choice", it.prompt, 1, it.category})
+		options = append(options,
+			[]any{id("bankopt", qid, 0), tenantID, qid, it.right, 0, true},
+			[]any{id("bankopt", qid, 1), tenantID, qid, it.wrong, 1, false},
+		)
+	}
+	for _, c := range []struct {
+		table string
+		cols  []string
+		rows  [][]any
+	}{
+		{"bank_questions", []string{"id", "tenant_id", "type", "prompt", "points", "category"}, questions},
+		{"bank_question_options", []string{"id", "tenant_id", "bank_question_id", "content", "position", "is_correct"}, options},
+	} {
+		if err := bulkInsert(ctx, tx, c.table, c.cols, c.rows); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // seedGamification derives points and badges from the progress already seeded,

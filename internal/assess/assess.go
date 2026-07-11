@@ -24,6 +24,9 @@ import (
 var (
 	ErrNotFound = errors.New("assess: not found")
 
+	// ErrInvalidPage is an opaque bank cursor that did not decode.
+	ErrInvalidPage = errors.New("assess: invalid page cursor")
+
 	// ErrInvalidQuestion means an author described a question that cannot be
 	// answered — a single-choice question with two correct options, an ordering
 	// question with one option to order.
@@ -66,15 +69,16 @@ var (
 
 // Audit actions this package emits.
 const (
-	ActionQuizCreated      = "quiz.created"
-	ActionQuizUpdated      = "quiz.updated"
-	ActionQuizDeleted      = "quiz.deleted"
-	ActionQuestionCreated  = "question.created"
-	ActionQuestionUpdated  = "question.updated"
-	ActionQuestionDeleted  = "question.deleted"
-	ActionAttemptStarted   = "attempt.started"
-	ActionAttemptSubmitted = "attempt.submitted"
-	ActionAttemptGraded    = "attempt.graded"
+	ActionQuizCreated       = "quiz.created"
+	ActionQuizUpdated       = "quiz.updated"
+	ActionQuizDeleted       = "quiz.deleted"
+	ActionQuestionCreated   = "question.created"
+	ActionQuestionUpdated   = "question.updated"
+	ActionQuestionDeleted   = "question.deleted"
+	ActionAttemptStarted    = "attempt.started"
+	ActionAttemptSubmitted  = "attempt.submitted"
+	ActionAttemptGraded     = "attempt.graded"
+	ActionBankQuestionSaved = "bank_question.saved"
 )
 
 // Question types.

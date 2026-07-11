@@ -29,6 +29,15 @@ type Repository interface {
 	DeleteQuestion(ctx context.Context, tx pgx.Tx, tenantID, questionID uuid.UUID) (uuid.UUID, error)
 	ReorderQuestions(ctx context.Context, tx pgx.Tx, tenantID, quizID uuid.UUID, order []uuid.UUID) error
 
+	// Content bank. QuestionAsNew and BankQuestionAsNew load a question in the
+	// author's shape so it can be copied — into the bank, or out of it into a quiz.
+	QuestionAsNew(ctx context.Context, tx pgx.Tx, tenantID, questionID uuid.UUID) (NewQuestion, error)
+	BankQuestionAsNew(ctx context.Context, tx pgx.Tx, tenantID, bankQuestionID uuid.UUID) (NewQuestion, error)
+	SaveToBank(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, category string, n NewQuestion) (BankQuestion, error)
+	ListBankQuestions(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, category string, before *bankCursor, limit int) ([]bankRow, error)
+	BankCategories(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) ([]string, error)
+	DeleteBankQuestion(ctx context.Context, tx pgx.Tx, tenantID, id uuid.UUID) (bool, error)
+
 	StartAttempt(ctx context.Context, tx pgx.Tx, tenantID, quizID, userID uuid.UUID, expiresAt *time.Time) (Attempt, error)
 	LiveAttempt(ctx context.Context, tx pgx.Tx, tenantID, quizID, userID uuid.UUID) (Attempt, error)
 	AttemptByNumber(ctx context.Context, tx pgx.Tx, tenantID, quizID, userID uuid.UUID, number int) (Attempt, error)

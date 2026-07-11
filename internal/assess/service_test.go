@@ -1044,3 +1044,90 @@ func TestRangeQuestionRoundTripsAndGrades(t *testing.T) {
 		t.Fatalf("range answer earned no points: scored %d/%d", graded.Points, graded.MaxPoints)
 	}
 }
+
+// A question is saved to the bank, listed, and copied into another quiz — where
+// editing the copy leaves the bank original alone.
+func TestContentBankRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+	_, choiceID, _ := f.quiz(t, assess.NewQuiz{PassingPercent: 60})
+
+	// Save the choice question to the bank under a category.
+	saved, err := f.svc.SaveQuestionToBank(t.Context(), f.tenant, choiceID, "Geography", f.author)
+	if err != nil {
+		t.Fatalf("save to bank: %v", err)
+	}
+	if saved.Category != "Geography" || saved.Type != assess.TypeSingleChoice {
+		t.Fatalf("saved bank question wrong: %+v", saved)
+	}
+
+	// It appears in the bank, and its category is listed.
+	page, err := f.svc.BankQuestions(t.Context(), f.tenant, "", "", 20)
+	if err != nil {
+		t.Fatalf("list bank: %v", err)
+	}
+	if len(page.Questions) != 1 || page.Questions[0].ID != saved.ID {
+		t.Fatalf("bank list: %+v", page.Questions)
+	}
+	cats, _ := f.svc.BankCategories(t.Context(), f.tenant)
+	if len(cats) != 1 || cats[0] != "Geography" {
+		t.Fatalf("categories: %v", cats)
+	}
+
+	// Filtering by a different category finds nothing.
+	other, _ := f.svc.BankQuestions(t.Context(), f.tenant, "History", "", 20)
+	if len(other.Questions) != 0 {
+		t.Fatalf("wrong category returned %d", len(other.Questions))
+	}
+
+	// Copy it into a second lesson's quiz. It arrives with its options intact.
+	lesson2 := f.secondQuizLesson(t)
+	added, err := f.svc.AddBankQuestionToQuiz(t.Context(), f.tenant, lesson2, saved.ID, f.author)
+	if err != nil {
+		t.Fatalf("add from bank: %v", err)
+	}
+	if added.Type != assess.TypeSingleChoice || len(added.Options) != 2 {
+		t.Fatalf("copied question wrong: type=%s options=%d", added.Type, len(added.Options))
+	}
+	// A fresh id: it is a copy, not the same row.
+	if added.ID == saved.ID {
+		t.Fatalf("copy reused the bank id")
+	}
+
+	// Deleting from the bank leaves the copy in the quiz.
+	if err := f.svc.DeleteBankQuestion(t.Context(), f.tenant, saved.ID); err != nil {
+		t.Fatalf("delete bank: %v", err)
+	}
+	page, _ = f.svc.BankQuestions(t.Context(), f.tenant, "", "", 20)
+	if len(page.Questions) != 0 {
+		t.Fatalf("bank not empty after delete: %d", len(page.Questions))
+	}
+}
+
+// secondQuizLesson makes another lesson with an empty quiz, to copy a bank
+// question into.
+func (f fixture) secondQuizLesson(t *testing.T) uuid.UUID {
+	t.Helper()
+	var lessonID uuid.UUID
+	err := f.db.WithTenant(t.Context(), f.tenant, func(ctx context.Context, tx pgx.Tx) error {
+		var topicID uuid.UUID
+		if err := tx.QueryRow(ctx,
+			`SELECT id FROM topics WHERE tenant_id = $1 LIMIT 1`, f.tenant).Scan(&topicID); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx,
+			`INSERT INTO lessons (tenant_id, topic_id, title, content_type, position)
+			 VALUES ($1, $2, 'Second quiz', 'quiz', 1) RETURNING id`, f.tenant, topicID).Scan(&lessonID); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("second lesson: %v", err)
+	}
+	if _, err := f.svc.CreateQuiz(t.Context(), f.tenant, lessonID, assess.NewQuiz{Title: "Second", PassingPercent: 50}, f.author); err != nil {
+		t.Fatalf("second quiz: %v", err)
+	}
+	return lessonID
+}

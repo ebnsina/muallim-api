@@ -793,6 +793,9 @@ func assessError(err error) error {
 	case errors.Is(err, assess.ErrQuizExists):
 		return huma.Error409Conflict("That lesson already has a quiz.")
 
+	case errors.Is(err, assess.ErrInvalidPage):
+		return huma.Error422UnprocessableEntity("That page cursor is not valid.")
+
 	case errors.Is(err, assess.ErrAttemptsExhausted):
 		return huma.Error409Conflict("You have used every attempt at this quiz.")
 
