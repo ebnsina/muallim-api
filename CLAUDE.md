@@ -98,6 +98,6 @@ git config user.name "ebnsina" && git config user.email "ebnsina.me@gmail.com"
 
 Do **not** add a `Co-Authored-By: Claude` trailer, or any other identity. Remote uses the `github-es` SSH host alias (`git@github-es:ebnsina/muallim-api.git`).
 
-`docs/` and `data/` are gitignored and must never be committed — the public repo carries no plans, no roadmap, no secrets. `docs/plan.md` holds the product and architecture plan and is for local reference only.
+`docs/` holds the installation, architecture, performance, and contract guides, and is committed. `docs/plan.md` and `data/` are gitignored and must never be committed — the product and architecture plan stays local.
 
 Conventional, imperative commit subjects: `feat(catalog): add course prerequisites`.
