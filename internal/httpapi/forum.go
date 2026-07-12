@@ -31,8 +31,14 @@ type ForumSpaceView struct {
 
 // ForumThreadView is a thread in a list or on its own page.
 type ForumThreadView struct {
-	ID             string    `json:"id" format:"uuid"`
-	SpaceID        string    `json:"space_id" format:"uuid"`
+	ID      string `json:"id" format:"uuid"`
+	SpaceID string `json:"space_id" format:"uuid"`
+
+	// SpaceTitle names the board. Absent in a board's own listing, which already
+	// knows what board it is; present on a single thread, which is a page that has to
+	// say where it is.
+	SpaceTitle string `json:"space_title,omitempty"`
+
 	Title          string    `json:"title"`
 	Body           string    `json:"body"`
 	AuthorName     string    `json:"author_name"`
@@ -69,6 +75,7 @@ func forumThreadView(t forum.Thread, viewer uuid.UUID) ForumThreadView {
 	return ForumThreadView{
 		ID:             t.ID.String(),
 		SpaceID:        t.SpaceID.String(),
+		SpaceTitle:     t.SpaceTitle,
 		Title:          t.Title,
 		Body:           t.Body,
 		AuthorName:     t.AuthorName,

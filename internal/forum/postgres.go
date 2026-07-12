@@ -165,13 +165,26 @@ func scanThread(row pgx.CollectableRow) (Thread, error) {
 	return t, err
 }
 
+// The board's title comes free: this statement already joins forum_spaces to decide
+// whether the reader may see the thread at all, so naming the board it is in costs
+// one more column and no more work.
 var threadSQL = fmt.Sprintf(`
 	SELECT t.id, t.space_id, COALESCE(t.author_id, `+nilUUID+`), COALESCE(u.name, ''),
-	       t.title, t.body, t.pinned, t.locked, t.reply_count, t.last_activity_at, t.created_at
+	       t.title, t.body, t.pinned, t.locked, t.reply_count, t.last_activity_at, t.created_at,
+	       s.title
 	FROM forum_threads t
 	JOIN forum_spaces s ON s.id = t.space_id
 	LEFT JOIN users u ON u.id = t.author_id
 	WHERE t.tenant_id = $1 AND t.id = $2 AND `+spaceVisibleFmt, "s", "$3", "$4")
+
+// scanThreadInSpace is scanThread plus the board's name. A listing has no use for
+// it; a single thread is a page that has to say where it is.
+func scanThreadInSpace(row pgx.CollectableRow) (Thread, error) {
+	var t Thread
+	err := row.Scan(&t.ID, &t.SpaceID, &t.AuthorID, &t.AuthorName, &t.Title, &t.Body,
+		&t.Pinned, &t.Locked, &t.ReplyCount, &t.LastActivityAt, &t.CreatedAt, &t.SpaceTitle)
+	return t, err
+}
 
 // Thread returns one thread if its space is visible to the actor.
 func (r *PostgresRepository) Thread(ctx context.Context, tx pgx.Tx, tenantID, threadID uuid.UUID, actor Actor) (Thread, error) {
@@ -179,7 +192,7 @@ func (r *PostgresRepository) Thread(ctx context.Context, tx pgx.Tx, tenantID, th
 	if err != nil {
 		return Thread{}, fmt.Errorf("forum: load thread: %w", err)
 	}
-	thread, err := pgx.CollectExactlyOneRow(rows, scanThread)
+	thread, err := pgx.CollectExactlyOneRow(rows, scanThreadInSpace)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Thread{}, ErrThreadNotFound

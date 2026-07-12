@@ -103,7 +103,12 @@ type Thread struct {
 
 	AuthorName     string
 	LastActivityAt time.Time
-	CreatedAt      time.Time
+
+	// SpaceTitle names the board this thread is in. Set only when a single thread is
+	// loaded — the board's own listing already knows what board it is, and a title
+	// repeated on every row of it is a string sent a hundred times to say one thing.
+	SpaceTitle string
+	CreatedAt  time.Time
 }
 
 // Post is one reply in a thread.
