@@ -9,10 +9,13 @@ data/
 *.pem
 *.key
 
-# Build output
+# Build output — `make build` writes bin/, a bare `go build` drops the binary here
 /bin/
 /tmp/
-muallim-api
+/api
+/migrate
+/seed
+/worker
 *.exe
 
 # Go
@@ -26,5 +29,3 @@ vendor/
 .idea/
 .vscode/
 *.swp
-/worker
-/seed
