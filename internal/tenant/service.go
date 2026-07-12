@@ -63,7 +63,7 @@ func (s *Service) Invalidate(host string) {
 }
 
 // normaliseHost lowercases and strips the port, so that "Acme.Lms.test:8080" and
-// "acme.lms.test" are one cache entry and one database lookup rather than two.
+// "acme.muallim.test" are one cache entry and one database lookup rather than two.
 func normaliseHost(host string) string {
 	host = strings.ToLower(strings.TrimSpace(host))
 

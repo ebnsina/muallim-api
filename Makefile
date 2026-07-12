@@ -34,7 +34,7 @@ lint: ## Vet and check formatting
 
 check: lint test-db ## Everything CI runs
 
-spec: ## Write the OpenAPI spec to bin/openapi.json — the contract for lms-web
+spec: ## Write the OpenAPI spec to bin/openapi.json — the contract for muallim-web
 	@mkdir -p bin
 	go run ./cmd/api -dump-spec > bin/openapi.json
 	@echo "wrote bin/openapi.json"
@@ -56,7 +56,7 @@ seed-huge: ## The same, at the size the pages will really be: ~300k rows
 	LMS_DATABASE_URL="$(DB_URL)" go run ./cmd/seed -reset \
 		-workspaces 3 -courses 60 -students 1200 -topics 5 -lessons 6
 
-seed-test: ## Only the bare workspace lms-web's end-to-end tests need
+seed-test: ## Only the bare workspace muallim-web's end-to-end tests need
 	@psql -q "$(TEST_DB_URL)" -c "INSERT INTO tenants (subdomain, name) VALUES ('localhost', 'Acme Academy') \
 		ON CONFLICT (lower(subdomain)) DO NOTHING"
 	@echo "workspace 'localhost' is ready in lms_test"

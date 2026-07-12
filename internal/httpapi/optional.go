@@ -56,7 +56,7 @@ func (o Optional[T]) MarshalJSON() ([]byte, error) {
 // Huma validates the request body against this before it unmarshals anything, so
 // without the nullable flag a `null` is a 422 and `UnmarshalJSON` never runs.
 // The generated OpenAPI document says `type: [string, "null"]`, which is what
-// tells lms-web — and every other client — that erasing the field is allowed.
+// tells muallim-web — and every other client — that erasing the field is allowed.
 func (o Optional[T]) Schema(r huma.Registry) *huma.Schema {
 	// Copied, not mutated in place. The registry hands back the schema it holds for
 	// this type, and marking that one nullable would make every `time.Time` in the

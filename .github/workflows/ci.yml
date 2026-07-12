@@ -98,7 +98,7 @@ jobs:
           go install honnef.co/go/tools/cmd/staticcheck@v0.7.0
           "$(go env GOPATH)/bin/staticcheck" ./...
 
-      # The OpenAPI document is the contract with lms-web and every other client.
+      # The OpenAPI document is the contract with muallim-web and every other client.
       # A build that cannot emit it has broken that contract in a way no test sees.
       - run: make spec
 

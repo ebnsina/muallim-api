@@ -214,7 +214,7 @@ Jobs must be **idempotent** — they will be retried. Make the work safe to repe
 
 ## 8. HTTP & the OpenAPI contract
 
-The generated OpenAPI 3.1 document **is** the contract with `lms-web` and every future client. Treat it as a public interface.
+The generated OpenAPI 3.1 document **is** the contract with `muallim-web` and every future client. Treat it as a public interface.
 
 - Operations are registered with `huma.Register` and carry a stable `OperationID` — it becomes the generated client's method name. Renaming one is a breaking change.
 - Request and response bodies are explicit Go structs. Never `map[string]any` on a public surface.

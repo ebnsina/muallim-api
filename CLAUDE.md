@@ -4,7 +4,7 @@ Go backend for a multi-tenant LMS. Read `GUIDELINES.md` before writing code; it 
 
 ## What this repo is
 
-An API-first, multi-tenant LMS backend. A **modular monolith** in Go, backed by Postgres. It publishes an OpenAPI 3.1 spec that is the contract for every client: `lms-web` (SvelteKit, sibling repo at `../lms-web`), and later a WordPress plugin, mobile apps, and an LTI tool.
+An API-first, multi-tenant LMS backend. A **modular monolith** in Go, backed by Postgres. It publishes an OpenAPI 3.1 spec that is the contract for every client: `muallim-web` (SvelteKit, sibling repo at `../muallim-web`), and later a WordPress plugin, mobile apps, and an LTI tool.
 
 Because those clients are separate, **the OpenAPI spec is a public interface.** Renaming an `OperationID` or narrowing a field breaks consumers you cannot see.
 
@@ -21,7 +21,7 @@ make run            # HTTP server on :8080
 make check          # vet, format check, race tests against a real Postgres
 make test           # tests; database tests skip without LMS_TEST_DATABASE_URL
 make test-db        # every test, including the ones that need Postgres
-make spec           # write bin/openapi.json — the contract for lms-web
+make spec           # write bin/openapi.json — the contract for muallim-web
 make seed           # a demo workspace with a demo account
 make seed-huge      # ~1.1M rows, three workspaces — judge a page at the size it will be
 ```

@@ -2,7 +2,7 @@
 
 Backend for a multi-tenant learning management system. A modular monolith in Go, backed by Postgres, publishing an OpenAPI 3.1 contract.
 
-Its first client is [`lms-web`](../lms-web) (SvelteKit). A WordPress plugin, mobile apps, and an LTI tool are planned, and all of them consume this same API — which is why the spec is treated as a public interface rather than an implementation detail.
+Its first client is [`muallim-web`](../muallim-web) (SvelteKit). A WordPress plugin, mobile apps, and an LTI tool are planned, and all of them consume this same API — which is why the spec is treated as a public interface rather than an implementation detail.
 
 ## Requirements
 
@@ -22,7 +22,7 @@ make run            # serve on :8080
 ```bash
 curl -s localhost:8080/v1/healthz | jq
 curl -s localhost:8080/v1/readyz  | jq          # also checks Postgres
-curl -s -H 'Host: acme.lms.test' localhost:8080/v1/courses | jq
+curl -s -H 'Host: acme.muallim.test' localhost:8080/v1/courses | jq
 open http://localhost:8080/docs                 # interactive API reference
 ```
 
@@ -86,7 +86,7 @@ The spec is generated from the Go types themselves, so it cannot drift from the 
 make spec           # writes bin/openapi.json
 ```
 
-It is also served live at `/openapi.json`, `/openapi.yaml`, and rendered at `/docs`. `lms-web` generates its typed client from this document, so a breaking change here fails that build rather than production.
+It is also served live at `/openapi.json`, `/openapi.yaml`, and rendered at `/docs`. `muallim-web` generates its typed client from this document, so a breaking change here fails that build rather than production.
 
 ## Development
 

@@ -25,7 +25,7 @@ var corsMethods = []string{
 
 // cors answers cross-origin requests for the origins in allowed.
 //
-// lms-web is served from a different origin than this API — localhost:5173 and
+// muallim-web is served from a different origin than this API — localhost:5173 and
 // localhost:8080 in development, app.example.com and api.example.com in
 // production — so every browser request to us is cross-origin, and so is every
 // request SvelteKit makes during server-side rendering, because its `fetch`

@@ -65,7 +65,7 @@ The generated schema says the field may be null.
 That sentence is the contract. Huma's validator happens to let a `null` through
 an optional field whatever the schema says, so a missing `nullable` breaks
 nothing here and everything downstream: `openapi-typescript` reads `type:
-string` and types the field `string | undefined`, and lms-web then has no way to
+string` and types the field `string | undefined`, and muallim-web then has no way to
 express "remove the deadline" that will typecheck.
 
 Asserted through a registry rather than by reading the emitted JSON, because

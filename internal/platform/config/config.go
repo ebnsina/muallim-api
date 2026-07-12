@@ -71,8 +71,8 @@ type Config struct {
 
 	// CORSOrigins are the exact browser origins allowed to call this API directly.
 	//
-	// Usually none. lms-web is served at acme.lms.com and reaches this API at
-	// acme.lms.com/api, which is same-origin: no preflight, no headers to grant.
+	// Usually none. muallim-web is served at acme.muallim.com and reaches this API at
+	// acme.muallim.com/api, which is same-origin: no preflight, no headers to grant.
 	// An entry here exists for some other browser client on another origin.
 	CORSOrigins []string
 
@@ -158,7 +158,7 @@ func Load() (Config, error) {
 		IdleTimeout:     duration("LMS_IDLE_TIMEOUT", 120*time.Second),
 		ShutdownTimeout: duration("LMS_SHUTDOWN_TIMEOUT", 20*time.Second),
 		DatabaseURL:     env("LMS_DATABASE_URL", ""),
-		// Empty by default. lms-web reaches this API same-origin through the edge,
+		// Empty by default. muallim-web reaches this API same-origin through the edge,
 		// so no browser origin needs granting; one that does is a deliberate act.
 		CORSOrigins: list(env("LMS_CORS_ORIGINS", "")),
 

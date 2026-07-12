@@ -68,7 +68,7 @@ type Options struct {
 // New builds the HTTP handler and the OpenAPI description of every route on it.
 //
 // The returned huma.API is exposed so that cmd/ can write the generated spec to
-// disk. That spec is the contract with lms-web and every future client; treat it
+// disk. That spec is the contract with muallim-web and every future client; treat it
 // as a public interface.
 func New(opts Options) (http.Handler, huma.API) {
 	mux := http.NewServeMux()

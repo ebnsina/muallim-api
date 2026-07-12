@@ -2,7 +2,7 @@
 //
 // With -dump-spec it writes the generated OpenAPI 3.1 document to stdout and
 // exits without binding a port or touching the database. That document is the
-// contract with lms-web and every other client; `make spec` writes it to disk for
+// contract with muallim-web and every other client; `make spec` writes it to disk for
 // their code generators.
 package main
 
