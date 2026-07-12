@@ -96,7 +96,7 @@ Author every commit as `ebnsina <ebnsina.me@gmail.com>`, configured **per repo**
 git config user.name "ebnsina" && git config user.email "ebnsina.me@gmail.com"
 ```
 
-Do **not** add a `Co-Authored-By: Claude` trailer, or any other identity. Remote uses the `github-es` SSH host alias (`git@github-es:ebnsina/lms-api.git`).
+Do **not** add a `Co-Authored-By: Claude` trailer, or any other identity. Remote uses the `github-es` SSH host alias (`git@github-es:ebnsina/muallim-api.git`).
 
 `docs/` and `data/` are gitignored and must never be committed — the public repo carries no plans, no roadmap, no secrets. `docs/plan.md` holds the product and architecture plan and is for local reference only.
 
