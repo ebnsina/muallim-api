@@ -4,7 +4,7 @@
 
 Go 1.26 and Postgres 17. Docker optional (`make db-up`) if you would rather not run Postgres locally.
 
-The database role must **not** be a superuser: superusers bypass row-level security, which would silently disable tenant isolation.
+The database role must **not** be a superuser: superusers bypass row-level security, which would silently disable tenant isolation. Both paths below create it `NOSUPERUSER NOBYPASSRLS`, and CI asserts as much before any test runs.
 
 ## Getting started
 
@@ -13,6 +13,15 @@ cp .env.example .env
 make db-create      # role + muallim/muallim_test databases
 make migrate        # apply migrations to both
 make run            # serve on :8080
+```
+
+Or in Docker, where `scripts/postgres-init.sql` creates the same role and databases on first boot, so `make db-create` is unnecessary:
+
+```bash
+cp .env.example .env
+make db-up          # Postgres 17 on :5432
+make migrate
+make run
 ```
 
 ```bash
