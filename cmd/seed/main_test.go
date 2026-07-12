@@ -118,11 +118,11 @@ func TestDatabaseNameLeaksNothing(t *testing.T) {
 	t.Parallel()
 
 	const secret = "hunter2"
-	url := "postgres://lms:" + secret + "@localhost:5432/lms_test?sslmode=disable"
+	url := "postgres://muallim:" + secret + "@localhost:5432/muallim_test?sslmode=disable"
 
 	got := databaseName(url)
-	if got != "lms_test" {
-		t.Errorf("databaseName = %q, want %q", got, "lms_test")
+	if got != "muallim_test" {
+		t.Errorf("databaseName = %q, want %q", got, "muallim_test")
 	}
 	if strings.Contains(got, secret) {
 		t.Error("the password is in the line the seeder prints")

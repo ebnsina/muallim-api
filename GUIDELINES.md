@@ -66,7 +66,7 @@ Go interfaces belong to the caller, not the implementation. Do not export a `Sto
 - **No package-level mutable state.** No `init()` doing work. No global DB handle, logger, or config. Pass dependencies explicitly; construct them in `cmd/`.
 - **Constructors validate.** `New*` returns `(T, error)` and refuses to build an unusable value. A constructed object is always ready to use.
 - **Zero value or error.** No half-initialised structs.
-- **Table-driven tests**, `t.Parallel()` where safe. Repository tests run against a real Postgres via `LMS_TEST_DATABASE_URL` (`make test-db`), and skip when it is unset. Mocking a database tests the mock: neither row-level security nor a query plan has an opinion about a fake. Each test seeds its own tenant, which keeps parallel tests isolated and exercises that isolation at the same time.
+- **Table-driven tests**, `t.Parallel()` where safe. Repository tests run against a real Postgres via `MUALLIM_TEST_DATABASE_URL` (`make test-db`), and skip when it is unset. Mocking a database tests the mock: neither row-level security nor a query plan has an opinion about a fake. Each test seeds its own tenant, which keeps parallel tests isolated and exercises that isolation at the same time.
 
 ### Comments
 
@@ -196,7 +196,7 @@ At the HTTP layer, read endpoints carry an `ETag` and answer a matching `If-None
 
 ### Bounds
 
-`statement_timeout` is set on every connection: a query still running after five seconds is a bug or a missing index, and cancelling it protects every other request from queueing behind it. Queries slower than `LMS_DB_SLOW_QUERY_THRESHOLD` are logged at warn **with their statement text** — a slow-query log that omits the query cannot answer the only question it exists to answer. Arguments are never logged; that is where user data lives.
+`statement_timeout` is set on every connection: a query still running after five seconds is a bug or a missing index, and cancelling it protects every other request from queueing behind it. Queries slower than `MUALLIM_DB_SLOW_QUERY_THRESHOLD` are logged at warn **with their statement text** — a slow-query log that omits the query cannot answer the only question it exists to answer. Arguments are never logged; that is where user data lives.
 
 The pool is small on purpose. Postgres costs roughly 10 MB of backend memory per connection and degrades past a few hundred: a small pool with a queue beats a large one that thrashes the server.
 

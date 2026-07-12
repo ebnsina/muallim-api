@@ -40,7 +40,7 @@ func run() error {
 		return err
 	}
 	if cfg.DatabaseURL == "" {
-		return errors.New("migrate: LMS_DATABASE_URL is not set")
+		return errors.New("migrate: MUALLIM_DATABASE_URL is not set")
 	}
 
 	db, err := sql.Open("pgx", cfg.DatabaseURL)

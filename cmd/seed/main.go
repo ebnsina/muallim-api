@@ -100,9 +100,9 @@ func run() error {
 	flag.Uint64Var(&cfg.seed, "seed", 1, "the random seed; the same seed builds the same data")
 	flag.Parse()
 
-	url := os.Getenv("LMS_DATABASE_URL")
+	url := os.Getenv("MUALLIM_DATABASE_URL")
 	if url == "" {
-		return errors.New("LMS_DATABASE_URL is required")
+		return errors.New("MUALLIM_DATABASE_URL is required")
 	}
 
 	ctx := context.Background()
@@ -1422,7 +1422,7 @@ func report(cfg config, url string, got counts, took time.Duration) {
 		got.spaces, got.threads, got.posts)
 
 	// Which database, because these accounts are only in this one. `pnpm test:e2e`
-	// runs against `lms_test`, which has no demo accounts at all — and an API left
+	// runs against `muallim_test`, which has no demo accounts at all — and an API left
 	// pointing there answers "those credentials are not valid" to every one of them.
 	fmt.Printf("written to %s. sign in at http://localhost:5173 — every account shares one password\n\n",
 		databaseName(url))

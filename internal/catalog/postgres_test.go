@@ -22,13 +22,13 @@ import (
 // Repository tests run against a real Postgres. Mocking a database tests the
 // mock: neither row-level security nor a query plan has an opinion about a fake.
 //
-// Set LMS_TEST_DATABASE_URL to enable. CI always sets it.
+// Set MUALLIM_TEST_DATABASE_URL to enable. CI always sets it.
 func testDB(t *testing.T) *database.DB {
 	t.Helper()
 
-	url := os.Getenv("LMS_TEST_DATABASE_URL")
+	url := os.Getenv("MUALLIM_TEST_DATABASE_URL")
 	if url == "" {
-		t.Skip("LMS_TEST_DATABASE_URL is not set; skipping database tests")
+		t.Skip("MUALLIM_TEST_DATABASE_URL is not set; skipping database tests")
 	}
 
 	log := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))

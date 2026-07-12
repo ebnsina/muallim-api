@@ -1,4 +1,4 @@
-// Command api serves the LMS HTTP API.
+// Command api serves the Muallim HTTP API.
 //
 // With -dump-spec it writes the generated OpenAPI 3.1 document to stdout and
 // exits without binding a port or touching the database. That document is the
@@ -89,7 +89,7 @@ func run() error {
 	log.Info("starting", "env", cfg.Env, "version", cfg.Version)
 
 	if cfg.DatabaseURL == "" {
-		return errors.New("LMS_DATABASE_URL is required to serve requests; use -dump-spec to emit the contract without a database")
+		return errors.New("MUALLIM_DATABASE_URL is required to serve requests; use -dump-spec to emit the contract without a database")
 	}
 
 	db, err := database.New(ctx, database.Options{
@@ -121,7 +121,7 @@ func run() error {
 		// Development only; config refuses an empty secret anywhere else. Sessions
 		// do not survive a restart, which is a nuisance, not a vulnerability.
 		secret = rand.Text() + rand.Text()
-		log.Warn("LMS_JWT_SECRET is unset; generated an ephemeral signing key. Sessions will not survive a restart.")
+		log.Warn("MUALLIM_JWT_SECRET is unset; generated an ephemeral signing key. Sessions will not survive a restart.")
 	}
 
 	tokens, err := auth.NewTokenIssuer(secret, cfg.JWTIssuer)
@@ -144,7 +144,7 @@ func run() error {
 		return err
 	}
 	if !cfg.MailerConfigured() {
-		log.Warn("LMS_SMTP_HOST is unset; the worker will log messages instead of sending them, including single-use tokens")
+		log.Warn("MUALLIM_SMTP_HOST is unset; the worker will log messages instead of sending them, including single-use tokens")
 	}
 
 	// Session revocation crosses workspaces, so it cannot run inside the

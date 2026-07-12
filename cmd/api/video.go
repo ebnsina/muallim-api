@@ -28,7 +28,7 @@ func newVideoResolver(cfg config.Config) (videoResolver, error) {
 	if cfg.StreamCustomer != "" {
 		stream, err := media.NewCloudflare(cfg.StreamCustomer)
 		if err != nil {
-			return videoResolver{}, fmt.Errorf("config: LMS_CLOUDFLARE_STREAM_CUSTOMER: %w", err)
+			return videoResolver{}, fmt.Errorf("config: MUALLIM_CLOUDFLARE_STREAM_CUSTOMER: %w", err)
 		}
 		providers = append(providers, stream)
 	}

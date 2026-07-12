@@ -15,11 +15,11 @@ Go 1.26 · Postgres 17 · Huma v2 (`humago` stdlib adapter, OpenAPI 3.1, RFC 945
 ## Commands
 
 ```bash
-make db-create      # role + lms/lms_test databases on a local Postgres
+make db-create      # role + muallim/muallim_test databases on a local Postgres
 make migrate        # apply migrations to both
 make run            # HTTP server on :8080
 make check          # vet, format check, race tests against a real Postgres
-make test           # tests; database tests skip without LMS_TEST_DATABASE_URL
+make test           # tests; database tests skip without MUALLIM_TEST_DATABASE_URL
 make test-db        # every test, including the ones that need Postgres
 make spec           # write bin/openapi.json — the contract for muallim-web
 make seed           # a demo workspace with a demo account

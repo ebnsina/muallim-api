@@ -73,7 +73,7 @@ type Options struct {
 func New(opts Options) (http.Handler, huma.API) {
 	mux := http.NewServeMux()
 
-	cfg := huma.DefaultConfig("LMS API", opts.Version)
+	cfg := huma.DefaultConfig("Muallim API", opts.Version)
 	cfg.Info.Description = "Multi-tenant learning management system."
 
 	// Declaring the scheme puts an Authorize button on the docs page and marks

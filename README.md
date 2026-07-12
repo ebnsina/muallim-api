@@ -14,7 +14,7 @@ The database role must **not** be a superuser: superusers bypass row-level secur
 
 ```bash
 cp .env.example .env
-make db-create      # role + lms/lms_test databases
+make db-create      # role + muallim/muallim_test databases
 make migrate        # apply migrations to both
 make run            # serve on :8080
 ```
@@ -123,7 +123,7 @@ accounts you had before it ran are gone.
 
 `.github/workflows/ci.yml` runs `make check`, `staticcheck`, `make spec`, and a build, against a real Postgres 17.
 
-The `lms` role it creates is `NOSUPERUSER NOBYPASSRLS`, and a step asserts as much before any test runs. A superuser bypasses row-level security, so every tenant-isolation test would pass against a database enforcing nothing — the most expensive kind of green build.
+The `muallim` role it creates is `NOSUPERUSER NOBYPASSRLS`, and a step asserts as much before any test runs. A superuser bypasses row-level security, so every tenant-isolation test would pass against a database enforcing nothing — the most expensive kind of green build.
 
 ## Layout
 

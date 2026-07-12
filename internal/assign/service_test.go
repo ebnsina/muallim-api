@@ -28,9 +28,9 @@ import (
 func testDB(t *testing.T) *database.DB {
 	t.Helper()
 
-	url := os.Getenv("LMS_TEST_DATABASE_URL")
+	url := os.Getenv("MUALLIM_TEST_DATABASE_URL")
 	if url == "" {
-		t.Skip("LMS_TEST_DATABASE_URL is not set; skipping database tests")
+		t.Skip("MUALLIM_TEST_DATABASE_URL is not set; skipping database tests")
 	}
 
 	log := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
@@ -48,16 +48,16 @@ func testDB(t *testing.T) *database.DB {
 func testStore(t *testing.T) *blob.S3 {
 	t.Helper()
 
-	endpoint := os.Getenv("LMS_TEST_S3_ENDPOINT")
+	endpoint := os.Getenv("MUALLIM_TEST_S3_ENDPOINT")
 	if endpoint == "" {
-		t.Skip("LMS_TEST_S3_ENDPOINT is not set; skipping object-store tests")
+		t.Skip("MUALLIM_TEST_S3_ENDPOINT is not set; skipping object-store tests")
 	}
 
 	store, err := blob.NewS3(blob.Options{
 		Endpoint:  endpoint,
-		Bucket:    envOr("LMS_TEST_S3_BUCKET", "lms-uploads"),
-		AccessKey: envOr("LMS_TEST_S3_ACCESS_KEY", "lms"),
-		SecretKey: envOr("LMS_TEST_S3_SECRET_KEY", "lms-secret-key"),
+		Bucket:    envOr("MUALLIM_TEST_S3_BUCKET", "muallim-uploads"),
+		AccessKey: envOr("MUALLIM_TEST_S3_ACCESS_KEY", "muallim"),
+		SecretKey: envOr("MUALLIM_TEST_S3_SECRET_KEY", "muallim-secret-key"),
 		Region:    "auto",
 		PathStyle: true,
 	})

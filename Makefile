@@ -1,18 +1,18 @@
 .DEFAULT_GOAL := help
 .PHONY: help run worker test test-db lint fmt build spec check migrate migrate-down migrate-status seed db-up db-down db-create
 
-DB_URL      ?= postgres://lms:lms@localhost:5432/lms?sslmode=disable
-TEST_DB_URL ?= postgres://lms:lms@localhost:5432/lms_test?sslmode=disable
+DB_URL      ?= postgres://muallim:muallim@localhost:5432/muallim?sslmode=disable
+TEST_DB_URL ?= postgres://muallim:muallim@localhost:5432/muallim_test?sslmode=disable
 TEST_S3_URL ?= http://localhost:9002
 
 help: ## List available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
 run: ## Start the API server
-	LMS_DATABASE_URL="$(DB_URL)" go run ./cmd/api
+	MUALLIM_DATABASE_URL="$(DB_URL)" go run ./cmd/api
 
 worker: ## Start the background job worker
-	LMS_DATABASE_URL="$(DB_URL)" go run ./cmd/worker
+	MUALLIM_DATABASE_URL="$(DB_URL)" go run ./cmd/worker
 
 build: ## Compile all binaries into bin/
 	go build -o bin/ ./cmd/...
@@ -21,8 +21,8 @@ test: ## Run tests (database tests skip without a test database)
 	go test ./... -race
 
 test-db: ## Run every test, including the ones that need Postgres and MinIO
-	LMS_TEST_DATABASE_URL="$(TEST_DB_URL)" \
-	LMS_TEST_S3_ENDPOINT="$(TEST_S3_URL)" \
+	MUALLIM_TEST_DATABASE_URL="$(TEST_DB_URL)" \
+	MUALLIM_TEST_S3_ENDPOINT="$(TEST_S3_URL)" \
 	go test ./... -race
 
 fmt: ## Format all Go source
@@ -40,42 +40,42 @@ spec: ## Write the OpenAPI spec to bin/openapi.json — the contract for muallim
 	@echo "wrote bin/openapi.json"
 
 migrate: ## Apply migrations to the development database
-	LMS_DATABASE_URL="$(DB_URL)" go run ./cmd/migrate up
-	LMS_DATABASE_URL="$(TEST_DB_URL)" go run ./cmd/migrate up
+	MUALLIM_DATABASE_URL="$(DB_URL)" go run ./cmd/migrate up
+	MUALLIM_DATABASE_URL="$(TEST_DB_URL)" go run ./cmd/migrate up
 
 migrate-down: ## Roll back the last migration
-	LMS_DATABASE_URL="$(DB_URL)" go run ./cmd/migrate down
+	MUALLIM_DATABASE_URL="$(DB_URL)" go run ./cmd/migrate down
 
 migrate-status: ## Show migration status
-	LMS_DATABASE_URL="$(DB_URL)" go run ./cmd/migrate status
+	MUALLIM_DATABASE_URL="$(DB_URL)" go run ./cmd/migrate status
 
 seed: ## Fill the dev database with a workspace, a demo account, and enough data to click around
-	LMS_DATABASE_URL="$(DB_URL)" go run ./cmd/seed -reset
+	MUALLIM_DATABASE_URL="$(DB_URL)" go run ./cmd/seed -reset
 
 seed-huge: ## The same, at the size the pages will really be: ~300k rows
-	LMS_DATABASE_URL="$(DB_URL)" go run ./cmd/seed -reset \
+	MUALLIM_DATABASE_URL="$(DB_URL)" go run ./cmd/seed -reset \
 		-workspaces 3 -courses 60 -students 1200 -topics 5 -lessons 6
 
 seed-test: ## Only the bare workspace muallim-web's end-to-end tests need
 	@psql -q "$(TEST_DB_URL)" -c "INSERT INTO tenants (subdomain, name) VALUES ('localhost', 'Acme Academy') \
 		ON CONFLICT (lower(subdomain)) DO NOTHING"
-	@echo "workspace 'localhost' is ready in lms_test"
+	@echo "workspace 'localhost' is ready in muallim_test"
 
-db-create: ## Create the lms role and both databases on a local Postgres
-	@psql -q postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname='lms'" | grep -q 1 || \
-		psql -q postgres -c "CREATE ROLE lms LOGIN PASSWORD 'lms'"
-	@psql -q postgres -tAc "SELECT 1 FROM pg_database WHERE datname='lms'" | grep -q 1 || \
-		psql -q postgres -c "CREATE DATABASE lms OWNER lms"
-	@psql -q postgres -tAc "SELECT 1 FROM pg_database WHERE datname='lms_test'" | grep -q 1 || \
-		psql -q postgres -c "CREATE DATABASE lms_test OWNER lms"
-	@echo "role lms and databases lms, lms_test are ready"
+db-create: ## Create the muallim role and both databases on a local Postgres
+	@psql -q postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname='muallim'" | grep -q 1 || \
+		psql -q postgres -c "CREATE ROLE muallim LOGIN PASSWORD 'muallim'"
+	@psql -q postgres -tAc "SELECT 1 FROM pg_database WHERE datname='muallim'" | grep -q 1 || \
+		psql -q postgres -c "CREATE DATABASE muallim OWNER muallim"
+	@psql -q postgres -tAc "SELECT 1 FROM pg_database WHERE datname='muallim_test'" | grep -q 1 || \
+		psql -q postgres -c "CREATE DATABASE muallim_test OWNER muallim"
+	@echo "role muallim and databases muallim, muallim_test are ready"
 
 db-up: ## Start Postgres in Docker
 	docker compose up -d postgres
 
 storage-up: ## Start MinIO, and create the bucket
 	docker compose up -d minio minio-bucket
-	@echo "MinIO on :9002, console on :9003 — lms / lms-secret-key"
+	@echo "MinIO on :9002, console on :9003 — muallim / muallim-secret-key"
 
 db-down: ## Stop Postgres
 	docker compose down

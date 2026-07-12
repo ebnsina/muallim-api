@@ -23,9 +23,9 @@ import (
 func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 
-	url := os.Getenv("LMS_TEST_DATABASE_URL")
+	url := os.Getenv("MUALLIM_TEST_DATABASE_URL")
 	if url == "" {
-		t.Skip("LMS_TEST_DATABASE_URL is not set")
+		t.Skip("MUALLIM_TEST_DATABASE_URL is not set")
 	}
 
 	pool, err := pgxpool.New(t.Context(), url)

@@ -1,17 +1,17 @@
 services:
   postgres:
     image: postgres:17-alpine
-    container_name: lms-postgres
+    container_name: muallim-postgres
     environment:
-      POSTGRES_USER: lms
-      POSTGRES_PASSWORD: lms
-      POSTGRES_DB: lms
+      POSTGRES_USER: muallim
+      POSTGRES_PASSWORD: muallim
+      POSTGRES_DB: muallim
     ports:
       - "5432:5432"
     volumes:
-      - lms-pgdata:/var/lib/postgresql/data
+      - muallim-pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U lms -d lms"]
+      test: ["CMD-SHELL", "pg_isready -U muallim -d muallim"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -21,18 +21,18 @@ services:
   # one is a development store that hides the bug you are about to ship.
   minio:
     image: minio/minio:latest
-    container_name: lms-minio
+    container_name: muallim-minio
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: lms
-      MINIO_ROOT_PASSWORD: lms-secret-key
+      MINIO_ROOT_USER: muallim
+      MINIO_ROOT_PASSWORD: muallim-secret-key
     # 9002/9003 rather than the usual 9000/9001: MinIO's default ports are the
     # ones every other project on a laptop has already taken.
     ports:
       - "9002:9000"
       - "9003:9001"
     volumes:
-      - lms-minio:/data
+      - muallim-minio:/data
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
       interval: 5s
@@ -47,11 +47,11 @@ services:
         condition: service_healthy
     entrypoint: >
       /bin/sh -c "
-      mc alias set local http://minio:9000 lms lms-secret-key &&
-      mc mb --ignore-existing local/lms-uploads &&
-      echo 'bucket lms-uploads is ready'
+      mc alias set local http://minio:9000 muallim muallim-secret-key &&
+      mc mb --ignore-existing local/muallim-uploads &&
+      echo 'bucket muallim-uploads is ready'
       "
 
 volumes:
-  lms-pgdata:
-  lms-minio:
+  muallim-pgdata:
+  muallim-minio:

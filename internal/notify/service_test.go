@@ -16,9 +16,9 @@ import (
 
 func testDB(t *testing.T) *database.DB {
 	t.Helper()
-	url := os.Getenv("LMS_TEST_DATABASE_URL")
+	url := os.Getenv("MUALLIM_TEST_DATABASE_URL")
 	if url == "" {
-		t.Skip("LMS_TEST_DATABASE_URL is not set; skipping database tests")
+		t.Skip("MUALLIM_TEST_DATABASE_URL is not set; skipping database tests")
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
 	db, err := database.New(t.Context(), database.Options{URL: url, MaxConns: 4}, log)

@@ -14,7 +14,7 @@ import (
 // fails loudly rather than reporting success for work it did not do.
 func newObjectStore(cfg config.Config, log *slog.Logger) (blob.Store, error) {
 	if !cfg.StorageConfigured() {
-		log.Warn("LMS_S3_ENDPOINT is unset; object deletions will fail. Run `make storage-up` for a local MinIO.")
+		log.Warn("MUALLIM_S3_ENDPOINT is unset; object deletions will fail. Run `make storage-up` for a local MinIO.")
 		return blob.Unconfigured{}, nil
 	}
 

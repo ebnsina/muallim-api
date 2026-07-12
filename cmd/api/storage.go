@@ -14,7 +14,7 @@ import (
 // an upload, and it says so at the moment somebody tries rather than at boot.
 func newObjectStore(cfg config.Config, log *slog.Logger) (blob.Store, error) {
 	if !cfg.StorageConfigured() {
-		log.Warn("LMS_S3_ENDPOINT is unset; assignment uploads will be refused. Run `make storage-up` for a local MinIO.")
+		log.Warn("MUALLIM_S3_ENDPOINT is unset; assignment uploads will be refused. Run `make storage-up` for a local MinIO.")
 		return blob.Unconfigured{}, nil
 	}
 

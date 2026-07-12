@@ -150,52 +150,52 @@ func (c Config) IsProduction() bool { return c.Env == EnvProduction }
 // request that happens to need the value.
 func Load() (Config, error) {
 	cfg := Config{
-		Env:             env("LMS_ENV", EnvDevelopment),
-		Version:         env("LMS_VERSION", "dev"),
-		Addr:            env("LMS_ADDR", ":8080"),
-		ReadTimeout:     duration("LMS_READ_TIMEOUT", 10*time.Second),
-		WriteTimeout:    duration("LMS_WRITE_TIMEOUT", 30*time.Second),
-		IdleTimeout:     duration("LMS_IDLE_TIMEOUT", 120*time.Second),
-		ShutdownTimeout: duration("LMS_SHUTDOWN_TIMEOUT", 20*time.Second),
-		DatabaseURL:     env("LMS_DATABASE_URL", ""),
+		Env:             env("MUALLIM_ENV", EnvDevelopment),
+		Version:         env("MUALLIM_VERSION", "dev"),
+		Addr:            env("MUALLIM_ADDR", ":8080"),
+		ReadTimeout:     duration("MUALLIM_READ_TIMEOUT", 10*time.Second),
+		WriteTimeout:    duration("MUALLIM_WRITE_TIMEOUT", 30*time.Second),
+		IdleTimeout:     duration("MUALLIM_IDLE_TIMEOUT", 120*time.Second),
+		ShutdownTimeout: duration("MUALLIM_SHUTDOWN_TIMEOUT", 20*time.Second),
+		DatabaseURL:     env("MUALLIM_DATABASE_URL", ""),
 		// Empty by default. muallim-web reaches this API same-origin through the edge,
 		// so no browser origin needs granting; one that does is a deliberate act.
-		CORSOrigins: list(env("LMS_CORS_ORIGINS", "")),
+		CORSOrigins: list(env("MUALLIM_CORS_ORIGINS", "")),
 
-		DBMaxConns:           int32(number("LMS_DB_MAX_CONNS", 10)),
-		DBMinConns:           int32(number("LMS_DB_MIN_CONNS", 2)),
-		DBStatementTimeout:   duration("LMS_DB_STATEMENT_TIMEOUT", 5*time.Second),
-		DBSlowQueryThreshold: duration("LMS_DB_SLOW_QUERY_THRESHOLD", 200*time.Millisecond),
-		TenantCacheTTL:       duration("LMS_TENANT_CACHE_TTL", 5*time.Minute),
+		DBMaxConns:           int32(number("MUALLIM_DB_MAX_CONNS", 10)),
+		DBMinConns:           int32(number("MUALLIM_DB_MIN_CONNS", 2)),
+		DBStatementTimeout:   duration("MUALLIM_DB_STATEMENT_TIMEOUT", 5*time.Second),
+		DBSlowQueryThreshold: duration("MUALLIM_DB_SLOW_QUERY_THRESHOLD", 200*time.Millisecond),
+		TenantCacheTTL:       duration("MUALLIM_TENANT_CACHE_TTL", 5*time.Minute),
 
-		JWTSecret: env("LMS_JWT_SECRET", ""),
-		JWTIssuer: env("LMS_JWT_ISSUER", "muallim-api"),
+		JWTSecret: env("MUALLIM_JWT_SECRET", ""),
+		JWTIssuer: env("MUALLIM_JWT_ISSUER", "muallim-api"),
 
-		AuthRateBurst: number("LMS_AUTH_RATE_BURST", 10),
-		AuthRateEvery: duration("LMS_AUTH_RATE_EVERY", 6*time.Second),
+		AuthRateBurst: number("MUALLIM_AUTH_RATE_BURST", 10),
+		AuthRateEvery: duration("MUALLIM_AUTH_RATE_EVERY", 6*time.Second),
 
-		WebBaseURL:   env("LMS_WEB_BASE_URL", "http://localhost:5173"),
-		SMTPHost:     env("LMS_SMTP_HOST", ""),
-		SMTPPort:     number("LMS_SMTP_PORT", 587),
-		SMTPUsername: env("LMS_SMTP_USERNAME", ""),
-		SMTPPassword: env("LMS_SMTP_PASSWORD", ""),
-		MailFrom:     env("LMS_MAIL_FROM", "LMS <no-reply@localhost>"),
-		MailFile:     env("LMS_MAIL_FILE", ""),
+		WebBaseURL:   env("MUALLIM_WEB_BASE_URL", "http://localhost:5173"),
+		SMTPHost:     env("MUALLIM_SMTP_HOST", ""),
+		SMTPPort:     number("MUALLIM_SMTP_PORT", 587),
+		SMTPUsername: env("MUALLIM_SMTP_USERNAME", ""),
+		SMTPPassword: env("MUALLIM_SMTP_PASSWORD", ""),
+		MailFrom:     env("MUALLIM_MAIL_FROM", "Muallim <no-reply@localhost>"),
+		MailFile:     env("MUALLIM_MAIL_FILE", ""),
 
-		StreamCustomer: env("LMS_CLOUDFLARE_STREAM_CUSTOMER", ""),
-		EmbedHosts:     list(env("LMS_EMBED_ALLOWED_HOSTS", "")),
+		StreamCustomer: env("MUALLIM_CLOUDFLARE_STREAM_CUSTOMER", ""),
+		EmbedHosts:     list(env("MUALLIM_EMBED_ALLOWED_HOSTS", "")),
 
-		S3Endpoint:  env("LMS_S3_ENDPOINT", ""),
-		S3Bucket:    env("LMS_S3_BUCKET", ""),
-		S3AccessKey: env("LMS_S3_ACCESS_KEY", ""),
-		S3SecretKey: env("LMS_S3_SECRET_KEY", ""),
-		S3Region:    env("LMS_S3_REGION", "auto"),
-		S3PathStyle: env("LMS_S3_PATH_STYLE", "") == "true",
+		S3Endpoint:  env("MUALLIM_S3_ENDPOINT", ""),
+		S3Bucket:    env("MUALLIM_S3_BUCKET", ""),
+		S3AccessKey: env("MUALLIM_S3_ACCESS_KEY", ""),
+		S3SecretKey: env("MUALLIM_S3_SECRET_KEY", ""),
+		S3Region:    env("MUALLIM_S3_REGION", "auto"),
+		S3PathStyle: env("MUALLIM_S3_PATH_STYLE", "") == "true",
 
-		WorkerMaxWorkers: number("LMS_WORKER_MAX_WORKERS", 10),
+		WorkerMaxWorkers: number("MUALLIM_WORKER_MAX_WORKERS", 10),
 	}
 
-	level, err := logLevel(env("LMS_LOG_LEVEL", "info"))
+	level, err := logLevel(env("MUALLIM_LOG_LEVEL", "info"))
 	if err != nil {
 		return Config{}, err
 	}
@@ -213,24 +213,24 @@ func (c Config) validate() error {
 	switch c.Env {
 	case EnvDevelopment, EnvStaging, EnvProduction:
 	default:
-		errs = append(errs, fmt.Errorf("config: LMS_ENV %q must be one of %s, %s, %s",
+		errs = append(errs, fmt.Errorf("config: MUALLIM_ENV %q must be one of %s, %s, %s",
 			c.Env, EnvDevelopment, EnvStaging, EnvProduction))
 	}
 
 	if c.Addr == "" {
-		errs = append(errs, errors.New("config: LMS_ADDR must not be empty"))
+		errs = append(errs, errors.New("config: MUALLIM_ADDR must not be empty"))
 	}
 
 	// A deployed environment without a database is never intentional. Locally we
 	// allow it so the server can boot before any migration exists.
 	if c.DatabaseURL == "" && c.Env != EnvDevelopment {
-		errs = append(errs, errors.New("config: LMS_DATABASE_URL is required outside development"))
+		errs = append(errs, errors.New("config: MUALLIM_DATABASE_URL is required outside development"))
 	}
 
 	// The API sends Access-Control-Allow-Credentials, and a browser rejects that
 	// alongside a wildcard origin. Failing here beats debugging it in a browser.
 	if slices.Contains(c.CORSOrigins, "*") {
-		errs = append(errs, errors.New(`config: LMS_CORS_ORIGINS cannot contain "*" because the API allows credentials; list exact origins`))
+		errs = append(errs, errors.New(`config: MUALLIM_CORS_ORIGINS cannot contain "*" because the API allows credentials; list exact origins`))
 	}
 
 	// An allowlist is a list of hosts, and there is no host called "*". Nothing
@@ -250,44 +250,44 @@ func (c Config) validate() error {
 	}
 	if configured != 0 && configured != 4 {
 		errs = append(errs, errors.New(
-			"config: LMS_S3_ENDPOINT, LMS_S3_BUCKET, LMS_S3_ACCESS_KEY and LMS_S3_SECRET_KEY "+
+			"config: MUALLIM_S3_ENDPOINT, MUALLIM_S3_BUCKET, MUALLIM_S3_ACCESS_KEY and MUALLIM_S3_SECRET_KEY "+
 				"must be set together, or not at all"))
 	}
 
 	if slices.Contains(c.EmbedHosts, "*") {
-		errs = append(errs, errors.New(`config: LMS_EMBED_ALLOWED_HOSTS cannot contain "*"; list exact hosts, e.g. fast.wistia.net`))
+		errs = append(errs, errors.New(`config: MUALLIM_EMBED_ALLOWED_HOSTS cannot contain "*"; list exact hosts, e.g. fast.wistia.net`))
 	}
 
 	// A signing secret is not optional anywhere it will actually sign anything.
 	// Refusing a short one at startup beats discovering it in a forged token.
 	if c.JWTSecret != "" && len(c.JWTSecret) < MinJWTSecretLength {
-		errs = append(errs, fmt.Errorf("config: LMS_JWT_SECRET must be at least %d bytes, got %d",
+		errs = append(errs, fmt.Errorf("config: MUALLIM_JWT_SECRET must be at least %d bytes, got %d",
 			MinJWTSecretLength, len(c.JWTSecret)))
 	}
 	if c.JWTSecret == "" && c.Env != EnvDevelopment {
-		errs = append(errs, errors.New("config: LMS_JWT_SECRET is required outside development"))
+		errs = append(errs, errors.New("config: MUALLIM_JWT_SECRET is required outside development"))
 	}
 
 	// Every mailed link points at the web client. A relative or malformed base URL
 	// produces a link nobody can click, discovered by a user who cannot sign in.
 	if u, err := url.Parse(c.WebBaseURL); err != nil || u.Scheme == "" || u.Host == "" {
-		errs = append(errs, fmt.Errorf("config: LMS_WEB_BASE_URL %q must be absolute, e.g. https://app.example.com", c.WebBaseURL))
+		errs = append(errs, fmt.Errorf("config: MUALLIM_WEB_BASE_URL %q must be absolute, e.g. https://app.example.com", c.WebBaseURL))
 	}
 
 	// Without SMTP the process logs messages rather than sending them, and those
 	// messages carry reset tokens. That is a development affordance, and a
 	// credential-disclosure bug anywhere a log is shipped somewhere.
 	if c.SMTPHost == "" && c.MailFile == "" && c.Env != EnvDevelopment {
-		errs = append(errs, errors.New("config: LMS_SMTP_HOST is required outside development; without it, reset tokens are written to the log"))
+		errs = append(errs, errors.New("config: MUALLIM_SMTP_HOST is required outside development; without it, reset tokens are written to the log"))
 	}
 
 	// The file sink writes single-use credentials to disk in plaintext. It exists
 	// for end-to-end tests, and refusing it here is what keeps it there.
 	if c.MailFile != "" && c.Env != EnvDevelopment {
-		errs = append(errs, errors.New("config: LMS_MAIL_FILE writes credentials to disk and is refused outside development"))
+		errs = append(errs, errors.New("config: MUALLIM_MAIL_FILE writes credentials to disk and is refused outside development"))
 	}
 	if c.SMTPHost != "" && c.MailFrom == "" {
-		errs = append(errs, errors.New("config: LMS_MAIL_FROM is required when LMS_SMTP_HOST is set"))
+		errs = append(errs, errors.New("config: MUALLIM_MAIL_FROM is required when MUALLIM_SMTP_HOST is set"))
 	}
 
 	return errors.Join(errs...)
@@ -356,6 +356,6 @@ func logLevel(s string) (slog.Level, error) {
 	case "error":
 		return slog.LevelError, nil
 	default:
-		return 0, fmt.Errorf("config: LMS_LOG_LEVEL %q must be one of debug, info, warn, error", s)
+		return 0, fmt.Errorf("config: MUALLIM_LOG_LEVEL %q must be one of debug, info, warn, error", s)
 	}
 }

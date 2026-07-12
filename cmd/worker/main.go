@@ -58,7 +58,7 @@ func run() error {
 	log := logging.New(os.Stdout, cfg.LogLevel, cfg.IsProduction())
 
 	if cfg.DatabaseURL == "" {
-		return errors.New("LMS_DATABASE_URL is required")
+		return errors.New("MUALLIM_DATABASE_URL is required")
 	}
 
 	// Cancelled on SIGINT/SIGTERM, which begins the graceful drain: River stops
@@ -250,7 +250,7 @@ func run() error {
 // reachable from a deployed environment.
 func newSender(cfg config.Config, log *slog.Logger) (comms.Sender, error) {
 	if cfg.MailFile != "" {
-		log.Warn("LMS_MAIL_FILE is set; email will be written to disk in plaintext, not sent",
+		log.Warn("MUALLIM_MAIL_FILE is set; email will be written to disk in plaintext, not sent",
 			slog.String("path", cfg.MailFile))
 		return mailer.NewFile(cfg.MailFile)
 	}

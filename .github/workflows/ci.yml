@@ -38,9 +38,9 @@ jobs:
       minio:
         image: bitnami/minio:latest
         env:
-          MINIO_ROOT_USER: lms
-          MINIO_ROOT_PASSWORD: lms-secret-key
-          MINIO_DEFAULT_BUCKETS: lms-uploads
+          MINIO_ROOT_USER: muallim
+          MINIO_ROOT_PASSWORD: muallim-secret-key
+          MINIO_DEFAULT_BUCKETS: muallim-uploads
         ports: ['9002:9000']
 
     steps:
@@ -55,22 +55,22 @@ jobs:
       # level security, so every tenant-isolation test would pass against a
       # database that enforces nothing — the most expensive kind of green build.
       # The service container's own `postgres` role owns nothing here.
-      - name: Create the lms role and databases
+      - name: Create the muallim role and databases
         env:
           PGPASSWORD: postgres
         run: |
-          psql -h localhost -U postgres -c "CREATE ROLE lms LOGIN PASSWORD 'lms' NOSUPERUSER NOBYPASSRLS"
-          psql -h localhost -U postgres -c "CREATE DATABASE lms OWNER lms"
-          psql -h localhost -U postgres -c "CREATE DATABASE lms_test OWNER lms"
+          psql -h localhost -U postgres -c "CREATE ROLE muallim LOGIN PASSWORD 'muallim' NOSUPERUSER NOBYPASSRLS"
+          psql -h localhost -U postgres -c "CREATE DATABASE muallim OWNER muallim"
+          psql -h localhost -U postgres -c "CREATE DATABASE muallim_test OWNER muallim"
 
-      - name: Assert the lms role cannot bypass row level security
+      - name: Assert the muallim role cannot bypass row level security
         env:
-          PGPASSWORD: lms
+          PGPASSWORD: muallim
         run: |
-          privileged=$(psql -h localhost -U lms -d lms -tAc \
-            "SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = 'lms'")
+          privileged=$(psql -h localhost -U muallim -d muallim -tAc \
+            "SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = 'muallim'")
           if [ "$privileged" != "f" ]; then
-            echo "::error::the lms role can bypass RLS; tenant isolation would be untested"
+            echo "::error::the muallim role can bypass RLS; tenant isolation would be untested"
             exit 1
           fi
 
