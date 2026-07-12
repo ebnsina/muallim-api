@@ -171,7 +171,85 @@ type MarkedSubmissionOutput struct {
 	}
 }
 
+// DeadlineView is one piece of work a learner still owes.
+//
+// `overdue` is computed here and sent, rather than left to a client's clock: a
+// browser's idea of "now" is whatever its owner set it to, and a deadline is not
+// a thing to let the reader decide about.
+type DeadlineView struct {
+	AssignmentID string `json:"assignment_id" format:"uuid"`
+	LessonID     string `json:"lesson_id" format:"uuid"`
+	Title        string `json:"title"`
+
+	CourseSlug  string `json:"course_slug"`
+	CourseTitle string `json:"course_title"`
+
+	DueAt     time.Time `json:"due_at"`
+	Overdue   bool      `json:"overdue"`
+	AllowLate bool      `json:"allow_late"`
+}
+
+// ListDeadlinesOutput is what a learner owes, soonest first.
+type ListDeadlinesOutput struct {
+	CacheControl string `header:"Cache-Control"`
+	Body         struct {
+		Deadlines []DeadlineView `json:"deadlines"`
+	}
+}
+
+// DeadlineWindow is how far back and forward the learner's list looks.
+//
+// Back a week, because a deadline missed on Monday is the one they most need on
+// Tuesday. Forward six weeks, because a date further off than that is not a thing
+// anybody does anything about today.
+const (
+	deadlinesLookBack   = 7 * 24 * time.Hour
+	deadlinesLookAhead  = 42 * 24 * time.Hour
+	deadlinesCacheEntry = "private, no-store"
+)
+
 func registerAssignments(api huma.API, svc *assign.Service, learning *enroll.Service) {
+	huma.Register(api, huma.Operation{
+		OperationID: "list-my-deadlines",
+		Method:      http.MethodGet,
+		Path:        "/v1/me/deadlines",
+		Summary:     "What I still owe, and when",
+		Description: "Unsubmitted assignments with a due date, across the courses I am " +
+			"enrolled on, from a week ago to six weeks out. One query, soonest first.",
+		Tags:     []string{"Learning"},
+		Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, in *struct {
+		Limit int `query:"limit" minimum:"1" maximum:"20" default:"10"`
+	}) (*ListDeadlinesOutput, error) {
+		p, err := requirePrincipal(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		now := time.Now()
+		deadlines, err := svc.Deadlines(ctx, p.TenantID, p.UserID,
+			now.Add(-deadlinesLookBack), now.Add(deadlinesLookAhead), in.Limit)
+		if err != nil {
+			return nil, assignError(err)
+		}
+
+		out := &ListDeadlinesOutput{CacheControl: deadlinesCacheEntry}
+		out.Body.Deadlines = make([]DeadlineView, 0, len(deadlines))
+		for _, d := range deadlines {
+			out.Body.Deadlines = append(out.Body.Deadlines, DeadlineView{
+				AssignmentID: d.AssignmentID.String(),
+				LessonID:     d.LessonID.String(),
+				Title:        d.Title,
+				CourseSlug:   d.CourseSlug,
+				CourseTitle:  d.CourseTitle,
+				DueAt:        d.DueAt,
+				Overdue:      d.Overdue(now),
+				AllowLate:    d.AllowLate,
+			})
+		}
+		return out, nil
+	})
+
 	huma.Register(api, huma.Operation{
 		OperationID: "get-assignment",
 		Method:      http.MethodGet,

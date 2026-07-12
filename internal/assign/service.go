@@ -39,6 +39,8 @@ type Repository interface {
 	DeleteFile(ctx context.Context, tx pgx.Tx, tenantID, fileID uuid.UUID) (string, error)
 
 	ListSubmissions(ctx context.Context, tx pgx.Tx, tenantID, assignmentID uuid.UUID, onlyAwaiting bool, limit int) ([]Marking, error)
+
+	Deadlines(ctx context.Context, tx pgx.Tx, tenantID, userID uuid.UUID, from, until time.Time, limit int) ([]Deadline, error)
 }
 
 // AuditEntry is one line of the audit trail.
@@ -771,4 +773,29 @@ func (s *Service) DownloadURL(ctx context.Context, tenantID, fileID, viewerID uu
 		return "", err
 	}
 	return url, nil
+}
+
+/*
+Deadlines lists what a learner still owes, from a moment until a horizon.
+
+`from` is deliberately the caller's, not `now`: a deadline missed yesterday is the
+one a learner most needs to see, so the dashboard asks from a week back and the
+overdue ones come with it. Nothing here decides how they are drawn — `Overdue`
+answers that from the same clock the caller is already holding.
+*/
+func (s *Service) Deadlines(ctx context.Context, tenantID, userID uuid.UUID, from, until time.Time, limit int) ([]Deadline, error) {
+	if limit <= 0 || limit > MaxDeadlines {
+		limit = MaxDeadlines
+	}
+
+	var deadlines []Deadline
+	err := s.db.WithTenantReadOnly(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		deadlines, err = s.repo.Deadlines(ctx, tx, tenantID, userID, from, until, limit)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return deadlines, nil
 }

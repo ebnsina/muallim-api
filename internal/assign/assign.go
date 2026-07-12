@@ -170,6 +170,35 @@ type File struct {
 	UploadedAt  time.Time
 }
 
+/*
+Deadline is one piece of work a learner still owes, and when it is owed.
+
+It is not an Assignment: an assignment is a thing hanging off a lesson, and a
+deadline is a thing hanging over a person. It carries the course and lesson it
+points back to, because a date with no link is a date nobody can act on.
+*/
+type Deadline struct {
+	AssignmentID uuid.UUID
+	LessonID     uuid.UUID
+	Title        string
+
+	CourseSlug  string
+	CourseTitle string
+
+	// Never nil: an assignment with no due date is not a deadline.
+	DueAt time.Time
+
+	AllowLate bool
+}
+
+// Overdue reports whether the moment has passed. Computed on read rather than
+// stored, because the answer changes without anything being written.
+func (d Deadline) Overdue(now time.Time) bool { return now.After(d.DueAt) }
+
+// MaxDeadlines bounds the learner's upcoming list. A month of work is a list; a
+// year of it is a wall.
+const MaxDeadlines = 50
+
 // Author identifies who did something, for the audit trail.
 type Author struct {
 	UserID    uuid.UUID

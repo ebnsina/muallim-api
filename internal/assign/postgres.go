@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -372,6 +373,52 @@ func (r *PostgresRepository) DeleteFile(ctx context.Context, tx pgx.Tx, tenantID
 		return "", fmt.Errorf("assign: delete file: %w", err)
 	}
 	return key, nil
+}
+
+/*
+Deadlines returns the work a learner still owes, soonest first.
+
+One query, not one per course: the enrolment, the lesson's course, and the
+learner's own submission all fall out of the same join, and a loop over
+enrolments asking "anything due here?" is the N+1 this codebase does not write.
+
+`NOT EXISTS` over the learner's own submission is what makes it *owed*: handing
+it in takes it off the list, and a draft with files attached is not handing it in.
+*/
+func (r *PostgresRepository) Deadlines(ctx context.Context, tx pgx.Tx, tenantID, userID uuid.UUID, from, until time.Time, limit int) ([]Deadline, error) {
+	rows, err := tx.Query(ctx,
+		`SELECT a.id, a.lesson_id, a.title, c.slug, c.title, a.due_at, a.allow_late
+		 FROM assignments a
+		 JOIN lessons l ON l.id = a.lesson_id AND l.tenant_id = a.tenant_id
+		 JOIN topics  t ON t.id = l.topic_id  AND t.tenant_id = a.tenant_id
+		 JOIN courses c ON c.id = t.course_id AND c.tenant_id = a.tenant_id
+		 JOIN enrolments e ON e.course_id = c.id AND e.tenant_id = a.tenant_id
+		      AND e.user_id = $2 AND e.status = 'active'
+		 WHERE a.tenant_id = $1
+		   AND a.due_at BETWEEN $3 AND $4
+		   AND c.status = 'published'
+		   AND NOT EXISTS (
+		       SELECT 1 FROM assignment_submissions s
+		       WHERE s.tenant_id = a.tenant_id AND s.assignment_id = a.id
+		         AND s.user_id = $2 AND s.status <> 'draft')
+		 ORDER BY a.due_at, a.id
+		 LIMIT $5`,
+		tenantID, userID, from, until, limit)
+	if err != nil {
+		return nil, fmt.Errorf("assign: deadlines: %w", err)
+	}
+	defer rows.Close()
+
+	var deadlines []Deadline
+	for rows.Next() {
+		var d Deadline
+		if err := rows.Scan(&d.AssignmentID, &d.LessonID, &d.Title,
+			&d.CourseSlug, &d.CourseTitle, &d.DueAt, &d.AllowLate); err != nil {
+			return nil, fmt.Errorf("assign: scan deadline: %w", err)
+		}
+		deadlines = append(deadlines, d)
+	}
+	return deadlines, rows.Err()
 }
 
 // ListSubmissions returns what has been handed in, for the person marking it.

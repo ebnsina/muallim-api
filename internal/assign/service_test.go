@@ -996,3 +996,60 @@ func (a certifyAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUI
 func newIssuer(db *database.DB) issuer {
 	return issuer{certify.NewService(db, certify.NewPostgresRepository(), certifyAuditor{audit.NewRecorder()})}
 }
+
+// A deadline is a thing a learner owes: enrolled, with a date, not handed in.
+func TestDeadlinesAreWhatIsOwed(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+	due := time.Now().Add(48 * time.Hour)
+	f.assignment(t, assign.NewAssignment{DueAt: &due})
+
+	from, until := time.Now().Add(-7*24*time.Hour), time.Now().Add(42*24*time.Hour)
+
+	// Not enrolled, so nothing is owed — the assignment exists, but not for them.
+	owed, err := f.svc.Deadlines(t.Context(), f.tenant, f.learner, from, until, 10)
+	if err != nil {
+		t.Fatalf("deadlines: %v", err)
+	}
+	if len(owed) != 0 {
+		t.Fatalf("a stranger to the course owes nothing, got %d", len(owed))
+	}
+
+	f.enrol(t)
+
+	owed, err = f.svc.Deadlines(t.Context(), f.tenant, f.learner, from, until, 10)
+	if err != nil {
+		t.Fatalf("deadlines: %v", err)
+	}
+	if len(owed) != 1 {
+		t.Fatalf("want the one assignment, got %d", len(owed))
+	}
+	if owed[0].CourseSlug != f.course || owed[0].LessonID != f.lesson {
+		t.Errorf("the deadline points at the wrong place: %+v", owed[0])
+	}
+	if owed[0].Overdue(time.Now()) {
+		t.Error("a deadline two days out is not overdue")
+	}
+	if !owed[0].Overdue(due.Add(time.Hour)) {
+		t.Error("an hour after the deadline, it is overdue")
+	}
+}
+
+// An assignment with no deadline is not a deadline, whoever is enrolled.
+func TestNoDueDateIsNoDeadline(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+	f.enrol(t)
+	f.assignment(t, assign.NewAssignment{})
+
+	owed, err := f.svc.Deadlines(t.Context(), f.tenant, f.learner,
+		time.Now().Add(-7*24*time.Hour), time.Now().Add(42*24*time.Hour), 10)
+	if err != nil {
+		t.Fatalf("deadlines: %v", err)
+	}
+	if len(owed) != 0 {
+		t.Fatalf("an assignment with no due date owes no date, got %d", len(owed))
+	}
+}
