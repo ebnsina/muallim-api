@@ -30,8 +30,14 @@ func NewPostgresRepository() *PostgresRepository { return &PostgresRepository{} 
 // plan is unchanged when nobody searches or filters. Courses per workspace are
 // few, so the ILIKE is a filter on an already-small, index-ordered scan, not a
 // reason to reach for a trigram index.
+// The author is carried as an id and resolved to a name afterwards, in one
+// statement for the whole page. Joining `users` here reads like the cheaper thing
+// — a primary-key lookup per row — and is not: that table's RLS policy pulls
+// memberships and invitations into *this* plan, and the listing stops being the
+// clean index seek a test pins it to. See instructorNames.
 const listPublishedCoursesSQL = `
-	SELECT id, slug, title, summary, difficulty, status, published_at, drip_mode, created_at, updated_at
+	SELECT id, slug, title, summary, difficulty, status, published_at, drip_mode,
+	       created_by, created_at, updated_at
 	FROM courses
 	WHERE tenant_id = $1
 	  AND status = 'published'
@@ -49,7 +55,8 @@ const listPublishedCoursesSQL = `
 // anonymous catalog request would pay for a feature only authors use. Each
 // statement gets an index that covers its filter and its sort.
 const listAllCoursesSQL = `
-	SELECT id, slug, title, summary, difficulty, status, published_at, drip_mode, created_at, updated_at
+	SELECT id, slug, title, summary, difficulty, status, published_at, drip_mode,
+	       created_by, created_at, updated_at
 	FROM courses
 	WHERE tenant_id = $1
 	  AND ($2::timestamptz IS NULL OR (created_at, id) < ($2, $3))
@@ -100,7 +107,7 @@ func (r *PostgresRepository) ListCourses(ctx context.Context, tx pgx.Tx, tenantI
 	courses, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Course, error) {
 		var c Course
 		err := row.Scan(&c.ID, &c.Slug, &c.Title, &c.Summary, &c.Difficulty,
-			&c.Status, &c.PublishedAt, &c.DripMode, &c.CreatedAt, &c.UpdatedAt)
+			&c.Status, &c.PublishedAt, &c.DripMode, &c.CreatedBy, &c.CreatedAt, &c.UpdatedAt)
 		return c, err
 	})
 	if err != nil {
@@ -124,8 +131,61 @@ func (r *PostgresRepository) ListCourses(ctx context.Context, tx pgx.Tx, tenantI
 		for i := range courses {
 			courses[i].LessonCount = counts[courses[i].ID]
 		}
+
+		names, err := r.instructorNames(ctx, tx, courses)
+		if err != nil {
+			return nil, err
+		}
+		for i := range courses {
+			if courses[i].CreatedBy != nil {
+				courses[i].InstructorName = names[*courses[i].CreatedBy]
+			}
+		}
 	}
 	return courses, nil
+}
+
+// instructorNames resolves the page's authors in one statement.
+//
+// Distinct ids, because a workspace's courses are written by a handful of people
+// and a page of twenty is usually two or three names. An author since erased has
+// no row, and the caller reads the missing key as the empty string — which is what
+// the course page already shows for one.
+func (r *PostgresRepository) instructorNames(ctx context.Context, tx pgx.Tx, courses []Course) (map[uuid.UUID]string, error) {
+	seen := make(map[uuid.UUID]struct{}, len(courses))
+	ids := make([]uuid.UUID, 0, len(courses))
+	for _, c := range courses {
+		if c.CreatedBy == nil {
+			continue
+		}
+		if _, dup := seen[*c.CreatedBy]; dup {
+			continue
+		}
+		seen[*c.CreatedBy] = struct{}{}
+		ids = append(ids, *c.CreatedBy)
+	}
+	if len(ids) == 0 {
+		return map[uuid.UUID]string{}, nil
+	}
+
+	rows, err := tx.Query(ctx, `SELECT id, name FROM users WHERE id = ANY($1)`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("catalog: instructor names: %w", err)
+	}
+	defer rows.Close()
+
+	names := make(map[uuid.UUID]string, len(ids))
+	for rows.Next() {
+		var (
+			id   uuid.UUID
+			name string
+		)
+		if err := rows.Scan(&id, &name); err != nil {
+			return nil, fmt.Errorf("catalog: scan instructor name: %w", err)
+		}
+		names[id] = name
+	}
+	return names, rows.Err()
 }
 
 // lessonCountsByCourseSQL counts the lessons under a set of courses in one pass.

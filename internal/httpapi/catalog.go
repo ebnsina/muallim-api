@@ -11,6 +11,7 @@ import (
 
 	"github.com/ebnsina/muallim-api/internal/auth"
 	"github.com/ebnsina/muallim-api/internal/catalog"
+	"github.com/ebnsina/muallim-api/internal/enroll"
 	"github.com/ebnsina/muallim-api/internal/tenant"
 )
 
@@ -47,6 +48,20 @@ type CourseSummary struct {
 	// LessonCount is how many lessons the course holds, for a listing that wants to
 	// say so without loading each curriculum.
 	LessonCount int `json:"lesson_count"`
+
+	// Instructor is the author's display name, empty for a course drafted before the
+	// column existed or by an account since erased.
+	Instructor string `json:"instructor"`
+
+	// LearnerCount counts the active and completed enrolments — the people studying
+	// it and the people who finished, which is what "350,392 learners" means.
+	LearnerCount int `json:"learner_count,omitempty"`
+
+	// The rating, and how many people gave it. Absent means *unrated* — nobody has
+	// reviewed it, or nobody asked. A client must never draw an average with no
+	// reviews behind it, so it is never sent as a bare nought.
+	RatingAverage float64 `json:"rating_average,omitempty"`
+	RatingCount   int     `json:"rating_count,omitempty"`
 }
 
 // CourseDetail is a course as it appears on its own page: the summary, plus the
@@ -59,13 +74,9 @@ type CourseDetail struct {
 	Requirements []string `json:"requirements"`
 	Language     string   `json:"language"`
 
-	// Instructor is the author's display name, empty for a course drafted before
-	// the column existed or by an account since erased.
-	Instructor string `json:"instructor"`
-
-	// LearnerCount counts the active and completed enrolments — the people studying
-	// it and the people who finished, which is what "350,392 learners" means.
-	LearnerCount int `json:"learner_count"`
+	// The instructor, the learner count, and the rating are on the summary: a
+	// catalogue card wants them as much as a course page does, and a field that
+	// exists twice is a field that will disagree with itself.
 
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -119,13 +130,17 @@ type CurriculumOutput struct {
 	}
 }
 
-// learnerCounter counts a course's enrolled and finished learners. Declared here,
-// by its consumer: the course page shows the number, and enrol owns it.
-type learnerCounter interface {
-	EnrolmentCount(ctx context.Context, tenantID uuid.UUID, slug string) (int, error)
+// courseFacts is what a catalogue knows about a course that the catalogue does not
+// own: how many people are on it, and what they made of it. Declared here by its
+// consumer; `enroll` holds both the enrolments and the reviews.
+//
+// Batched by id, because the listing draws twenty cards and a query per card is
+// the N+1 this codebase does not write.
+type courseFacts interface {
+	Facts(ctx context.Context, tenantID uuid.UUID, courseIDs []uuid.UUID) (map[uuid.UUID]enroll.CourseFacts, error)
 }
 
-func registerCatalog(api huma.API, svc *catalog.Service, learners learnerCounter) {
+func registerCatalog(api huma.API, svc *catalog.Service, facts courseFacts) {
 	huma.Register(api, huma.Operation{
 		OperationID: "list-courses",
 		Method:      http.MethodGet,
@@ -152,10 +167,15 @@ func registerCatalog(api huma.API, svc *catalog.Service, learners learnerCounter
 			return nil, catalogError(err)
 		}
 
+		known, err := factsFor(ctx, facts, page.Courses)
+		if err != nil {
+			return nil, catalogError(err)
+		}
+
 		out := &ListCoursesOutput{CacheControl: catalogCacheControl}
 		out.Body.Courses = make([]CourseSummary, 0, len(page.Courses))
 		for _, c := range page.Courses {
-			out.Body.Courses = append(out.Body.Courses, courseSummary(c))
+			out.Body.Courses = append(out.Body.Courses, courseSummary(c, known[c.ID]))
 		}
 		out.Body.NextCursor = page.NextCursor
 		out.Body.HasMore = page.HasMore
@@ -192,11 +212,18 @@ func registerCatalog(api huma.API, svc *catalog.Service, learners learnerCounter
 			return nil, catalogError(err)
 		}
 
+		// An author's own listing gets the facts too: "how many are on it, what do
+		// they think of it" is the first thing anybody asks about a course they wrote.
+		known, err := factsFor(ctx, facts, page.Courses)
+		if err != nil {
+			return nil, catalogError(err)
+		}
+
 		// Drafts must never reach a shared cache, whoever asked for them.
 		out := &ListCoursesOutput{CacheControl: draftCacheControl}
 		out.Body.Courses = make([]CourseSummary, 0, len(page.Courses))
 		for _, c := range page.Courses {
-			out.Body.Courses = append(out.Body.Courses, courseSummary(c))
+			out.Body.Courses = append(out.Body.Courses, courseSummary(c, known[c.ID]))
 		}
 		out.Body.NextCursor = page.NextCursor
 		out.Body.HasMore = page.HasMore
@@ -234,18 +261,19 @@ func registerCatalog(api huma.API, svc *catalog.Service, learners learnerCounter
 			cacheControl = draftCacheControl
 		}
 
-		// One more query, not one per lesson. A draft has nobody enrolled and nobody
-		// to show a count to, so it does not pay for one.
-		var learnerCount int
+		// One more query, not one per lesson. A draft has nobody enrolled, nobody who
+		// has reviewed it, and nobody to show either to, so it does not pay for one.
+		var known enroll.CourseFacts
 		if curriculum.Course.Status == catalog.StatusPublished {
-			learnerCount, err = learners.EnrolmentCount(ctx, tenant.ID(ctx), in.Slug)
+			page, err := factsFor(ctx, facts, []catalog.Course{curriculum.Course})
 			if err != nil {
 				return nil, catalogError(err)
 			}
+			known = page[curriculum.Course.ID]
 		}
 
 		out := &CurriculumOutput{CacheControl: cacheControl}
-		out.Body.Course = courseDetail(curriculum.Course, learnerCount)
+		out.Body.Course = courseDetail(curriculum.Course, known)
 		out.Body.Topics = make([]TopicView, 0, len(curriculum.Topics))
 		for _, t := range curriculum.Topics {
 			lessons := make([]LessonView, 0, len(t.Lessons))
@@ -333,7 +361,7 @@ func registerCourseCopy(api huma.API, svc *catalog.Service) {
 		// The learner count is not this endpoint's business, and an author editing
 		// copy has not changed it. Zero here rather than a query nobody asked for.
 		out := &UpdateCourseOutput{}
-		out.Body.Course = courseDetail(course, 0)
+		out.Body.Course = courseDetail(course, enroll.CourseFacts{})
 		return out, nil
 	})
 }
@@ -382,14 +410,14 @@ func registerCatalogWrites(api huma.API, svc *catalog.Service) {
 		}
 
 		out := &CreateCourseOutput{}
-		out.Body.Course = courseSummary(course)
+		out.Body.Course = courseSummary(course, enroll.CourseFacts{})
 		return out, nil
 	})
 }
 
 // courseDetail maps a course to its page view. The slices are never nil: `[]` and
 // `null` are the same emptiness to a client that has to branch on it anyway.
-func courseDetail(c catalog.Course, learnerCount int) CourseDetail {
+func courseDetail(c catalog.Course, f enroll.CourseFacts) CourseDetail {
 	objectives, requirements := c.Objectives, c.Requirements
 	if objectives == nil {
 		objectives = []string{}
@@ -399,28 +427,54 @@ func courseDetail(c catalog.Course, learnerCount int) CourseDetail {
 	}
 
 	return CourseDetail{
-		CourseSummary: courseSummary(c),
+		CourseSummary: courseSummary(c, f),
 		Description:   c.Description,
 		Objectives:    objectives,
 		Requirements:  requirements,
 		Language:      c.Language,
-		Instructor:    c.InstructorName,
-		LearnerCount:  learnerCount,
 		UpdatedAt:     c.UpdatedAt,
 	}
 }
 
-func courseSummary(c catalog.Course) CourseSummary {
+/*
+factsFor loads the learner counts and ratings for a page of courses.
+
+One call for the page, not one per card — and the map it returns reads a missing
+course as the zero value, which says "nobody enrolled, nobody reviewed". That is
+the truth for a course nobody has touched, and it is why the caller never has to
+ask whether a course is in the map.
+*/
+func factsFor(ctx context.Context, facts courseFacts, courses []catalog.Course) (map[uuid.UUID]enroll.CourseFacts, error) {
+	if len(courses) == 0 {
+		return map[uuid.UUID]enroll.CourseFacts{}, nil
+	}
+
+	ids := make([]uuid.UUID, len(courses))
+	for i, c := range courses {
+		ids[i] = c.ID
+	}
+	return facts.Facts(ctx, tenant.ID(ctx), ids)
+}
+
+// courseSummary maps a course, and whatever is known about it from outside the
+// catalogue. A zero `f` is a course nobody asked the facts for: the fields are
+// omitted rather than sent as noughts, so a write's echo never claims a rated
+// course is unrated.
+func courseSummary(c catalog.Course, f enroll.CourseFacts) CourseSummary {
 	return CourseSummary{
-		ID:          c.ID.String(),
-		Slug:        c.Slug,
-		Title:       c.Title,
-		Summary:     c.Summary,
-		Difficulty:  c.Difficulty,
-		Status:      c.Status,
-		PublishedAt: c.PublishedAt,
-		DripMode:    c.DripMode,
-		LessonCount: c.LessonCount,
+		ID:            c.ID.String(),
+		Slug:          c.Slug,
+		Title:         c.Title,
+		Summary:       c.Summary,
+		Difficulty:    c.Difficulty,
+		Status:        c.Status,
+		PublishedAt:   c.PublishedAt,
+		DripMode:      c.DripMode,
+		LessonCount:   c.LessonCount,
+		Instructor:    c.InstructorName,
+		LearnerCount:  f.Learners,
+		RatingAverage: f.RatingAverage,
+		RatingCount:   f.RatingCount,
 	}
 }
 

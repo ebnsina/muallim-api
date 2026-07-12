@@ -388,6 +388,59 @@ func (r *PostgresRepository) CountEnrolments(ctx context.Context, tx pgx.Tx, ten
 	return n, nil
 }
 
+/*
+CourseFacts counts the learners and the reviews for a page of courses at once.
+
+Two aggregates in one statement, both keyed by course, both index-backed: the
+enrolment count walks enrolments_course_idx and the rating walks
+course_reviews_one_per_learner_idx. A course nobody has enrolled on or reviewed
+simply has no row here, and the caller reads a missing key as the zero — which is
+"no learners, unrated", and is the truth.
+
+The `= ANY($2)` is the whole point. The catalogue draws twenty of these on a page
+and a count per card is the N+1 this codebase does not write.
+*/
+const courseFactsSQL = `
+	SELECT c.id,
+	       coalesce(e.learners, 0),
+	       coalesce(r.average, 0),
+	       coalesce(r.reviews, 0)
+	FROM courses c
+	LEFT JOIN LATERAL (
+	    SELECT count(*) AS learners
+	    FROM enrolments e
+	    WHERE e.tenant_id = c.tenant_id AND e.course_id = c.id
+	      AND e.status IN ('active', 'completed')
+	) e ON true
+	LEFT JOIN LATERAL (
+	    SELECT avg(rating)::float8 AS average, count(*) AS reviews
+	    FROM course_reviews rv
+	    WHERE rv.tenant_id = c.tenant_id AND rv.course_id = c.id
+	) r ON true
+	WHERE c.tenant_id = $1 AND c.id = ANY($2)`
+
+// CourseFacts returns, for each course id given, its learner count and its rating.
+func (r *PostgresRepository) CourseFacts(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, courseIDs []uuid.UUID) (map[uuid.UUID]CourseFacts, error) {
+	rows, err := tx.Query(ctx, courseFactsSQL, tenantID, courseIDs)
+	if err != nil {
+		return nil, fmt.Errorf("enroll: course facts: %w", err)
+	}
+	defer rows.Close()
+
+	facts := make(map[uuid.UUID]CourseFacts, len(courseIDs))
+	for rows.Next() {
+		var (
+			id uuid.UUID
+			f  CourseFacts
+		)
+		if err := rows.Scan(&id, &f.Learners, &f.RatingAverage, &f.RatingCount); err != nil {
+			return nil, fmt.Errorf("enroll: scan course facts: %w", err)
+		}
+		facts[id] = f
+	}
+	return facts, rows.Err()
+}
+
 const upsertReviewSQL = `
 	INSERT INTO course_reviews (tenant_id, course_id, user_id, rating, body)
 	VALUES ($1, $2, $3, $4, $5)

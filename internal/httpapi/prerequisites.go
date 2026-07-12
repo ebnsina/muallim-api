@@ -8,6 +8,7 @@ import (
 
 	"github.com/ebnsina/muallim-api/internal/auth"
 	"github.com/ebnsina/muallim-api/internal/catalog"
+	"github.com/ebnsina/muallim-api/internal/enroll"
 	"github.com/ebnsina/muallim-api/internal/tenant"
 )
 
@@ -51,7 +52,7 @@ func registerPrerequisites(api huma.API, svc *catalog.Service) {
 		out := &ListPrerequisitesOutput{CacheControl: directive}
 		out.Body.Prerequisites = make([]CourseSummary, 0, len(prerequisites))
 		for _, c := range prerequisites {
-			out.Body.Prerequisites = append(out.Body.Prerequisites, courseSummary(c))
+			out.Body.Prerequisites = append(out.Body.Prerequisites, courseSummary(c, enroll.CourseFacts{}))
 		}
 		return out, nil
 	})
@@ -85,7 +86,7 @@ func registerPrerequisites(api huma.API, svc *catalog.Service) {
 		}
 
 		out := &CourseOutput{}
-		out.Body.Course = courseSummary(course)
+		out.Body.Course = courseSummary(course, enroll.CourseFacts{})
 		return out, nil
 	})
 

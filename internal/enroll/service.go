@@ -17,6 +17,8 @@ import (
 type Repository interface {
 	CourseBySlug(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, slug string) (uuid.UUID, string, error)
 
+	CourseFacts(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, courseIDs []uuid.UUID) (map[uuid.UUID]CourseFacts, error)
+
 	Enrol(ctx context.Context, tx pgx.Tx, tenantID, courseID, userID uuid.UUID, source string, expiresAt *time.Time) (Enrolment, bool, error)
 	Enrolment(ctx context.Context, tx pgx.Tx, tenantID, courseID, userID uuid.UUID) (Enrolment, error)
 	CancelEnrolment(ctx context.Context, tx pgx.Tx, tenantID, courseID, userID uuid.UUID) error
@@ -651,4 +653,41 @@ func (s *Service) Analytics(ctx context.Context, tenantID uuid.UUID, slug string
 		return err
 	})
 	return out, err
+}
+
+/*
+CourseFacts is what a course looks like from the outside: how many people are on
+it, and what they made of it.
+
+Both belong to this package — an enrolment is one, a review is the other — and a
+catalogue that wanted them was reaching for a count per row. They are fetched for
+a whole page at once instead, keyed by course.
+*/
+type CourseFacts struct {
+	// Learners counts the active and completed enrolments: the people studying it
+	// and the people who finished, which is what "350,392 learners" means.
+	Learners int
+
+	// RatingAverage is the mean, 1–5, and is meaningless when RatingCount is zero.
+	// A course with no reviews is unrated, not rated nought.
+	RatingAverage float64
+	RatingCount   int
+}
+
+// Facts loads them for a page of courses. One query, whatever the page holds.
+func (s *Service) Facts(ctx context.Context, tenantID uuid.UUID, courseIDs []uuid.UUID) (map[uuid.UUID]CourseFacts, error) {
+	if len(courseIDs) == 0 {
+		return map[uuid.UUID]CourseFacts{}, nil
+	}
+
+	var facts map[uuid.UUID]CourseFacts
+	err := s.db.WithTenantReadOnly(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		facts, err = s.repo.CourseFacts(ctx, tx, tenantID, courseIDs)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return facts, nil
 }

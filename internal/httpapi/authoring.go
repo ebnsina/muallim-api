@@ -10,6 +10,7 @@ import (
 
 	"github.com/ebnsina/muallim-api/internal/auth"
 	"github.com/ebnsina/muallim-api/internal/catalog"
+	"github.com/ebnsina/muallim-api/internal/enroll"
 )
 
 // TopicOutput is a single topic.
@@ -341,7 +342,7 @@ func registerAuthoring(api huma.API, svc *catalog.Service) {
 		}
 
 		out := &CourseOutput{}
-		out.Body.Course = courseSummary(course)
+		out.Body.Course = courseSummary(course, enroll.CourseFacts{})
 		return out, nil
 	})
 
@@ -367,7 +368,7 @@ func registerAuthoring(api huma.API, svc *catalog.Service) {
 		}
 
 		out := &CourseOutput{}
-		out.Body.Course = courseSummary(course)
+		out.Body.Course = courseSummary(course, enroll.CourseFacts{})
 		return out, nil
 	})
 }
