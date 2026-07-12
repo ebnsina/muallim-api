@@ -44,6 +44,7 @@ const listPublishedCoursesSQL = `
 	  AND ($2::timestamptz IS NULL OR (created_at, id) < ($2, $3))
 	  AND ($5::text IS NULL OR difficulty = $5)
 	  AND ($6::text IS NULL OR title ILIKE '%' || $6 || '%')
+	  AND ($7::uuid IS NULL OR created_by = $7)
 	ORDER BY created_at DESC, id DESC
 	LIMIT $4`
 
@@ -62,6 +63,7 @@ const listAllCoursesSQL = `
 	  AND ($2::timestamptz IS NULL OR (created_at, id) < ($2, $3))
 	  AND ($5::text IS NULL OR difficulty = $5)
 	  AND ($6::text IS NULL OR title ILIKE '%' || $6 || '%')
+	  AND ($7::uuid IS NULL OR created_by = $7)
 	ORDER BY created_at DESC, id DESC
 	LIMIT $4`
 
@@ -90,15 +92,18 @@ func (r *PostgresRepository) ListCourses(ctx context.Context, tx pgx.Tx, tenantI
 
 	// Blank filters go to the database as NULL, which the query reads as "no
 	// filter". A non-null empty string would match nothing, which is the opposite.
-	var difficulty, search any
+	var difficulty, search, author any
 	if p.Difficulty != "" {
 		difficulty = p.Difficulty
 	}
 	if p.Search != "" {
 		search = p.Search
 	}
+	if p.Author != nil {
+		author = *p.Author
+	}
 
-	rows, err := tx.Query(ctx, query, tenantID, afterTime, afterID, p.Limit+1, difficulty, search)
+	rows, err := tx.Query(ctx, query, tenantID, afterTime, afterID, p.Limit+1, difficulty, search, author)
 	if err != nil {
 		return nil, fmt.Errorf("catalog: list courses: %w", err)
 	}

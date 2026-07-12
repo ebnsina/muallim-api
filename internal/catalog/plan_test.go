@@ -97,7 +97,7 @@ func TestCourseListingsAreIndexScansWithoutASortNode(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// A first page: no cursor, and no search or difficulty, so every
 			// residual predicate is inert and the index alone shapes the scan.
-			plan := explain(t, db, tenantID, tt.sql, tenantID, nil, nil, 21, nil, nil)
+			plan := explain(t, db, tenantID, tt.sql, tenantID, nil, nil, 21, nil, nil, nil)
 
 			if strings.Contains(plan, "Seq Scan") {
 				t.Errorf("plan reads the whole table:\n%s", plan)
@@ -143,7 +143,7 @@ func TestDeepCoursePageStillSeeksOnTheIndex(t *testing.T) {
 		t.Fatalf("decode cursor: %v", err)
 	}
 
-	plan := explain(t, db, tenantID, catalog.ListAllCoursesSQL, tenantID, createdAt, id, 21, nil, nil)
+	plan := explain(t, db, tenantID, catalog.ListAllCoursesSQL, tenantID, createdAt, id, 21, nil, nil, nil)
 
 	if strings.Contains(plan, "Seq Scan") || strings.Contains(plan, "Sort") {
 		t.Errorf("a deep page does not seek:\n%s", plan)

@@ -204,6 +204,12 @@ type ListParams struct {
 	// Difficulty narrows to one level. Blank, or anything not a known level,
 	// matches everything — a filter nobody set filters nothing.
 	Difficulty string
+
+	// Author narrows to the courses one person wrote. Nil lists everybody's.
+	//
+	// An id and not a name: two people in a workspace may be called Ahmed, and a
+	// listing keyed on a display name would quietly merge them.
+	Author *uuid.UUID
 }
 
 // Page size bounds. An unbounded list endpoint is an outage waiting for the

@@ -50,8 +50,11 @@ type CourseSummary struct {
 	LessonCount int `json:"lesson_count"`
 
 	// Instructor is the author's display name, empty for a course drafted before the
-	// column existed or by an account since erased.
-	Instructor string `json:"instructor"`
+	// column existed or by an account since erased. InstructorID is who they are —
+	// two people in a workspace may share a name, so a client that lists "everything
+	// by this person" follows the id and never the name.
+	Instructor   string `json:"instructor"`
+	InstructorID string `json:"instructor_id,omitempty" format:"uuid"`
 
 	// LearnerCount counts the active and completed enrolments — the people studying
 	// it and the people who finished, which is what "350,392 learners" means.
@@ -154,7 +157,13 @@ func registerCatalog(api huma.API, svc *catalog.Service, facts courseFacts) {
 		Cursor     string `query:"cursor" maxLength:"128" doc:"Opaque cursor from a previous page"`
 		Q          string `query:"q" maxLength:"200" doc:"Filter to courses whose title contains this"`
 		Difficulty string `query:"difficulty" maxLength:"20" doc:"Filter to one of: beginner, intermediate, advanced, expert"`
+		Author     string `query:"author" format:"uuid" doc:"Filter to the courses one person wrote, by their id"`
 	}) (*ListCoursesOutput, error) {
+		author, err := optionalUUID(in.Author)
+		if err != nil {
+			return nil, huma.Error422UnprocessableEntity("author must be a uuid.")
+		}
+
 		// IncludeDrafts is left false. This route is anonymous, and there is no
 		// query parameter that could set it.
 		page, err := svc.ListCourses(ctx, tenant.ID(ctx), catalog.ListParams{
@@ -162,6 +171,7 @@ func registerCatalog(api huma.API, svc *catalog.Service, facts courseFacts) {
 			Cursor:     in.Cursor,
 			Search:     in.Q,
 			Difficulty: in.Difficulty,
+			Author:     author,
 		})
 		if err != nil {
 			return nil, catalogError(err)
@@ -472,10 +482,34 @@ func courseSummary(c catalog.Course, f enroll.CourseFacts) CourseSummary {
 		DripMode:      c.DripMode,
 		LessonCount:   c.LessonCount,
 		Instructor:    c.InstructorName,
+		InstructorID:  instructorID(c),
 		LearnerCount:  f.Learners,
 		RatingAverage: f.RatingAverage,
 		RatingCount:   f.RatingCount,
 	}
+}
+
+// optionalUUID reads a query parameter that may simply not be there. An empty
+// string is "no filter"; anything else must be a uuid or the request is refused —
+// a malformed id is a client bug, not a listing of everything.
+func optionalUUID(raw string) (*uuid.UUID, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		return nil, err
+	}
+	return &id, nil
+}
+
+// instructorID renders the author's id, or nothing at all for a course whose
+// author has been erased — there is no such person to list the courses of.
+func instructorID(c catalog.Course) string {
+	if c.CreatedBy == nil {
+		return ""
+	}
+	return c.CreatedBy.String()
 }
 
 // catalogError maps the catalog package's sentinels onto status codes. This is
