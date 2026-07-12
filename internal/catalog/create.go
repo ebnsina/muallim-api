@@ -77,7 +77,7 @@ func (s *Service) CreateCourse(ctx context.Context, tenantID uuid.UUID, n NewCou
 
 	var created Course
 	err := s.db.WithTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
-		course, err := s.repo.CreateCourse(ctx, tx, tenantID, n)
+		course, err := s.repo.CreateCourse(ctx, tx, tenantID, n, author.UserID)
 		if err != nil {
 			return err
 		}
@@ -100,16 +100,19 @@ func (s *Service) CreateCourse(ctx context.Context, tenantID uuid.UUID, n NewCou
 }
 
 const createCourseSQL = `
-	INSERT INTO courses (tenant_id, slug, title, summary, difficulty, status)
-	VALUES ($1, $2, $3, $4, $5, 'draft')
-	RETURNING id, slug, title, summary, difficulty, status, published_at, drip_mode, created_at, updated_at`
+	INSERT INTO courses (tenant_id, slug, title, summary, difficulty, status, created_by)
+	VALUES ($1, $2, $3, $4, $5, 'draft', $6)
+	RETURNING id, slug, title, summary, difficulty, status, published_at, drip_mode,
+	          description, objectives, requirements, language, created_by, created_at, updated_at`
 
 // CreateCourse inserts a course and returns it.
-func (r *PostgresRepository) CreateCourse(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, n NewCourse) (Course, error) {
+func (r *PostgresRepository) CreateCourse(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, n NewCourse, createdBy uuid.UUID) (Course, error) {
 	var c Course
-	err := tx.QueryRow(ctx, createCourseSQL, tenantID, n.Slug, n.Title, n.Summary, n.Difficulty).Scan(
+	err := tx.QueryRow(ctx, createCourseSQL, tenantID, n.Slug, n.Title, n.Summary, n.Difficulty, createdBy).Scan(
 		&c.ID, &c.Slug, &c.Title, &c.Summary, &c.Difficulty,
-		&c.Status, &c.PublishedAt, &c.DripMode, &c.CreatedAt, &c.UpdatedAt)
+		&c.Status, &c.PublishedAt, &c.DripMode,
+		&c.Description, &c.Objectives, &c.Requirements, &c.Language,
+		&c.CreatedBy, &c.CreatedAt, &c.UpdatedAt)
 
 	if err != nil {
 		if isUniqueViolation(err) {

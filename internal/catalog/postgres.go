@@ -223,11 +223,16 @@ func (r *PostgresRepository) DeleteAnnouncement(ctx context.Context, tx pgx.Tx, 
 // The filter is in the query, not in a check after the fact. A draft that is
 // loaded and then discarded has already been loaded, and the first refactor that
 // forgets the discard turns an unreleased course into a public one.
+// The author's name is joined here rather than fetched after: a page that shows
+// "created by" would otherwise cost a second query for a single string.
 const courseBySlugSQL = `
-	SELECT id, slug, title, summary, difficulty, status, published_at, drip_mode, created_at, updated_at
-	FROM courses
-	WHERE tenant_id = $1 AND lower(slug) = lower($2)
-	  AND (status = 'published' OR $3)`
+	SELECT c.id, c.slug, c.title, c.summary, c.difficulty, c.status, c.published_at, c.drip_mode,
+	       c.description, c.objectives, c.requirements, c.language,
+	       c.created_by, COALESCE(u.name, ''), c.created_at, c.updated_at
+	FROM courses c
+	LEFT JOIN users u ON u.id = c.created_by
+	WHERE c.tenant_id = $1 AND lower(c.slug) = lower($2)
+	  AND (c.status = 'published' OR $3)`
 
 // CourseBySlug loads a single course. The unique index on (tenant_id, lower(slug))
 // makes this an index lookup.
@@ -238,7 +243,9 @@ func (r *PostgresRepository) CourseBySlug(ctx context.Context, tx pgx.Tx, tenant
 	var c Course
 	err := tx.QueryRow(ctx, courseBySlugSQL, tenantID, slug, includeDrafts).Scan(
 		&c.ID, &c.Slug, &c.Title, &c.Summary, &c.Difficulty,
-		&c.Status, &c.PublishedAt, &c.DripMode, &c.CreatedAt, &c.UpdatedAt)
+		&c.Status, &c.PublishedAt, &c.DripMode,
+		&c.Description, &c.Objectives, &c.Requirements, &c.Language,
+		&c.CreatedBy, &c.InstructorName, &c.CreatedAt, &c.UpdatedAt)
 
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

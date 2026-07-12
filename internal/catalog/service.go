@@ -16,7 +16,8 @@ type Repository interface {
 	ListCourses(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, p ListParams) ([]Course, error)
 	CourseBySlug(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, slug string, includeDrafts bool) (Course, error)
 	CurriculumFor(ctx context.Context, tx pgx.Tx, tenantID, courseID uuid.UUID) ([]Topic, error)
-	CreateCourse(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, n NewCourse) (Course, error)
+	CreateCourse(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, n NewCourse, createdBy uuid.UUID) (Course, error)
+	UpdateCourse(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, slug string, p CoursePatch) (Course, error)
 
 	CreateAnnouncement(ctx context.Context, tx pgx.Tx, tenantID, courseID, authorID uuid.UUID, title, body string) (Announcement, error)
 	Announcements(ctx context.Context, tx pgx.Tx, tenantID, courseID uuid.UUID) ([]Announcement, error)

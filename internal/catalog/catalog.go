@@ -23,6 +23,23 @@ var (
 	// ErrInvalidAnnouncement is an announcement with no title or no body, or one
 	// past the length either should hold.
 	ErrInvalidAnnouncement = errors.New("catalog: announcement is not valid")
+
+	// ErrInvalidDifficulty is a difficulty the column does not permit.
+	ErrInvalidDifficulty = errors.New("catalog: difficulty is not one of beginner, intermediate, advanced, expert")
+
+	// ErrInvalidCourse is copy that would not fit on a page: an empty title, or a
+	// description, objective, or requirement past its bound.
+	ErrInvalidCourse = errors.New("catalog: course is not valid")
+)
+
+// A course's copy is bounded. An unbounded text column reachable from a write
+// endpoint is a way to fill a disk one request at a time.
+const (
+	MaxCourseTitle       = 200
+	MaxCourseSummary     = 1_000
+	MaxCourseDescription = 20_000
+	MaxCourseListItem    = 500
+	MaxCourseListItems   = 20
 )
 
 // An announcement's bounds. A title is a headline, a body is a notice, and
@@ -69,8 +86,33 @@ type Course struct {
 	// does not — so a zero here can mean "no lessons" or "not counted".
 	LessonCount int
 
+	// The landing page's copy. Loaded by CourseBySlug; the listing leaves them
+	// empty rather than carry a paragraph per row it will not render.
+	Description  string
+	Objectives   []string
+	Requirements []string
+	Language     string
+
+	// CreatedBy is the author. InstructorName is their display name, joined in the
+	// same query — a name is what a page shows, and a second lookup per course is
+	// how a page becomes N+1.
+	CreatedBy      *uuid.UUID
+	InstructorName string
+
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+// CoursePatch edits a course's copy. A nil field is left alone; an empty slice
+// clears the list, which is a different act from not mentioning it.
+type CoursePatch struct {
+	Title        *string
+	Summary      *string
+	Description  *string
+	Difficulty   *string
+	Language     *string
+	Objectives   *[]string
+	Requirements *[]string
 }
 
 // Topic is an ordered section of a course.

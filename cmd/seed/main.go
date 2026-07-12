@@ -300,7 +300,7 @@ func seedWorkspace(ctx context.Context, db *database.DB, cfg config, index int, 
 		}
 		got.users = len(people.everyone)
 
-		catalogue, err := seedCatalogue(ctx, tx, tenantID, cfg, rng)
+		catalogue, err := seedCatalogue(ctx, tx, tenantID, cfg, people.instructor, rng)
 		if err != nil {
 			return fmt.Errorf("catalogue: %w", err)
 		}
@@ -730,7 +730,7 @@ type seededCourse struct {
 	assignmentPoints int
 }
 
-func seedCatalogue(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg config, rng *rand.Rand) ([]seededCourse, error) {
+func seedCatalogue(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg config, instructor uuid.UUID, rng *rand.Rand) ([]seededCourse, error) {
 	var (
 		courses     [][]any
 		topics      [][]any
@@ -777,6 +777,11 @@ func seedCatalogue(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg confi
 			courseSummaries[index%len(courseSummaries)],
 			[]string{"beginner", "intermediate", "advanced", "expert"}[index%4],
 			status, published, drip,
+			courseDescriptions[index%len(courseDescriptions)],
+			courseObjectives[index%len(courseObjectives)],
+			courseRequirements[index%len(courseRequirements)],
+			[]string{"en", "en", "en", "ar"}[index%4],
+			instructor,
 		})
 
 		// Courses vary in size, so a catalogue shows a spread of lesson counts
@@ -945,7 +950,7 @@ func seedCatalogue(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, cfg confi
 		cols  []string
 		rows  [][]any
 	}{
-		{"courses", []string{"id", "tenant_id", "slug", "title", "summary", "difficulty", "status", "published_at", "drip_mode"}, courses},
+		{"courses", []string{"id", "tenant_id", "slug", "title", "summary", "difficulty", "status", "published_at", "drip_mode", "description", "objectives", "requirements", "language", "created_by"}, courses},
 		{"topics", []string{"id", "tenant_id", "course_id", "title", "position"}, topics},
 		{"lessons", []string{"id", "tenant_id", "topic_id", "title", "content_type", "duration_seconds", "is_preview", "position", "content", "video_source", "video_url", "video_embed_url"}, lessons},
 		{"quizzes", []string{"id", "tenant_id", "lesson_id", "title", "description", "time_limit_seconds", "max_attempts", "passing_percent"}, quizzes},
@@ -1468,6 +1473,103 @@ var (
 		"How light travels, how the eye receives it, and how to prove both with a darkened room.",
 		"Read the sky, and build the instrument that reads it for you.",
 		"A physician's syllabus, from diagnosis to the pharmacology of what you can grow.",
+	}
+
+	// The landing page's copy, in the same order as the summaries above: a pitch
+	// long enough to need a "show more", and lists long enough to wrap two columns.
+	courseDescriptions = []string{
+		"Al-Khwarizmi did not invent the equation. He invented the idea that an equation " +
+			"could be solved by a procedure — the same steps, in the same order, whoever is " +
+			"holding the pen. That is the idea this course is about.\n\n" +
+			"We begin where he began: with completion and balancing, the two moves that turn " +
+			"a tangle into a form you already know how to solve. You will work the six canonical " +
+			"cases by hand, and you will prove each one geometrically, because a procedure you " +
+			"cannot picture is a procedure you will misapply.\n\n" +
+			"By the end you will not be reciting the quadratic formula. You will be deriving it, " +
+			"and you will understand why it was worth deriving.",
+
+		"Ibn al-Haytham settled an argument that had run for a thousand years — does the eye " +
+			"reach out to the world, or does the world arrive at the eye? — by doing something " +
+			"nobody had thought to do. He built the apparatus and looked.\n\n" +
+			"This course follows the Book of Optics as a working manual. You will darken a room, " +
+			"admit a single ray, and measure what it does. Reflection, refraction, the camera " +
+			"obscura, the anatomy of the eye: each is a claim, and each claim is one you will test.\n\n" +
+			"The method is the subject. The optics is how we practise it.",
+
+		"An astrolabe is a model of the sky you can hold. Learning to read one teaches you the " +
+			"sky itself, because every line on the instrument answers to something overhead.\n\n" +
+			"You will start with the celestial sphere and the coordinates that describe it, then " +
+			"take an altitude, find your latitude, tell the hour by a star, and determine the " +
+			"direction of prayer from any city on the plate. Then you will build one, in brass or " +
+			"in card, and check it against the night.\n\n" +
+			"Nothing here needs a telescope. Everything here needs patience and a clear evening.",
+
+		"The Canon organised everything a physician of its age knew, and it did so well enough " +
+			"to be taught in Europe for six hundred years. This course reads it the way it was " +
+			"meant to be read: as a syllabus, not a relic.\n\n" +
+			"We work from examination to diagnosis to treatment. You will learn the pulse and what " +
+			"it was thought to reveal, the fevers and how they were distinguished, and the materia " +
+			"medica — the plants, their preparations, their doses, and the honest limits of each.\n\n" +
+			"Where the Canon is right, we will say why it is right. Where it is wrong, we will say " +
+			"how it was found out. Both are how medicine learns.",
+	}
+
+	courseObjectives = [][]string{
+		{
+			"Solve any quadratic by completion and balancing, without reaching for a formula",
+			"Derive the quadratic formula yourself, and explain each step to somebody else",
+			"Prove an algebraic identity geometrically, the way al-Khwarizmi proved his",
+			"Recognise the six canonical cases on sight, and know why there are exactly six",
+			"Translate a word problem into a form that a procedure can finish",
+			"Read a medieval mathematical argument without needing it modernised first",
+		},
+		{
+			"Set up a camera obscura and predict what it will show before you look",
+			"Measure the angle of refraction between two media, and account for what you measure",
+			"State the intromission theory and give the experiment that decides it",
+			"Trace a ray through the eye's structures and say where the image forms",
+			"Design a controlled optical experiment: one variable, one claim, one result",
+			"Tell a demonstration from an assertion in any scientific text you read",
+		},
+		{
+			"Take the altitude of a star or the sun with an astrolabe, to within a degree",
+			"Find your latitude from a single sighting, at night or at noon",
+			"Tell the time by the stars, and know how far to trust the answer",
+			"Determine the qibla from any city on the instrument's plate",
+			"Build a working astrolabe and test it against a sky you have predicted",
+			"Read the celestial sphere as coordinates rather than as pictures",
+		},
+		{
+			"Take a history and an examination in the order the Canon lays down",
+			"Distinguish the classical fevers by their described course, and say what each would be called today",
+			"Prepare a simple from a plant you have grown, at a dose you can defend",
+			"Read a pharmacological entry critically: what is observed, what is inferred, what is asserted",
+			"Explain how a treatment that works for the wrong reason is eventually found out",
+			"Trace one doctrine from the Canon to the moment medicine abandoned it",
+		},
+	}
+
+	courseRequirements = [][]string{
+		{
+			"Arithmetic, and the patience to do it by hand",
+			"No prior algebra. We build it from nothing, which is the point",
+			"Paper. A great deal of paper",
+		},
+		{
+			"A room you can darken completely",
+			"Curiosity about how a claim is settled, rather than who settled it",
+			"No physics beyond school. The geometry is drawn, not assumed",
+		},
+		{
+			"A clear night, and somewhere to stand under it",
+			"Basic geometry: angles, circles, and the confidence to draw both",
+			"An astrolabe is provided as a printable plate. Brass is optional",
+		},
+		{
+			"No medical training is assumed, and none is conferred",
+			"A willingness to read a text that is sometimes wrong, and to find out where",
+			"This is a history and philosophy of medicine. Do not treat anybody with it",
+		},
 	}
 
 	roman = []string{"I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"}

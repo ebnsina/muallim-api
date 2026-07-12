@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/google/uuid"
 
 	"github.com/ebnsina/muallim-api/internal/auth"
 	"github.com/ebnsina/muallim-api/internal/catalog"
@@ -46,6 +47,27 @@ type CourseSummary struct {
 	// LessonCount is how many lessons the course holds, for a listing that wants to
 	// say so without loading each curriculum.
 	LessonCount int `json:"lesson_count"`
+}
+
+// CourseDetail is a course as it appears on its own page: the summary, plus the
+// copy a listing has no use for and would pay for by the row.
+type CourseDetail struct {
+	CourseSummary
+
+	Description  string   `json:"description"`
+	Objectives   []string `json:"objectives"`
+	Requirements []string `json:"requirements"`
+	Language     string   `json:"language"`
+
+	// Instructor is the author's display name, empty for a course drafted before
+	// the column existed or by an account since erased.
+	Instructor string `json:"instructor"`
+
+	// LearnerCount counts the active and completed enrolments — the people studying
+	// it and the people who finished, which is what "350,392 learners" means.
+	LearnerCount int `json:"learner_count"`
+
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // LessonView is a lesson within a curriculum.
@@ -89,15 +111,21 @@ type ListCoursesOutput struct {
 type CurriculumOutput struct {
 	CacheControl string `header:"Cache-Control"`
 	Body         struct {
-		Course CourseSummary `json:"course"`
-		Topics []TopicView   `json:"topics"`
+		Course CourseDetail `json:"course"`
+		Topics []TopicView  `json:"topics"`
 
 		LessonCount     int `json:"lesson_count"`
 		DurationSeconds int `json:"duration_seconds"`
 	}
 }
 
-func registerCatalog(api huma.API, svc *catalog.Service) {
+// learnerCounter counts a course's enrolled and finished learners. Declared here,
+// by its consumer: the course page shows the number, and enrol owns it.
+type learnerCounter interface {
+	EnrolmentCount(ctx context.Context, tenantID uuid.UUID, slug string) (int, error)
+}
+
+func registerCatalog(api huma.API, svc *catalog.Service, learners learnerCounter) {
 	huma.Register(api, huma.Operation{
 		OperationID: "list-courses",
 		Method:      http.MethodGet,
@@ -206,8 +234,18 @@ func registerCatalog(api huma.API, svc *catalog.Service) {
 			cacheControl = draftCacheControl
 		}
 
+		// One more query, not one per lesson. A draft has nobody enrolled and nobody
+		// to show a count to, so it does not pay for one.
+		var learnerCount int
+		if curriculum.Course.Status == catalog.StatusPublished {
+			learnerCount, err = learners.EnrolmentCount(ctx, tenant.ID(ctx), in.Slug)
+			if err != nil {
+				return nil, catalogError(err)
+			}
+		}
+
 		out := &CurriculumOutput{CacheControl: cacheControl}
-		out.Body.Course = courseSummary(curriculum.Course)
+		out.Body.Course = courseDetail(curriculum.Course, learnerCount)
 		out.Body.Topics = make([]TopicView, 0, len(curriculum.Topics))
 		for _, t := range curriculum.Topics {
 			lessons := make([]LessonView, 0, len(t.Lessons))
@@ -241,6 +279,63 @@ type CreateCourseOutput struct {
 	Body struct {
 		Course CourseSummary `json:"course"`
 	}
+}
+
+// UpdateCourseOutput is a course after its copy was rewritten.
+type UpdateCourseOutput struct {
+	Body struct {
+		Course CourseDetail `json:"course"`
+	}
+}
+
+func registerCourseCopy(api huma.API, svc *catalog.Service) {
+	huma.Register(api, huma.Operation{
+		OperationID: "update-course",
+		Method:      http.MethodPatch,
+		Path:        "/v1/courses/{slug}",
+		Summary:     "Edit a course's copy",
+		Description: "Requires course:write. Rewrites what a course says about itself: its pitch, " +
+			"what a learner will be able to do, and what it asks of them first. " +
+			"An omitted field is left alone; an empty list clears the list.",
+		Tags:     []string{"Authoring"},
+		Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, in *struct {
+		Slug string `path:"slug" maxLength:"200"`
+		Body struct {
+			// Pointers: an omitted field is left alone rather than cleared.
+			Title        *string   `json:"title,omitempty" minLength:"1" maxLength:"200"`
+			Summary      *string   `json:"summary,omitempty" maxLength:"1000"`
+			Description  *string   `json:"description,omitempty" maxLength:"20000" doc:"The long pitch. Plain text; newlines are kept."`
+			Difficulty   *string   `json:"difficulty,omitempty" enum:"beginner,intermediate,advanced,expert"`
+			Language     *string   `json:"language,omitempty" maxLength:"20" doc:"The language it is taught in, as a tag: en, bn, ar."`
+			Objectives   *[]string `json:"objectives,omitempty" maxItems:"20" doc:"What a learner will be able to do. Shown as \"what you'll learn\"."`
+			Requirements *[]string `json:"requirements,omitempty" maxItems:"20" doc:"What a learner needs before starting."`
+		}
+	}) (*UpdateCourseOutput, error) {
+		p, author, err := authorFor(ctx, auth.PermCourseWrite)
+		if err != nil {
+			return nil, err
+		}
+
+		course, err := svc.EditCourse(ctx, p.TenantID, in.Slug, catalog.CoursePatch{
+			Title:        in.Body.Title,
+			Summary:      in.Body.Summary,
+			Description:  in.Body.Description,
+			Difficulty:   in.Body.Difficulty,
+			Language:     in.Body.Language,
+			Objectives:   in.Body.Objectives,
+			Requirements: in.Body.Requirements,
+		}, author)
+		if err != nil {
+			return nil, catalogError(err)
+		}
+
+		// The learner count is not this endpoint's business, and an author editing
+		// copy has not changed it. Zero here rather than a query nobody asked for.
+		out := &UpdateCourseOutput{}
+		out.Body.Course = courseDetail(course, 0)
+		return out, nil
+	})
 }
 
 func registerCatalogWrites(api huma.API, svc *catalog.Service) {
@@ -292,6 +387,29 @@ func registerCatalogWrites(api huma.API, svc *catalog.Service) {
 	})
 }
 
+// courseDetail maps a course to its page view. The slices are never nil: `[]` and
+// `null` are the same emptiness to a client that has to branch on it anyway.
+func courseDetail(c catalog.Course, learnerCount int) CourseDetail {
+	objectives, requirements := c.Objectives, c.Requirements
+	if objectives == nil {
+		objectives = []string{}
+	}
+	if requirements == nil {
+		requirements = []string{}
+	}
+
+	return CourseDetail{
+		CourseSummary: courseSummary(c),
+		Description:   c.Description,
+		Objectives:    objectives,
+		Requirements:  requirements,
+		Language:      c.Language,
+		Instructor:    c.InstructorName,
+		LearnerCount:  learnerCount,
+		UpdatedAt:     c.UpdatedAt,
+	}
+}
+
 func courseSummary(c catalog.Course) CourseSummary {
 	return CourseSummary{
 		ID:          c.ID.String(),
@@ -312,6 +430,9 @@ func catalogError(err error) error {
 	switch {
 	case errors.Is(err, catalog.ErrNotFound):
 		return huma.Error404NotFound("Course not found.")
+
+	case errors.Is(err, catalog.ErrInvalidCourse), errors.Is(err, catalog.ErrInvalidDifficulty):
+		return huma.Error422UnprocessableEntity(err.Error())
 
 	case errors.Is(err, catalog.ErrPrerequisiteCycle):
 		// 422: the request was understood and is impossible. A course that requires

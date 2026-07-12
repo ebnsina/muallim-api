@@ -320,6 +320,58 @@ func (r *PostgresRepository) SetCourseStatus(ctx context.Context, tx pgx.Tx, ten
 	return c, nil
 }
 
+// UpdateCourse writes a course's copy. A nil field in the patch coalesces back to
+// the stored value, so one statement serves every combination of fields.
+//
+// The author's name is re-joined on the way out: the caller holds a Course, and a
+// half-populated one would show the page an empty instructor.
+func (r *PostgresRepository) UpdateCourse(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, slug string, p CoursePatch) (Course, error) {
+	var c Course
+
+	err := tx.QueryRow(ctx,
+		`WITH updated AS (
+		     UPDATE courses SET
+		         title        = COALESCE($3, title),
+		         summary      = COALESCE($4, summary),
+		         description  = COALESCE($5, description),
+		         difficulty   = COALESCE($6, difficulty),
+		         language     = COALESCE($7, language),
+		         objectives   = COALESCE($8, objectives),
+		         requirements = COALESCE($9, requirements),
+		         updated_at   = now()
+		     WHERE tenant_id = $1 AND lower(slug) = lower($2)
+		     RETURNING *
+		 )
+		 SELECT c.id, c.slug, c.title, c.summary, c.difficulty, c.status, c.published_at, c.drip_mode,
+		        c.description, c.objectives, c.requirements, c.language,
+		        c.created_by, COALESCE(u.name, ''), c.created_at, c.updated_at
+		 FROM updated c
+		 LEFT JOIN users u ON u.id = c.created_by`,
+		tenantID, slug, p.Title, p.Summary, p.Description, p.Difficulty, p.Language, p.Objectives, p.Requirements).
+		Scan(&c.ID, &c.Slug, &c.Title, &c.Summary, &c.Difficulty, &c.Status,
+			&c.PublishedAt, &c.DripMode,
+			&c.Description, &c.Objectives, &c.Requirements, &c.Language,
+			&c.CreatedBy, &c.InstructorName, &c.CreatedAt, &c.UpdatedAt)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Course{}, ErrNotFound
+		}
+		if isCheckViolation(err) {
+			return Course{}, ErrInvalidDifficulty
+		}
+		return Course{}, fmt.Errorf("catalog: update course %q: %w", slug, err)
+	}
+	return c, nil
+}
+
+// isCheckViolation reports whether err is a Postgres CHECK constraint failure —
+// here, a difficulty the column does not permit.
+func isCheckViolation(err error) bool {
+	var pgErr interface{ SQLState() string }
+	return errors.As(err, &pgErr) && pgErr.SQLState() == "23514"
+}
+
 func isForeignKeyViolation(err error) bool {
 	var pgErr interface{ SQLState() string }
 	return errors.As(err, &pgErr) && pgErr.SQLState() == "23503"

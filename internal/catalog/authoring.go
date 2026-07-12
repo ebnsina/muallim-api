@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,6 +28,7 @@ const (
 	ActionLessonUpdated     = "lesson.updated"
 	ActionLessonDeleted     = "lesson.deleted"
 	ActionLessonsReordered  = "lessons.reordered"
+	ActionCourseUpdated     = "course.updated"
 	ActionCoursePublished   = "course.published"
 	ActionCourseUnpublished = "course.unpublished"
 )
@@ -108,6 +110,63 @@ type AuthoringRepository interface {
 	CountLessons(ctx context.Context, tx pgx.Tx, tenantID, courseID uuid.UUID) (int, error)
 	SetCourseStatus(ctx context.Context, tx pgx.Tx, tenantID, courseID uuid.UUID, status string) (Course, error)
 	SetDripMode(ctx context.Context, tx pgx.Tx, tenantID, courseID uuid.UUID, mode string) (Course, error)
+}
+
+// EditCourse rewrites a course's copy — its pitch, what it teaches, and what it
+// asks of a learner before they start.
+func (s *Service) EditCourse(ctx context.Context, tenantID uuid.UUID, slug string, p CoursePatch, author Author) (Course, error) {
+	if err := p.validate(); err != nil {
+		return Course{}, err
+	}
+
+	var updated Course
+	err := s.db.WithTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		course, err := s.repo.UpdateCourse(ctx, tx, tenantID, slug, p)
+		if err != nil {
+			return err
+		}
+		updated = course
+
+		return s.audit.Record(ctx, tx, tenantID, AuditEntry{
+			ActorID: &author.UserID, Action: ActionCourseUpdated,
+			TargetType: "course", TargetID: course.ID.String(),
+			IP: author.IP, UserAgent: author.UserAgent,
+			Metadata: map[string]any{"slug": course.Slug},
+		})
+	})
+	if err != nil {
+		return Course{}, err
+	}
+	return updated, nil
+}
+
+// validate bounds the copy. The database would refuse an impossible difficulty
+// anyway; the lengths it would happily accept forever.
+func (p CoursePatch) validate() error {
+	if p.Title != nil && (strings.TrimSpace(*p.Title) == "" || len(*p.Title) > MaxCourseTitle) {
+		return fmt.Errorf("%w: title", ErrInvalidCourse)
+	}
+	if p.Summary != nil && len(*p.Summary) > MaxCourseSummary {
+		return fmt.Errorf("%w: summary is longer than %d characters", ErrInvalidCourse, MaxCourseSummary)
+	}
+	if p.Description != nil && len(*p.Description) > MaxCourseDescription {
+		return fmt.Errorf("%w: description is longer than %d characters", ErrInvalidCourse, MaxCourseDescription)
+	}
+
+	for label, list := range map[string]*[]string{"objectives": p.Objectives, "requirements": p.Requirements} {
+		if list == nil {
+			continue
+		}
+		if len(*list) > MaxCourseListItems {
+			return fmt.Errorf("%w: more than %d %s", ErrInvalidCourse, MaxCourseListItems, label)
+		}
+		for _, item := range *list {
+			if strings.TrimSpace(item) == "" || len(item) > MaxCourseListItem {
+				return fmt.Errorf("%w: an entry in %s is empty or too long", ErrInvalidCourse, label)
+			}
+		}
+	}
+	return nil
 }
 
 // AddTopic appends a topic to a course.
