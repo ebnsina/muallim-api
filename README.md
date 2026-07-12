@@ -1,4 +1,4 @@
-# lms-api
+# muallim-api
 
 Backend for a multi-tenant learning management system. A modular monolith in Go, backed by Postgres, publishing an OpenAPI 3.1 contract.
 

@@ -9,9 +9,9 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/google/uuid"
 
-	"github.com/ebnsina/lms-api/internal/auth"
-	"github.com/ebnsina/lms-api/internal/certify"
-	"github.com/ebnsina/lms-api/internal/tenant"
+	"github.com/ebnsina/muallim-api/internal/auth"
+	"github.com/ebnsina/muallim-api/internal/certify"
+	"github.com/ebnsina/muallim-api/internal/tenant"
 )
 
 /*

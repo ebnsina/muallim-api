@@ -6,7 +6,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/ebnsina/lms-api/internal/catalog"
+	"github.com/ebnsina/muallim-api/internal/catalog"
 )
 
 func slugsOf(courses []catalog.Course) []string {

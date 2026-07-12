@@ -4,9 +4,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/ebnsina/lms-api/internal/catalog"
-	"github.com/ebnsina/lms-api/internal/media"
-	"github.com/ebnsina/lms-api/internal/platform/config"
+	"github.com/ebnsina/muallim-api/internal/catalog"
+	"github.com/ebnsina/muallim-api/internal/media"
+	"github.com/ebnsina/muallim-api/internal/platform/config"
 )
 
 // videoResolver adapts internal/media to the interface catalog declares.

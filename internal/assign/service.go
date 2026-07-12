@@ -11,8 +11,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/ebnsina/lms-api/internal/platform/blob"
-	"github.com/ebnsina/lms-api/internal/platform/database"
+	"github.com/ebnsina/muallim-api/internal/platform/blob"
+	"github.com/ebnsina/muallim-api/internal/platform/database"
 )
 
 // Repository is the persistence contract, declared here by its consumer.

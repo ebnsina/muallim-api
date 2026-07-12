@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/ebnsina/lms-api/internal/auth"
+	"github.com/ebnsina/muallim-api/internal/auth"
 )
 
 // claim bootstraps a workspace and returns its owner's principal.

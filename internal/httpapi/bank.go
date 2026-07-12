@@ -7,7 +7,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/google/uuid"
 
-	"github.com/ebnsina/lms-api/internal/assess"
+	"github.com/ebnsina/muallim-api/internal/assess"
 )
 
 // BankQuestionView is one reusable question as the bank list shows it.

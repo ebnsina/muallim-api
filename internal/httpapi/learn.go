@@ -9,7 +9,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/google/uuid"
 
-	"github.com/ebnsina/lms-api/internal/learn"
+	"github.com/ebnsina/muallim-api/internal/learn"
 )
 
 // NoteView is a learner's note as a client reads it. An empty body is a real,

@@ -9,8 +9,8 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/google/uuid"
 
-	"github.com/ebnsina/lms-api/internal/auth"
-	"github.com/ebnsina/lms-api/internal/tenant"
+	"github.com/ebnsina/muallim-api/internal/auth"
+	"github.com/ebnsina/muallim-api/internal/tenant"
 )
 
 // InvitationView is an invitation as returned to a client. It never carries the

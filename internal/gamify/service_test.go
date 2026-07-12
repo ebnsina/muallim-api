@@ -10,8 +10,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/ebnsina/lms-api/internal/gamify"
-	"github.com/ebnsina/lms-api/internal/platform/database"
+	"github.com/ebnsina/muallim-api/internal/gamify"
+	"github.com/ebnsina/muallim-api/internal/platform/database"
 )
 
 func testDB(t *testing.T) *database.DB {

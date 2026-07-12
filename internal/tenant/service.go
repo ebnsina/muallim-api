@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ebnsina/lms-api/internal/platform/cache"
+	"github.com/ebnsina/muallim-api/internal/platform/cache"
 )
 
 // Repository loads tenants. The interface is declared here, by its consumer, and

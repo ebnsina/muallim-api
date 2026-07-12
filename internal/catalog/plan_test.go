@@ -8,8 +8,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/ebnsina/lms-api/internal/catalog"
-	"github.com/ebnsina/lms-api/internal/platform/database"
+	"github.com/ebnsina/muallim-api/internal/catalog"
+	"github.com/ebnsina/muallim-api/internal/platform/database"
 )
 
 // seedManyCourses inserts enough rows that the planner has a real choice. A

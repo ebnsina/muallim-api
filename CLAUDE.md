@@ -1,4 +1,4 @@
-# CLAUDE.md — `lms-api`
+# CLAUDE.md — `muallim-api`
 
 Go backend for a multi-tenant LMS. Read `GUIDELINES.md` before writing code; it is the authoritative engineering contract. This file is the short version plus the things that are easy to get wrong.
 

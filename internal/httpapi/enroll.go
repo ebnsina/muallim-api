@@ -9,9 +9,9 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/ebnsina/lms-api/internal/auth"
-	"github.com/ebnsina/lms-api/internal/enroll"
-	"github.com/ebnsina/lms-api/internal/tenant"
+	"github.com/ebnsina/muallim-api/internal/auth"
+	"github.com/ebnsina/muallim-api/internal/enroll"
+	"github.com/ebnsina/muallim-api/internal/tenant"
 )
 
 // lessonCacheControl keeps lesson content out of every shared cache.

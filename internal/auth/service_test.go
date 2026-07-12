@@ -14,9 +14,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/ebnsina/lms-api/internal/audit"
-	"github.com/ebnsina/lms-api/internal/auth"
-	"github.com/ebnsina/lms-api/internal/platform/database"
+	"github.com/ebnsina/muallim-api/internal/audit"
+	"github.com/ebnsina/muallim-api/internal/auth"
+	"github.com/ebnsina/muallim-api/internal/platform/database"
 )
 
 const password = "correct horse battery staple"
@@ -184,7 +184,7 @@ func newServiceWithMailer(t *testing.T, db *database.DB) (*auth.Service, *fakeMa
 func newServiceWithFakes(t *testing.T, db *database.DB) (*auth.Service, *fakeMailer, *fakeEnqueuer) {
 	t.Helper()
 
-	tokens, err := auth.NewTokenIssuer("a-signing-secret-of-at-least-32-bytes", "lms-api-test")
+	tokens, err := auth.NewTokenIssuer("a-signing-secret-of-at-least-32-bytes", "muallim-api-test")
 	if err != nil {
 		t.Fatal(err)
 	}

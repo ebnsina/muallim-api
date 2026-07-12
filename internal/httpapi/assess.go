@@ -9,10 +9,10 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/google/uuid"
 
-	"github.com/ebnsina/lms-api/internal/assess"
-	"github.com/ebnsina/lms-api/internal/auth"
-	"github.com/ebnsina/lms-api/internal/enroll"
-	"github.com/ebnsina/lms-api/internal/tenant"
+	"github.com/ebnsina/muallim-api/internal/assess"
+	"github.com/ebnsina/muallim-api/internal/auth"
+	"github.com/ebnsina/muallim-api/internal/enroll"
+	"github.com/ebnsina/muallim-api/internal/tenant"
 )
 
 // Every quiz endpoint is addressed under its lesson, and every attempt under the

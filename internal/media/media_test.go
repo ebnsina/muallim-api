@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ebnsina/lms-api/internal/media"
+	"github.com/ebnsina/muallim-api/internal/media"
 )
 
 // The allowlist a deployment might write: one host it has decided to trust.

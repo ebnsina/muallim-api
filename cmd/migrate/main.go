@@ -18,8 +18,8 @@ import (
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivermigrate"
 
-	"github.com/ebnsina/lms-api/internal/platform/config"
-	"github.com/ebnsina/lms-api/migrations"
+	"github.com/ebnsina/muallim-api/internal/platform/config"
+	"github.com/ebnsina/muallim-api/migrations"
 )
 
 func main() {

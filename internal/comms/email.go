@@ -8,7 +8,7 @@ import (
 
 	"github.com/riverqueue/river"
 
-	"github.com/ebnsina/lms-api/internal/platform/mailer"
+	"github.com/ebnsina/muallim-api/internal/platform/mailer"
 )
 
 // Sender delivers a rendered message. Declared here, by its consumer; the

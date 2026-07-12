@@ -169,7 +169,7 @@ func Load() (Config, error) {
 		TenantCacheTTL:       duration("LMS_TENANT_CACHE_TTL", 5*time.Minute),
 
 		JWTSecret: env("LMS_JWT_SECRET", ""),
-		JWTIssuer: env("LMS_JWT_ISSUER", "lms-api"),
+		JWTIssuer: env("LMS_JWT_ISSUER", "muallim-api"),
 
 		AuthRateBurst: number("LMS_AUTH_RATE_BURST", 10),
 		AuthRateEvery: duration("LMS_AUTH_RATE_EVERY", 6*time.Second),

@@ -14,7 +14,7 @@ const testSecret = "a-signing-secret-of-at-least-32-bytes"
 
 func testIssuer(t *testing.T) *TokenIssuer {
 	t.Helper()
-	issuer, err := NewTokenIssuer(testSecret, "lms-api-test")
+	issuer, err := NewTokenIssuer(testSecret, "muallim-api-test")
 	if err != nil {
 		t.Fatalf("NewTokenIssuer: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestVerifyRejectsAlgNone(t *testing.T) {
 	unsigned := jwt.NewWithClaims(jwt.SigningMethodNone, claims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   p.UserID.String(),
-			Issuer:    "lms-api-test",
+			Issuer:    "muallim-api-test",
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
 		},
 		TenantID:  p.TenantID.String(),
@@ -96,7 +96,7 @@ func TestVerifyRejectsAlgNone(t *testing.T) {
 func TestVerifyRejectsWrongSecret(t *testing.T) {
 	t.Parallel()
 
-	forged, err := NewTokenIssuer("a-completely-different-secret-key-32", "lms-api-test")
+	forged, err := NewTokenIssuer("a-completely-different-secret-key-32", "muallim-api-test")
 	if err != nil {
 		t.Fatal(err)
 	}

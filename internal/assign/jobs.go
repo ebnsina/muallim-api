@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
 
-	"github.com/ebnsina/lms-api/internal/platform/blob"
+	"github.com/ebnsina/muallim-api/internal/platform/blob"
 )
 
 // DeleteObjectsArgs removes objects whose rows have gone.

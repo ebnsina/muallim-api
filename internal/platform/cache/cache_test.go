@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ebnsina/lms-api/internal/platform/cache"
+	"github.com/ebnsina/muallim-api/internal/platform/cache"
 )
 
 func TestGetOrLoadCachesHits(t *testing.T) {

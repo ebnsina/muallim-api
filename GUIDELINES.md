@@ -1,4 +1,4 @@
-# Engineering Guidelines — `lms-api`
+# Engineering Guidelines — `muallim-api`
 
 These are rules, not suggestions. A change that violates one should not merge.
 
@@ -331,7 +331,7 @@ git config user.email "ebnsina.me@gmail.com"
 
 Set **per repo**, never globally. Do **not** add a `Co-Authored-By` trailer or any other identity.
 
-Remote uses the `github-es` SSH host alias: `git@github-es:ebnsina/lms-api.git`.
+Remote uses the `github-es` SSH host alias: `git@github-es:ebnsina/muallim-api.git`.
 
 `docs/` and `data/` are gitignored and never committed.
 

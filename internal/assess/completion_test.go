@@ -5,8 +5,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/ebnsina/lms-api/internal/assess"
-	"github.com/ebnsina/lms-api/internal/enroll"
+	"github.com/ebnsina/muallim-api/internal/assess"
+	"github.com/ebnsina/muallim-api/internal/enroll"
 )
 
 // take answers the choice question rightly or wrongly, submits, and grades.

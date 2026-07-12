@@ -7,7 +7,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/ebnsina/lms-api/internal/gamify"
+	"github.com/ebnsina/muallim-api/internal/gamify"
 )
 
 // BadgeView is one badge in the catalogue or on a learner's shelf.

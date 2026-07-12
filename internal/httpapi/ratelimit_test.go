@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ebnsina/lms-api/internal/platform/ratelimit"
+	"github.com/ebnsina/muallim-api/internal/platform/ratelimit"
 )
 
 func throttledHandler(burst int) http.Handler {

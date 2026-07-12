@@ -10,11 +10,11 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
 
-	"github.com/ebnsina/lms-api/internal/assess"
-	"github.com/ebnsina/lms-api/internal/audit"
-	"github.com/ebnsina/lms-api/internal/auth"
-	"github.com/ebnsina/lms-api/internal/enroll"
-	"github.com/ebnsina/lms-api/internal/gamify"
+	"github.com/ebnsina/muallim-api/internal/assess"
+	"github.com/ebnsina/muallim-api/internal/audit"
+	"github.com/ebnsina/muallim-api/internal/auth"
+	"github.com/ebnsina/muallim-api/internal/enroll"
+	"github.com/ebnsina/muallim-api/internal/gamify"
 )
 
 // EraseOrphansArgs sweeps users who belong to no workspace.

@@ -12,7 +12,7 @@ data/
 # Build output
 /bin/
 /tmp/
-lms-api
+muallim-api
 *.exe
 
 # Go

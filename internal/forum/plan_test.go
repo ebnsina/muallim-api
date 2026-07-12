@@ -8,8 +8,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/ebnsina/lms-api/internal/forum"
-	"github.com/ebnsina/lms-api/internal/platform/database"
+	"github.com/ebnsina/muallim-api/internal/forum"
+	"github.com/ebnsina/muallim-api/internal/platform/database"
 )
 
 func explain(t *testing.T, db *database.DB, tenantID uuid.UUID, sql string, args ...any) string {

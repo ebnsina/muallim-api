@@ -6,7 +6,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/ebnsina/lms-api/internal/enroll"
+	"github.com/ebnsina/muallim-api/internal/enroll"
 )
 
 func TestReviewRequiresEnrolmentThenListsAndSummarises(t *testing.T) {

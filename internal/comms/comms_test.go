@@ -14,7 +14,7 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
-	"github.com/ebnsina/lms-api/internal/comms"
+	"github.com/ebnsina/muallim-api/internal/comms"
 )
 
 // testPool connects to the database `make test-db` provides, and skips when there

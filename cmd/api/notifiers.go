@@ -6,13 +6,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/ebnsina/lms-api/internal/assess"
-	"github.com/ebnsina/lms-api/internal/assign"
-	"github.com/ebnsina/lms-api/internal/enroll"
-	"github.com/ebnsina/lms-api/internal/forum"
-	"github.com/ebnsina/lms-api/internal/gamify"
-	"github.com/ebnsina/lms-api/internal/learn"
-	"github.com/ebnsina/lms-api/internal/notify"
+	"github.com/ebnsina/muallim-api/internal/assess"
+	"github.com/ebnsina/muallim-api/internal/assign"
+	"github.com/ebnsina/muallim-api/internal/enroll"
+	"github.com/ebnsina/muallim-api/internal/forum"
+	"github.com/ebnsina/muallim-api/internal/gamify"
+	"github.com/ebnsina/muallim-api/internal/learn"
+	"github.com/ebnsina/muallim-api/internal/notify"
 )
 
 // learnNotifier adapts the notify service to the Notifier interface learn

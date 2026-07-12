@@ -6,13 +6,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/ebnsina/lms-api/internal/assess"
-	"github.com/ebnsina/lms-api/internal/assign"
-	"github.com/ebnsina/lms-api/internal/audit"
-	"github.com/ebnsina/lms-api/internal/auth"
-	"github.com/ebnsina/lms-api/internal/catalog"
-	"github.com/ebnsina/lms-api/internal/certify"
-	"github.com/ebnsina/lms-api/internal/enroll"
+	"github.com/ebnsina/muallim-api/internal/assess"
+	"github.com/ebnsina/muallim-api/internal/assign"
+	"github.com/ebnsina/muallim-api/internal/audit"
+	"github.com/ebnsina/muallim-api/internal/auth"
+	"github.com/ebnsina/muallim-api/internal/catalog"
+	"github.com/ebnsina/muallim-api/internal/certify"
+	"github.com/ebnsina/muallim-api/internal/enroll"
 )
 
 // The dependency rule forbids a domain package from importing a sibling, so auth

@@ -6,7 +6,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/ebnsina/lms-api/internal/grade"
+	"github.com/ebnsina/muallim-api/internal/grade"
 )
 
 /*

@@ -6,7 +6,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/ebnsina/lms-api/internal/auth"
+	"github.com/ebnsina/muallim-api/internal/auth"
 )
 
 // registerOwner claims a fresh workspace and returns the owner's address.

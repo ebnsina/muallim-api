@@ -3,8 +3,8 @@ package main
 import (
 	"log/slog"
 
-	"github.com/ebnsina/lms-api/internal/platform/blob"
-	"github.com/ebnsina/lms-api/internal/platform/config"
+	"github.com/ebnsina/muallim-api/internal/platform/blob"
+	"github.com/ebnsina/muallim-api/internal/platform/config"
 )
 
 // newObjectStore returns the store this deployment was given, or one that refuses.

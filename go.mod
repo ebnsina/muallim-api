@@ -1,4 +1,4 @@
-module github.com/ebnsina/lms-api
+module github.com/ebnsina/muallim-api
 
 go 1.26.4
 

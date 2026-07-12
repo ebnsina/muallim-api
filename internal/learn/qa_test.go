@@ -8,8 +8,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/ebnsina/lms-api/internal/learn"
-	"github.com/ebnsina/lms-api/internal/platform/database"
+	"github.com/ebnsina/muallim-api/internal/learn"
+	"github.com/ebnsina/muallim-api/internal/platform/database"
 )
 
 // seedLessonInCourse makes a published course with one lesson and returns the

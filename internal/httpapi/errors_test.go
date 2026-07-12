@@ -10,17 +10,17 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/ebnsina/lms-api/internal/assess"
-	"github.com/ebnsina/lms-api/internal/assign"
-	"github.com/ebnsina/lms-api/internal/auth"
-	"github.com/ebnsina/lms-api/internal/catalog"
-	"github.com/ebnsina/lms-api/internal/certify"
-	"github.com/ebnsina/lms-api/internal/enroll"
-	"github.com/ebnsina/lms-api/internal/forum"
-	"github.com/ebnsina/lms-api/internal/grade"
-	"github.com/ebnsina/lms-api/internal/learn"
-	"github.com/ebnsina/lms-api/internal/notify"
-	"github.com/ebnsina/lms-api/internal/platform/blob"
+	"github.com/ebnsina/muallim-api/internal/assess"
+	"github.com/ebnsina/muallim-api/internal/assign"
+	"github.com/ebnsina/muallim-api/internal/auth"
+	"github.com/ebnsina/muallim-api/internal/catalog"
+	"github.com/ebnsina/muallim-api/internal/certify"
+	"github.com/ebnsina/muallim-api/internal/enroll"
+	"github.com/ebnsina/muallim-api/internal/forum"
+	"github.com/ebnsina/muallim-api/internal/grade"
+	"github.com/ebnsina/muallim-api/internal/learn"
+	"github.com/ebnsina/muallim-api/internal/notify"
+	"github.com/ebnsina/muallim-api/internal/platform/blob"
 )
 
 // statusOf extracts the HTTP status a mapped error will render as, or 500 when

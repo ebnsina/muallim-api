@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/ebnsina/lms-api/internal/catalog"
+	"github.com/ebnsina/muallim-api/internal/catalog"
 )
 
 // A new course releases everything at once. Drip is opt-in: a course that starts

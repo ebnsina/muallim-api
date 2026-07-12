@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ebnsina/lms-api/internal/platform/ratelimit"
+	"github.com/ebnsina/muallim-api/internal/platform/ratelimit"
 )
 
 // throttledPrefixes are the paths worth limiting: everything that verifies a

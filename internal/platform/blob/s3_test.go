@@ -14,7 +14,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/ebnsina/lms-api/internal/platform/blob"
+	"github.com/ebnsina/muallim-api/internal/platform/blob"
 )
 
 /*

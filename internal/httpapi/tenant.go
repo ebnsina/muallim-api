@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/ebnsina/lms-api/internal/tenant"
+	"github.com/ebnsina/muallim-api/internal/tenant"
 )
 
 // systemPaths serve the platform rather than a tenant: probes, the OpenAPI
