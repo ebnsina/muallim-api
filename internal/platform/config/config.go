@@ -210,8 +210,8 @@ func Load() (Config, error) {
 		WebBaseURL: env("MUALLIM_WEB_BASE_URL", "http://localhost:5173"),
 		APIBaseURL: env("MUALLIM_API_BASE_URL", "http://localhost:8080"),
 
-		FakeGatewayEnabled:     env("MUALLIM_FAKE_GATEWAY", "true") == "true",
-		FakeGatewaySecret:      env("MUALLIM_FAKE_GATEWAY_SECRET", "fake-gateway-secret"),
+		FakeGatewayEnabled:     env("MUALLIM_FAKE_GATEWAY", "false") == "true",
+		FakeGatewaySecret:      env("MUALLIM_FAKE_GATEWAY_SECRET", ""),
 		StripeSecretKey:        env("MUALLIM_STRIPE_SECRET_KEY", ""),
 		StripeWebhookSecret:    env("MUALLIM_STRIPE_WEBHOOK_SECRET", ""),
 		SSLCommerzEnabled:      env("MUALLIM_SSLCOMMERZ", "false") == "true",
@@ -311,6 +311,26 @@ func (c Config) validate() error {
 	}
 	if c.JWTSecret == "" && c.Env != EnvDevelopment {
 		errs = append(errs, errors.New("config: MUALLIM_JWT_SECRET is required outside development"))
+	}
+
+	/*
+		The fake gateway settles orders on a signed webhook, and a shared secret is the
+		whole of that signature. Shipped with a default secret it would authenticate a
+		forged "paid" webhook from anybody who read the source — free enrolment, no
+		browser. So it fails closed: enabled means a secret is required, the old default
+		is refused by name, and it may not run in production at all, where it has no
+		business settling a customer's course access with money that never moved.
+	*/
+	if c.FakeGatewayEnabled {
+		if c.IsProduction() {
+			errs = append(errs, errors.New("config: MUALLIM_FAKE_GATEWAY must be off in production; it settles orders without taking money"))
+		}
+		if c.FakeGatewaySecret == "" {
+			errs = append(errs, errors.New("config: MUALLIM_FAKE_GATEWAY is on but MUALLIM_FAKE_GATEWAY_SECRET is unset; a webhook secret is not optional"))
+		}
+		if c.FakeGatewaySecret == "fake-gateway-secret" {
+			errs = append(errs, errors.New("config: MUALLIM_FAKE_GATEWAY_SECRET is the shipped default, which is public; set your own"))
+		}
 	}
 
 	// Every mailed link points at the web client. A relative or malformed base URL

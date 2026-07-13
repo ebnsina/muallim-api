@@ -11,8 +11,14 @@ import (
 
 // SetName changes a person's display name.
 func (r *PostgresRepository) SetName(ctx context.Context, tx pgx.Tx, tenantID, userID uuid.UUID, name string) error {
+	// The tenant predicate is defence in depth beside RLS, and matches the sibling
+	// SetPasswordHash: RLS is the net, not the only control, and a statement that
+	// takes a tenantID must use it rather than trust the net alone.
 	tag, err := tx.Exec(ctx,
-		`UPDATE users SET name = $2, updated_at = now() WHERE id = $1`, userID, name)
+		`UPDATE users SET name = $2, updated_at = now()
+		 WHERE id = $1
+		   AND EXISTS (SELECT 1 FROM memberships m WHERE m.user_id = users.id AND m.tenant_id = $3)`,
+		userID, name, tenantID)
 	if err != nil {
 		return fmt.Errorf("auth: set name: %w", err)
 	}
@@ -26,7 +32,11 @@ func (r *PostgresRepository) SetName(ctx context.Context, tx pgx.Tx, tenantID, u
 // returned to nothing else.
 func (r *PostgresRepository) PasswordHash(ctx context.Context, tx pgx.Tx, tenantID, userID uuid.UUID) (string, error) {
 	var hash string
-	err := tx.QueryRow(ctx, `SELECT password_hash FROM users WHERE id = $1`, userID).Scan(&hash)
+	err := tx.QueryRow(ctx,
+		`SELECT password_hash FROM users
+		 WHERE id = $1
+		   AND EXISTS (SELECT 1 FROM memberships m WHERE m.user_id = users.id AND m.tenant_id = $2)`,
+		userID, tenantID).Scan(&hash)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", ErrNotMember

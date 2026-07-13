@@ -322,6 +322,14 @@ func (s *Service) ChangeMemberRole(ctx context.Context, p Principal, userID uuid
 			return nil // idempotent
 		}
 
+		// An admin holds user:manage, but managing an owner is an owner's own
+		// prerogative. This is the mirror of the guard above that stops a non-owner
+		// creating an owner — without it an admin could demote every co-owner and
+		// leave the workspace with one owner it chose.
+		if current.Role == RoleOwner && p.Role != RoleOwner {
+			return fmt.Errorf("%w: only an owner may change an owner's role", ErrForbidden)
+		}
+
 		if current.Role == RoleOwner {
 			owners, err := s.members.CountOwners(ctx, tx, p.TenantID)
 			if err != nil {
@@ -336,9 +344,10 @@ func (s *Service) ChangeMemberRole(ctx context.Context, p Principal, userID uuid
 			return err
 		}
 
-		// Their access token still carries the old role until it expires. Revoking
-		// their sessions makes a demotion take effect now rather than in fifteen
-		// minutes, which is the whole point of demoting somebody.
+		// Their refresh token dies now, so no new access token is minted with the old
+		// role; the access token already in their hand is stateless and outlives this
+		// by up to fifteen minutes. Containment is within the quarter hour, not the
+		// second — the same tradeoff a password change makes.
 		if err := s.members.RevokeAllUserSessions(ctx, tx, p.TenantID, userID); err != nil {
 			return err
 		}
@@ -369,6 +378,12 @@ func (s *Service) RemoveMember(ctx context.Context, p Principal, userID uuid.UUI
 		current, err := s.members.MembershipFor(ctx, tx, p.TenantID, userID)
 		if err != nil {
 			return err
+		}
+
+		// Only an owner may remove an owner. An admin managing members may not eject
+		// the people who outrank them.
+		if current.Role == RoleOwner && p.Role != RoleOwner {
+			return fmt.Errorf("%w: only an owner may remove an owner", ErrForbidden)
 		}
 
 		if current.Role == RoleOwner {

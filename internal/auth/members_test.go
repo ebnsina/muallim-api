@@ -557,3 +557,60 @@ func TestAMadeUpCursorIsRefused(t *testing.T) {
 		}
 	}
 }
+
+/*
+An admin may manage members, but not the owners above them.
+
+Creating an owner was already guarded; demoting or removing one was not, so an
+admin could strip every co-owner down to the last and leave the workspace with the
+one owner they chose. This is the mirror of the create guard, in both directions.
+*/
+func TestAnAdminCannotUnseatAnOwner(t *testing.T) {
+	t.Parallel()
+
+	db := testDB(t)
+	svc := newService(t, db)
+	tenantID := seedTenant(t, db)
+	owner, _ := claim(t, svc, tenantID)
+
+	// A second owner, so the last-owner guard is not what refuses the admin — the
+	// rank guard is.
+	_, ownerToken, err := svc.Invite(t.Context(), owner, uniqueEmail(), auth.RoleOwner, "Test Workspace", auth.RequestContext{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pair2, _, _, err := svc.AcceptInvitation(t.Context(), tenantID, ownerToken, password, "Owner Two", auth.RequestContext{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondOwner, err := svc.Verify(pair2.AccessToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// And an admin.
+	_, adminToken, err := svc.Invite(t.Context(), owner, uniqueEmail(), auth.RoleAdmin, "Test Workspace", auth.RequestContext{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pair3, _, _, err := svc.AcceptInvitation(t.Context(), tenantID, adminToken, password, "Admin", auth.RequestContext{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin, err := svc.Verify(pair3.AccessToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.ChangeMemberRole(t.Context(), admin, secondOwner.UserID, auth.RoleStudent, auth.RequestContext{}); !errors.Is(err, auth.ErrForbidden) {
+		t.Errorf("demote an owner returned %v, want ErrForbidden", err)
+	}
+	if err := svc.RemoveMember(t.Context(), admin, secondOwner.UserID, auth.RequestContext{}); !errors.Is(err, auth.ErrForbidden) {
+		t.Errorf("remove an owner returned %v, want ErrForbidden", err)
+	}
+
+	// An owner still may — the guard is about rank, not about owners being untouchable.
+	if err := svc.ChangeMemberRole(t.Context(), owner, secondOwner.UserID, auth.RoleAdmin, auth.RequestContext{}); err != nil {
+		t.Errorf("an owner could not demote a co-owner: %v", err)
+	}
+}

@@ -9,6 +9,10 @@ import (
 
 const key = "6f1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8"
 
+// The context a secret is bound to. In the app it is tenant id + gateway; here it
+// only has to be some bytes, and a different some bytes to prove binding works.
+var aad = []byte("tenant-42|sslcommerz")
+
 func newSealer(t *testing.T) *secret.Sealer {
 	t.Helper()
 
@@ -22,7 +26,7 @@ func newSealer(t *testing.T) *secret.Sealer {
 func TestASealedSecretComesBack(t *testing.T) {
 	s := newSealer(t)
 
-	sealed, err := s.Seal("store-password")
+	sealed, err := s.Seal("store-password", aad)
 	if err != nil {
 		t.Fatalf("seal: %v", err)
 	}
@@ -31,7 +35,7 @@ func TestASealedSecretComesBack(t *testing.T) {
 		t.Fatal("the plaintext is still readable in the ciphertext")
 	}
 
-	opened, err := s.Open(sealed)
+	opened, err := s.Open(sealed, aad)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -45,11 +49,11 @@ func TestASealedSecretComesBack(t *testing.T) {
 func TestTheSameSecretSealsDifferentlyEveryTime(t *testing.T) {
 	s := newSealer(t)
 
-	first, err := s.Seal("same")
+	first, err := s.Seal("same", aad)
 	if err != nil {
 		t.Fatalf("seal: %v", err)
 	}
-	second, err := s.Seal("same")
+	second, err := s.Seal("same", aad)
 	if err != nil {
 		t.Fatalf("seal: %v", err)
 	}
@@ -62,13 +66,13 @@ func TestTheSameSecretSealsDifferentlyEveryTime(t *testing.T) {
 func TestAnEditedCiphertextDoesNotOpen(t *testing.T) {
 	s := newSealer(t)
 
-	sealed, err := s.Seal("store-password")
+	sealed, err := s.Seal("store-password", aad)
 	if err != nil {
 		t.Fatalf("seal: %v", err)
 	}
 
 	sealed[len(sealed)-1] ^= 0xff
-	if _, err := s.Open(sealed); err == nil {
+	if _, err := s.Open(sealed, aad); err == nil {
 		t.Fatal("a tampered ciphertext opened")
 	}
 }
@@ -76,7 +80,7 @@ func TestAnEditedCiphertextDoesNotOpen(t *testing.T) {
 func TestAnotherKeyDoesNotOpenIt(t *testing.T) {
 	s := newSealer(t)
 
-	sealed, err := s.Seal("store-password")
+	sealed, err := s.Seal("store-password", aad)
 	if err != nil {
 		t.Fatalf("seal: %v", err)
 	}
@@ -85,7 +89,7 @@ func TestAnotherKeyDoesNotOpenIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new sealer: %v", err)
 	}
-	if _, err := other.Open(sealed); err == nil {
+	if _, err := other.Open(sealed, aad); err == nil {
 		t.Fatal("a ciphertext opened under the wrong key")
 	}
 }
@@ -101,5 +105,24 @@ func TestAKeyThatIsNotAKeyIsRefused(t *testing.T) {
 				t.Fatal("the key was accepted")
 			}
 		})
+	}
+}
+
+// The point of the aad: a ciphertext sealed for one context does not open under
+// another, even with the right key. It is what stops a row being moved between
+// workspaces and decrypted in the wrong one.
+func TestACiphertextDoesNotOpenUnderAnotherContext(t *testing.T) {
+	s := newSealer(t)
+
+	sealed, err := s.Seal("store-password", []byte("tenant-A|bkash"))
+	if err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+
+	if _, err := s.Open(sealed, []byte("tenant-B|bkash")); err == nil {
+		t.Fatal("a ciphertext opened for a workspace it was not sealed for")
+	}
+	if _, err := s.Open(sealed, []byte("tenant-A|stripe")); err == nil {
+		t.Fatal("a ciphertext opened for a gateway it was not sealed for")
 	}
 }

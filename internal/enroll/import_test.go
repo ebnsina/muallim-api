@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -13,6 +14,10 @@ import (
 	"github.com/ebnsina/muallim-api/internal/enroll"
 	"github.com/ebnsina/muallim-api/internal/platform/database"
 )
+
+// uniqueEmail is a fresh address per call, so a rerun does not collide on the
+// users_email_key from rows the last run left behind.
+func uniqueEmail() string { return "u" + uuid.NewString()[:8] + "@example.test" }
 
 // directory is what cmd/ wires over auth: enroll asks who holds an address, and
 // auth's own table answers.
@@ -69,8 +74,8 @@ func TestImportingACohortReportsWhatBecameOfEveryAddress(t *testing.T) {
 	tenantID := seedTenant(t, db)
 	slug, _ := seedCourse(t, db, tenantID, 2, true)
 
-	joining := "joining@example.test"
-	already := "already@example.test"
+	joining := uniqueEmail()
+	already := uniqueEmail()
 	seedMember(t, db, tenantID, joining)
 	alreadyID := seedMember(t, db, tenantID, already)
 
@@ -79,11 +84,12 @@ func TestImportingACohortReportsWhatBecameOfEveryAddress(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	nobody := uniqueEmail()
 	results, err := svc.Import(t.Context(), tenantID, slug, []string{
-		"  JOINING@example.test ", // trimmed and lower-cased
+		"  " + strings.ToUpper(joining) + " ", // trimmed and lower-cased
 		already,
-		"nobody@example.test", // holds no account here
-		joining,               // listed twice; reported once
+		nobody,  // holds no account here
+		joining, // listed twice; reported once
 	}, actorFor(seedUser(t, db, tenantID)))
 	if err != nil {
 		t.Fatalf("Import: %v", err)
@@ -91,9 +97,9 @@ func TestImportingACohortReportsWhatBecameOfEveryAddress(t *testing.T) {
 
 	got := outcomes(results)
 	want := map[string]string{
-		joining:               enroll.OutcomeEnrolled,
-		already:               enroll.OutcomeAlready,
-		"nobody@example.test": enroll.OutcomeUnknown,
+		joining: enroll.OutcomeEnrolled,
+		already: enroll.OutcomeAlready,
+		nobody:  enroll.OutcomeUnknown,
 	}
 	if len(got) != len(want) {
 		t.Fatalf("the report has %d lines, want %d: %+v", len(got), len(want), got)
@@ -115,7 +121,7 @@ func TestImportingCreatesNoAccounts(t *testing.T) {
 	tenantID := seedTenant(t, db)
 	slug, _ := seedCourse(t, db, tenantID, 1, true)
 
-	stranger := "stranger@example.test"
+	stranger := uniqueEmail()
 	if _, err := svc.Import(t.Context(), tenantID, slug, []string{stranger},
 		actorFor(seedUser(t, db, tenantID))); err != nil {
 		t.Fatalf("Import: %v", err)
@@ -186,7 +192,7 @@ func TestImportingSomebodyWhoBoughtTheCourseKeepsThePurchase(t *testing.T) {
 	tenantID := seedTenant(t, db)
 	slug, _ := seedCourse(t, db, tenantID, 2, true)
 
-	email := "buyer@example.test"
+	email := uniqueEmail()
 	buyer := seedMember(t, db, tenantID, email)
 
 	// Enrolled the way a paid webhook enrols somebody.

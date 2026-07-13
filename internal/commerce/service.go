@@ -55,10 +55,23 @@ Sealer encrypts a workspace's gateway secret at rest.
 Declared here and satisfied in platform: a store password sitting in plaintext in a
 table is a store password in every backup, every replica, and every `pg_dump` that
 somebody once emailed themselves. The key is not in the database.
+
+The aad binds a ciphertext to the (tenant, gateway) it belongs to. It is not stored
+— it is re-derived from the row on the way back in — so a ciphertext lifted into
+another workspace's row fails to open rather than handing over a live secret.
 */
 type Sealer interface {
-	Seal(plaintext string) ([]byte, error)
-	Open(ciphertext []byte) (string, error)
+	Seal(plaintext string, aad []byte) ([]byte, error)
+	Open(ciphertext, aad []byte) (string, error)
+}
+
+// credentialAAD is what a workspace's sealed secret is bound to: the tenant that
+// owns it and the gateway it is for. Move the ciphertext to another row and this no
+// longer matches, so GCM refuses it instead of decrypting a secret into wrong hands.
+func credentialAAD(tenantID uuid.UUID, gateway string) []byte {
+	aad := make([]byte, 0, len(tenantID)+len(gateway))
+	aad = append(aad, tenantID[:]...)
+	return append(aad, gateway...)
 }
 
 // AuditEntry is one line of the audit trail.
@@ -255,7 +268,7 @@ func (s *Service) account(ctx context.Context, tenantID uuid.UUID, gateway strin
 	}
 
 	if len(cipher) > 0 {
-		secret, err := s.seal.Open(cipher)
+		secret, err := s.seal.Open(cipher, credentialAAD(tenantID, gateway))
 		if err != nil {
 			return Account{}, fmt.Errorf("%w: %v", ErrCredentials, err)
 		}
@@ -280,7 +293,7 @@ func (s *Service) SetCredentials(ctx context.Context, tenantID uuid.UUID, gatewa
 		return ErrCredentials
 	}
 
-	cipher, err := s.seal.Seal(creds.Secret)
+	cipher, err := s.seal.Seal(creds.Secret, credentialAAD(tenantID, gateway))
 	if err != nil {
 		return fmt.Errorf("commerce: seal credentials: %w", err)
 	}
@@ -477,7 +490,7 @@ func (s *Service) Buy(ctx context.Context, tenantID uuid.UUID, slug string, lear
 			return err
 		}
 		if len(cipher) > 0 {
-			secret, err := s.seal.Open(cipher)
+			secret, err := s.seal.Open(cipher, credentialAAD(tenantID, gateway))
 			if err != nil {
 				return fmt.Errorf("%w: %v", ErrCredentials, err)
 			}

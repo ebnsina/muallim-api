@@ -7,9 +7,10 @@ sit in a table, so they sit in every backup, every replica, and every pg_dump th
 somebody once emailed themselves. Encrypting them there moves the secret out of the
 database and into the environment, which is where a key belongs.
 
-AES-256-GCM: authenticated, so a ciphertext somebody edited will not open, and a
-row swapped between tenants will not open either — the account id is bound in as
-additional data.
+AES-256-GCM: authenticated, so a ciphertext somebody edited will not open. And the
+caller binds context in as additional data — the tenant and gateway a credential
+belongs to — so a ciphertext lifted out of one workspace's row and dropped into
+another's fails to open rather than decrypting to a live secret in the wrong hands.
 */
 package secret
 
@@ -70,23 +71,28 @@ crypto/rand is how you get one that will not. Storing it beside the ciphertext i
 the ordinary practice; storing it *inside* the ciphertext is a nonce you cannot read
 back, which is a ciphertext you cannot open.
 */
-func (s *Sealer) Seal(plaintext string) ([]byte, error) {
+// aad identifies what this secret belongs to. The same value must be given to Open,
+// or the ciphertext will not decrypt — which is the whole point: it is not stored,
+// it is re-derived from the row, so a ciphertext in the wrong row is authenticated
+// against the wrong context and refused.
+func (s *Sealer) Seal(plaintext string, aad []byte) ([]byte, error) {
 	nonce := make([]byte, s.aead.NonceSize())
 	if _, err := rand.Read(nonce); err != nil {
 		return nil, fmt.Errorf("secret: nonce: %w", err)
 	}
-	return s.aead.Seal(nonce, nonce, []byte(plaintext), nil), nil
+	return s.aead.Seal(nonce, nonce, []byte(plaintext), aad), nil
 }
 
-// Open decrypts. A ciphertext that was truncated, edited, or sealed under another
-// key does not open — GCM refuses it rather than returning plausible rubbish.
-func (s *Sealer) Open(ciphertext []byte) (string, error) {
+// Open decrypts. A ciphertext that was truncated, edited, sealed under another key,
+// or bound to a different aad does not open — GCM refuses it rather than returning
+// plausible rubbish.
+func (s *Sealer) Open(ciphertext, aad []byte) (string, error) {
 	size := s.aead.NonceSize()
 	if len(ciphertext) < size {
 		return "", errors.New("secret: the ciphertext is too short to hold a nonce")
 	}
 
-	plaintext, err := s.aead.Open(nil, ciphertext[:size], ciphertext[size:], nil)
+	plaintext, err := s.aead.Open(nil, ciphertext[:size], ciphertext[size:], aad)
 	if err != nil {
 		return "", fmt.Errorf("secret: open: %w", err)
 	}
