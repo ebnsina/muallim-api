@@ -96,9 +96,7 @@ func TestEraseOrphanedUsersErasesAUserWithNoMembership(t *testing.T) {
 		t.Fatal("the fixture did not create a user")
 	}
 
-	if _, err := newMaintenance(t, db).EraseOrphanedUsers(t.Context(), 1000); err != nil {
-		t.Fatalf("erase: %v", err)
-	}
+	sweep(t, newMaintenance(t, db))
 
 	if userExists(t, db, userID) {
 		t.Error("an orphaned user survived erasure")
@@ -119,9 +117,7 @@ func TestEraseOrphanedUsersSparesAUserWhoStillBelongsSomewhere(t *testing.T) {
 		t.Fatalf("register: %v", err)
 	}
 
-	if _, err := newMaintenance(t, db).EraseOrphanedUsers(t.Context(), 1000); err != nil {
-		t.Fatalf("erase: %v", err)
-	}
+	sweep(t, newMaintenance(t, db))
 
 	if !memberExists(t, db, tenantID, member.ID) {
 		t.Error("a user who still belongs to a workspace was erased")
@@ -228,9 +224,7 @@ func TestErasureCascadesButKeepsTheAuditTrail(t *testing.T) {
 		t.Fatalf("fixture is uninteresting: sessions=%d audit entries naming them=%d", sessionsBefore, auditBefore)
 	}
 
-	if _, err := newMaintenance(t, db).EraseOrphanedUsers(t.Context(), 1000); err != nil {
-		t.Fatalf("erase: %v", err)
-	}
+	sweep(t, newMaintenance(t, db))
 
 	sessionsAfter, auditRows, auditWithActor := counts(t)
 
@@ -275,4 +269,29 @@ func TestNewMaintenanceRefusesMissingDependencies(t *testing.T) {
 	if _, err := auth.NewMaintenance(&database.DB{}, nil, discardLogger()); err == nil {
 		t.Error("NewMaintenance accepted a nil repository")
 	}
+}
+
+/*
+sweep runs the erasure until it has nothing left to erase.
+
+One batch is not enough, and that is not a detail of the test — it is how the sweep
+works. It takes the *oldest* orphans first, in batches, so a user created a moment
+ago is at the back of a queue that may be thousands long. A test that swept once and
+expected its own user gone was really asserting that the shared test database was
+empty, which it is not and cannot be relied upon to be. The worker runs this on a
+schedule until it drains; so does this.
+*/
+func sweep(t *testing.T, m *auth.Maintenance) {
+	t.Helper()
+
+	for range 100 {
+		erased, err := m.EraseOrphanedUsers(t.Context(), 1000)
+		if err != nil {
+			t.Fatalf("erase: %v", err)
+		}
+		if erased == 0 {
+			return
+		}
+	}
+	t.Fatal("the sweep never drained: a hundred batches of a thousand and still orphans")
 }
