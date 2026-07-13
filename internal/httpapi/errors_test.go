@@ -115,6 +115,7 @@ func TestMembershipSentinelsMapToADeliberateStatus(t *testing.T) {
 		auth.ErrInvitationInvalid:  http.StatusNotFound,
 		auth.ErrInvalidCredentials: http.StatusUnauthorized,
 		auth.ErrNameInvalid:        http.StatusUnprocessableEntity,
+		auth.ErrInvalidPage:        http.StatusUnprocessableEntity,
 		auth.ErrAlreadyMember:      http.StatusConflict,
 		auth.ErrInvitationPending:  http.StatusConflict,
 		auth.ErrRegistrationClosed: http.StatusForbidden,
@@ -438,6 +439,7 @@ func TestCertifySentinelsMapToADeliberateStatus(t *testing.T) {
 	t.Parallel()
 
 	tests := map[error]int{
+		certify.ErrInvalidPage:     http.StatusUnprocessableEntity,
 		certify.ErrNotFound:        http.StatusNotFound,
 		certify.ErrTemplateExists:  http.StatusConflict,
 		certify.ErrRevoked:         http.StatusConflict,

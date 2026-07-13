@@ -441,22 +441,119 @@ func TestListMembersAndInvitations(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	members, err := svc.Members(t.Context(), owner, 50)
+	page, err := svc.Members(t.Context(), owner, auth.PageParams{Limit: 50})
 	if err != nil {
 		t.Fatal(err)
 	}
+	members := page.Items
 	if len(members) != 1 || members[0].User.Email != ownerEmail || members[0].Role != auth.RoleOwner {
 		t.Errorf("members = %+v, want exactly the owner", members)
 	}
+	if page.HasMore || page.NextCursor != "" {
+		t.Error("one member is not more than a page")
+	}
 
-	invitations, err := svc.Invitations(t.Context(), owner, 50)
+	invited, err := svc.Invitations(t.Context(), owner, auth.PageParams{Limit: 50})
 	if err != nil {
 		t.Fatal(err)
 	}
+	invitations := invited.Items
 	if len(invitations) != 1 {
 		t.Fatalf("invitations = %d, want 1", len(invitations))
 	}
 	if got := invitations[0].Status(invitations[0].CreatedAt); got != "pending" {
 		t.Errorf("status = %q, want pending", got)
+	}
+}
+
+/*
+The page that could not be turned.
+
+`/v1/members` capped at two hundred and offered no cursor, so a school with more
+members than that could not be read to the end. The list stopped, and said nothing
+about stopping — which is the worst way for a list to be wrong.
+
+This walks a workspace larger than a page and insists on what a keyset promises:
+nobody listed twice, and nobody missed.
+*/
+func TestEveryMemberCanBeReachedByTurningPages(t *testing.T) {
+	t.Parallel()
+
+	db := testDB(t)
+	svc := newService(t, db)
+	tenantID := seedTenant(t, db)
+	owner, ownerEmail := claim(t, svc, tenantID)
+
+	// Five more people who actually joined: an invitation is not a membership until
+	// somebody accepts it.
+	const joiners = 5
+	for range joiners {
+		email := uniqueEmail()
+		_, token, err := svc.Invite(t.Context(), owner, email, auth.RoleStudent,
+			"Test Workspace", auth.RequestContext{})
+		if err != nil {
+			t.Fatalf("Invite: %v", err)
+		}
+		if _, _, _, err := svc.AcceptInvitation(t.Context(), tenantID, token, password,
+			"Joiner", auth.RequestContext{}); err != nil {
+			t.Fatalf("AcceptInvitation: %v", err)
+		}
+	}
+
+	seen := map[string]int{}
+	cursor := ""
+
+	for pages := 0; ; pages++ {
+		if pages > 10 {
+			t.Fatal("the cursor never ran out: a page that always has more is a page that never turns")
+		}
+
+		page, err := svc.Members(t.Context(), owner, auth.PageParams{Limit: 2, Cursor: cursor})
+		if err != nil {
+			t.Fatalf("Members: %v", err)
+		}
+		for _, m := range page.Items {
+			seen[m.User.Email]++
+		}
+
+		if !page.HasMore {
+			if page.NextCursor != "" {
+				t.Error("the last page still offered a cursor")
+			}
+			break
+		}
+		if page.NextCursor == "" {
+			t.Fatal("there is more, and no way to ask for it")
+		}
+		cursor = page.NextCursor
+	}
+
+	if len(seen) != joiners+1 {
+		t.Errorf("paging found %d members, want %d — somebody was skipped", len(seen), joiners+1)
+	}
+	if seen[ownerEmail] != 1 {
+		t.Errorf("the owner was seen %d times, want exactly once", seen[ownerEmail])
+	}
+	for email, count := range seen {
+		if count != 1 {
+			t.Errorf("%s appeared %d times across the pages", email, count)
+		}
+	}
+}
+
+// A cursor this API did not issue is refused, rather than quietly serving page one.
+func TestAMadeUpCursorIsRefused(t *testing.T) {
+	t.Parallel()
+
+	db := testDB(t)
+	svc := newService(t, db)
+	tenantID := seedTenant(t, db)
+	owner, _ := claim(t, svc, tenantID)
+
+	for _, token := range []string{"not-base64!", "bm90LWEtY3Vyc29y"} {
+		_, err := svc.Members(t.Context(), owner, auth.PageParams{Cursor: token})
+		if !errors.Is(err, auth.ErrInvalidPage) {
+			t.Errorf("cursor %q returned %v, want ErrInvalidPage", token, err)
+		}
 	}
 }

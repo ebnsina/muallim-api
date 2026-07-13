@@ -17,11 +17,11 @@ type MembershipRepository interface {
 	InvitationByDigest(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, digest []byte) (Invitation, error)
 	MarkInvitationAccepted(ctx context.Context, tx pgx.Tx, tenantID, invitationID uuid.UUID) (bool, error)
 	RevokeInvitation(ctx context.Context, tx pgx.Tx, tenantID, invitationID uuid.UUID) (bool, error)
-	ListInvitations(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, limit int) ([]Invitation, error)
+	ListInvitations(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, after *cursor, limit int) ([]Invitation, error)
 
 	InvitedUserByEmail(ctx context.Context, tx pgx.Tx, email string) (User, string, bool, error)
 	MembershipFor(ctx context.Context, tx pgx.Tx, tenantID, userID uuid.UUID) (Membership, error)
-	ListMembers(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, limit int) ([]Member, error)
+	ListMembers(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, after *cursor, limit int) ([]Member, error)
 
 	CountOwners(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) (int, error)
 	LockMemberships(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) error
@@ -246,25 +246,49 @@ func (s *Service) RevokeInvitationByID(ctx context.Context, p Principal, invitat
 }
 
 // Invitations lists the workspace's invitations, newest first.
-func (s *Service) Invitations(ctx context.Context, p Principal, limit int) ([]Invitation, error) {
-	var out []Invitation
-	err := s.db.WithTenantReadOnly(ctx, p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+func (s *Service) Invitations(ctx context.Context, p Principal, params PageParams) (Page[Invitation], error) {
+	limit, after, err := params.clamp()
+	if err != nil {
+		return Page[Invitation]{}, err
+	}
+
+	var rows []Invitation
+	err = s.db.WithTenantReadOnly(ctx, p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		out, err = s.members.ListInvitations(ctx, tx, p.TenantID, limit)
+		rows, err = s.members.ListInvitations(ctx, tx, p.TenantID, after, limit)
 		return err
 	})
-	return out, err
+	if err != nil {
+		return Page[Invitation]{}, err
+	}
+
+	return page(rows, limit, func(i Invitation) cursor {
+		return cursor{CreatedAt: i.CreatedAt, ID: i.ID}
+	}), nil
 }
 
-// Members lists the workspace's members.
-func (s *Service) Members(ctx context.Context, p Principal, limit int) ([]Member, error) {
-	var out []Member
-	err := s.db.WithTenantReadOnly(ctx, p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+// Members lists a page of the workspace's members, oldest first.
+func (s *Service) Members(ctx context.Context, p Principal, params PageParams) (Page[Member], error) {
+	limit, after, err := params.clamp()
+	if err != nil {
+		return Page[Member]{}, err
+	}
+
+	var rows []Member
+	err = s.db.WithTenantReadOnly(ctx, p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		out, err = s.members.ListMembers(ctx, tx, p.TenantID, limit)
+		rows, err = s.members.ListMembers(ctx, tx, p.TenantID, after, limit)
 		return err
 	})
-	return out, err
+	if err != nil {
+		return Page[Member]{}, err
+	}
+
+	// The sort key is the membership's, not the user's: the same person may hold an
+	// account far older than their place in this workspace.
+	return page(rows, limit, func(m Member) cursor {
+		return cursor{CreatedAt: m.JoinedAt, ID: m.MembershipID}
+	}), nil
 }
 
 // ChangeMemberRole promotes or demotes a member.

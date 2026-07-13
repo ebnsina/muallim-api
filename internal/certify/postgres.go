@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -113,13 +114,14 @@ func (r *PostgresRepository) BySerial(ctx context.Context, tx pgx.Tx, tenantID u
 	return certificate, nil
 }
 
-func (r *PostgresRepository) ForLearner(ctx context.Context, tx pgx.Tx, tenantID, userID uuid.UUID) ([]Certificate, error) {
+func (r *PostgresRepository) ForLearner(ctx context.Context, tx pgx.Tx, tenantID, userID uuid.UUID, limit int) ([]Certificate, error) {
 	rows, err := tx.Query(ctx,
 		`SELECT `+certificateColumns+`
 		   FROM certificates
 		  WHERE tenant_id = $1 AND user_id = $2
-		  ORDER BY issued_at DESC, id`,
-		tenantID, userID)
+		  ORDER BY issued_at DESC, id DESC
+		  LIMIT $3`,
+		tenantID, userID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("certify: list a learner's certificates: %w", err)
 	}
@@ -255,4 +257,41 @@ func (r *PostgresRepository) SetCourseTemplate(ctx context.Context, tx pgx.Tx, t
 		return ErrNotFound
 	}
 	return nil
+}
+
+// Issued is a page of what the workspace has awarded, newest first.
+//
+// Newest first, so the keyset runs backwards: `(issued_at, id) < ($2, $3)`. One
+// comparison against the index that already satisfies the sort.
+func (r *PostgresRepository) Issued(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, after *cursor, limit int) ([]Certificate, error) {
+	var (
+		afterTime *time.Time
+		afterID   *uuid.UUID
+	)
+	if after != nil {
+		afterTime, afterID = &after.IssuedAt, &after.ID
+	}
+
+	rows, err := tx.Query(ctx,
+		`SELECT `+certificateColumns+`
+		   FROM certificates
+		  WHERE tenant_id = $1
+		    AND ($2::timestamptz IS NULL OR (issued_at, id) < ($2, $3))
+		  ORDER BY issued_at DESC, id DESC
+		  LIMIT $4`,
+		tenantID, afterTime, afterID, limit+1)
+	if err != nil {
+		return nil, fmt.Errorf("certify: list issued certificates: %w", err)
+	}
+	defer rows.Close()
+
+	var certificates []Certificate
+	for rows.Next() {
+		certificate, err := scanCertificate(rows)
+		if err != nil {
+			return nil, fmt.Errorf("certify: scan certificate: %w", err)
+		}
+		certificates = append(certificates, certificate)
+	}
+	return certificates, rows.Err()
 }

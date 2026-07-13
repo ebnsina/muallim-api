@@ -24,7 +24,8 @@ type Repository interface {
 	Subject(ctx context.Context, tx pgx.Tx, tenantID, courseID, userID uuid.UUID) (Subject, error)
 
 	BySerial(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, serial string) (Certificate, error)
-	ForLearner(ctx context.Context, tx pgx.Tx, tenantID, userID uuid.UUID) ([]Certificate, error)
+	ForLearner(ctx context.Context, tx pgx.Tx, tenantID, userID uuid.UUID, limit int) ([]Certificate, error)
+	Issued(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, after *cursor, limit int) ([]Certificate, error)
 	Revoke(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, serial, reason string) error
 
 	TemplateByID(ctx context.Context, tx pgx.Tx, tenantID, templateID uuid.UUID) (Template, error)
@@ -186,17 +187,43 @@ func (s *Service) Verify(ctx context.Context, tenantID uuid.UUID, serial string)
 	return certificate, err
 }
 
-// Mine is a learner's own certificates, newest first.
+// Mine is a learner's own certificates, newest first. Bounded, like every list
+// here: a person who has earned a hundred of them has earned a second page.
 func (s *Service) Mine(ctx context.Context, tenantID, userID uuid.UUID) ([]Certificate, error) {
 	var certificates []Certificate
 
 	err := s.db.WithTenantReadOnly(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		certificates, err = s.repo.ForLearner(ctx, tx, tenantID, userID)
+		certificates, err = s.repo.ForLearner(ctx, tx, tenantID, userID, MaxPageSize)
 		return err
 	})
 
 	return certificates, err
+}
+
+/*
+Issued is what the workspace has awarded, newest first.
+
+Nothing could ask this before: the only way in was a serial, and a serial is what
+somebody who already holds a certificate has. A registrar looking for the one they
+issued last Tuesday had nowhere to look.
+*/
+func (s *Service) Issued(ctx context.Context, tenantID uuid.UUID, params PageParams) (Page, error) {
+	limit, after, err := params.clamp()
+	if err != nil {
+		return Page{}, err
+	}
+
+	var rows []Certificate
+	err = s.db.WithTenantReadOnly(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		rows, err = s.repo.Issued(ctx, tx, tenantID, after, limit)
+		return err
+	})
+	if err != nil {
+		return Page{}, err
+	}
+	return paginate(rows, limit), nil
 }
 
 // Revoke marks a certificate as no longer standing, and says why. It is never

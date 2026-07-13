@@ -523,11 +523,11 @@ func TestInviteReturnsAPopulatedInvitation(t *testing.T) {
 	}
 
 	// And the row agrees with the struct: listing it back must not shift the time.
-	list, err := svc.Invitations(t.Context(), owner, 10)
+	list, err := svc.Invitations(t.Context(), owner, auth.PageParams{Limit: 10})
 	if err != nil {
 		t.Fatalf("list invitations: %v", err)
 	}
-	for _, got := range list {
+	for _, got := range list.Items {
 		if got.ID != inv.ID {
 			continue
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -82,16 +83,26 @@ func (r *PostgresRepository) RevokeInvitation(ctx context.Context, tx pgx.Tx, te
 	return tag.RowsAffected() == 1, nil
 }
 
+// Newest first, so the keyset runs the other way: `<` and not `>`.
 const listInvitationsSQL = `
 	SELECT id, tenant_id, email, role, invited_by, expires_at, accepted_at, revoked_at, created_at
 	FROM invitations
 	WHERE tenant_id = $1
+	  AND ($2::timestamptz IS NULL OR (created_at, id) < ($2, $3))
 	ORDER BY created_at DESC, id DESC
-	LIMIT $2`
+	LIMIT $4`
 
-// ListInvitations returns the workspace's invitations, newest first.
-func (r *PostgresRepository) ListInvitations(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, limit int) ([]Invitation, error) {
-	rows, err := tx.Query(ctx, listInvitationsSQL, tenantID, limit)
+// ListInvitations returns a page of the workspace's invitations, newest first.
+func (r *PostgresRepository) ListInvitations(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, after *cursor, limit int) ([]Invitation, error) {
+	var (
+		afterTime *time.Time
+		afterID   *uuid.UUID
+	)
+	if after != nil {
+		afterTime, afterID = &after.CreatedAt, &after.ID
+	}
+
+	rows, err := tx.Query(ctx, listInvitationsSQL, tenantID, afterTime, afterID, limit+1)
 	if err != nil {
 		return nil, fmt.Errorf("auth: list invitations: %w", err)
 	}
@@ -156,19 +167,39 @@ func (r *PostgresRepository) MembershipFor(ctx context.Context, tx pgx.Tx, tenan
 	return m, nil
 }
 
+/*
+The keyset. `(m.created_at, m.id) > ($2, $3)` is one comparison of one row
+against one index, not `created_at > x OR (created_at = x AND id > y)` — which
+Postgres cannot always use an index for, and which is the same thing written in a
+way that scans.
+
+`$2 IS NULL` is the first page. One statement, two shapes, and no string building.
+*/
 const listMembersSQL = `
-	SELECT u.id, u.email, u.name, u.email_verified_at, u.created_at, m.role, m.status
+	SELECT u.id, u.email, u.name, u.email_verified_at, u.created_at,
+	       m.id, m.created_at, m.role, m.status
 	FROM memberships m
 	JOIN users u ON u.id = m.user_id
 	WHERE m.tenant_id = $1
+	  AND ($2::timestamptz IS NULL OR (m.created_at, m.id) > ($2, $3))
 	ORDER BY m.created_at, m.id
-	LIMIT $2`
+	LIMIT $4`
 
-// ListMembers returns the workspace's members.
+// ListMembers returns a page of the workspace's members.
 //
-// One query, joined — not a membership query followed by a user query per row.
-func (r *PostgresRepository) ListMembers(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, limit int) ([]Member, error) {
-	rows, err := tx.Query(ctx, listMembersSQL, tenantID, limit)
+// One query, joined — not a membership query followed by a user query per row. It
+// asks for limit+1 rows: the extra one is how the caller knows there is more,
+// without a COUNT(*) that would scan the table to answer yes or no.
+func (r *PostgresRepository) ListMembers(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, after *cursor, limit int) ([]Member, error) {
+	var (
+		afterTime *time.Time
+		afterID   *uuid.UUID
+	)
+	if after != nil {
+		afterTime, afterID = &after.CreatedAt, &after.ID
+	}
+
+	rows, err := tx.Query(ctx, listMembersSQL, tenantID, afterTime, afterID, limit+1)
 	if err != nil {
 		return nil, fmt.Errorf("auth: list members: %w", err)
 	}
@@ -177,7 +208,8 @@ func (r *PostgresRepository) ListMembers(ctx context.Context, tx pgx.Tx, tenantI
 	members, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Member, error) {
 		var m Member
 		err := row.Scan(&m.User.ID, &m.User.Email, &m.User.Name,
-			&m.User.EmailVerifiedAt, &m.User.CreatedAt, &m.Role, &m.Status)
+			&m.User.EmailVerifiedAt, &m.User.CreatedAt,
+			&m.MembershipID, &m.JoinedAt, &m.Role, &m.Status)
 		return m, err
 	})
 	if err != nil {

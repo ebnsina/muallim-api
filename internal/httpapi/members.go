@@ -42,17 +42,23 @@ type ListInvitationsOutput struct {
 	CacheControl string `header:"Cache-Control"`
 	Body         struct {
 		Invitations []InvitationView `json:"invitations"`
+
+		// NextCursor is opaque. Pass it back as `cursor` for the next page; its
+		// absence means this was the last.
+		NextCursor string `json:"next_cursor,omitempty"`
+		HasMore    bool   `json:"has_more"`
 	}
 }
 
 // MemberView is a member of the workspace.
 type MemberView struct {
-	UserID        string `json:"user_id" format:"uuid"`
-	Email         string `json:"email" format:"email"`
-	Name          string `json:"name"`
-	Role          string `json:"role" enum:"owner,admin,instructor,student"`
-	Status        string `json:"status" enum:"active,suspended"`
-	EmailVerified bool   `json:"email_verified"`
+	UserID        string    `json:"user_id" format:"uuid"`
+	Email         string    `json:"email" format:"email"`
+	Name          string    `json:"name"`
+	Role          string    `json:"role" enum:"owner,admin,instructor,student"`
+	Status        string    `json:"status" enum:"active,suspended"`
+	EmailVerified bool      `json:"email_verified"`
+	JoinedAt      time.Time `json:"joined_at" doc:"When they joined this workspace — not when the account was made."`
 }
 
 // ListMembersOutput is the workspace's members.
@@ -60,6 +66,11 @@ type ListMembersOutput struct {
 	CacheControl string `header:"Cache-Control"`
 	Body         struct {
 		Members []MemberView `json:"members"`
+
+		// NextCursor is opaque. Pass it back as `cursor` for the next page; its
+		// absence means this was the last.
+		NextCursor string `json:"next_cursor,omitempty"`
+		HasMore    bool   `json:"has_more"`
 	}
 }
 
@@ -136,23 +147,26 @@ func registerMembers(api huma.API, svc *auth.Service) {
 		Tags:        []string{"Members"},
 		Security:    []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, in *struct {
-		Limit int `query:"limit" minimum:"1" maximum:"200" default:"50"`
+		Limit  int    `query:"limit" minimum:"1" maximum:"100" default:"50"`
+		Cursor string `query:"cursor" maxLength:"128" doc:"Opaque cursor from a previous page."`
 	}) (*ListInvitationsOutput, error) {
 		p, err := requirePermission(ctx, auth.PermUserManage)
 		if err != nil {
 			return nil, err
 		}
 
-		invitations, err := svc.Invitations(ctx, p, in.Limit)
+		page, err := svc.Invitations(ctx, p, auth.PageParams{Limit: in.Limit, Cursor: in.Cursor})
 		if err != nil {
 			return nil, membersError(err)
 		}
 
 		out := &ListInvitationsOutput{CacheControl: "private, no-store"}
-		out.Body.Invitations = make([]InvitationView, 0, len(invitations))
-		for _, inv := range invitations {
+		out.Body.Invitations = make([]InvitationView, 0, len(page.Items))
+		for _, inv := range page.Items {
 			out.Body.Invitations = append(out.Body.Invitations, invitationView(inv))
 		}
+		out.Body.NextCursor = page.NextCursor
+		out.Body.HasMore = page.HasMore
 		return out, nil
 	})
 
@@ -191,21 +205,22 @@ func registerMembers(api huma.API, svc *auth.Service) {
 		Tags:        []string{"Members"},
 		Security:    []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, in *struct {
-		Limit int `query:"limit" minimum:"1" maximum:"200" default:"50"`
+		Limit  int    `query:"limit" minimum:"1" maximum:"100" default:"50"`
+		Cursor string `query:"cursor" maxLength:"128" doc:"Opaque cursor from a previous page."`
 	}) (*ListMembersOutput, error) {
 		p, err := requirePermission(ctx, auth.PermUserRead)
 		if err != nil {
 			return nil, err
 		}
 
-		members, err := svc.Members(ctx, p, in.Limit)
+		page, err := svc.Members(ctx, p, auth.PageParams{Limit: in.Limit, Cursor: in.Cursor})
 		if err != nil {
 			return nil, membersError(err)
 		}
 
 		out := &ListMembersOutput{CacheControl: "private, no-store"}
-		out.Body.Members = make([]MemberView, 0, len(members))
-		for _, m := range members {
+		out.Body.Members = make([]MemberView, 0, len(page.Items))
+		for _, m := range page.Items {
 			out.Body.Members = append(out.Body.Members, MemberView{
 				UserID:        m.User.ID.String(),
 				Email:         m.User.Email,
@@ -213,8 +228,11 @@ func registerMembers(api huma.API, svc *auth.Service) {
 				Role:          m.Role,
 				Status:        m.Status,
 				EmailVerified: m.User.EmailVerifiedAt != nil,
+				JoinedAt:      m.JoinedAt,
 			})
 		}
+		out.Body.NextCursor = page.NextCursor
+		out.Body.HasMore = page.HasMore
 		return out, nil
 	})
 
@@ -290,6 +308,9 @@ func invitationView(inv auth.Invitation) InvitationView {
 // membersError maps the membership sentinels onto status codes.
 func membersError(err error) error {
 	switch {
+	case errors.Is(err, auth.ErrInvalidPage):
+		return huma.Error422UnprocessableEntity("That page cursor is not one this API issued.")
+
 	case errors.Is(err, auth.ErrInvitationInvalid):
 		return huma.Error404NotFound("That invitation is invalid, expired, or already used.")
 

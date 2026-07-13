@@ -65,6 +65,12 @@ type CertificatesOutput struct {
 	CacheControl string `header:"Cache-Control"`
 	Body         struct {
 		Certificates []CertificateView `json:"certificates"`
+
+		// NextCursor is opaque. Pass it back as `cursor` for the next page; its
+		// absence means this was the last. Empty on a learner's own list, which is
+		// bounded rather than paged.
+		NextCursor string `json:"next_cursor,omitempty"`
+		HasMore    bool   `json:"has_more"`
 	}
 }
 
@@ -149,6 +155,38 @@ func registerCertificates(api huma.API, svc *certify.Service) {
 		for _, certificate := range certificates {
 			out.Body.Certificates = append(out.Body.Certificates, certificateView(certificate))
 		}
+		return out, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "list-certificates",
+		Method:      http.MethodGet,
+		Path:        "/v1/certificates",
+		Summary:     "What this workspace has issued",
+		Description: "Requires course:write. Newest first, keyset-paginated. Until this existed the only way in was a serial — which is what somebody who already holds a certificate has, and not what a registrar looking for the one they issued last week has.",
+		Tags:        []string{"Certificates"},
+		Security:    []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, in *struct {
+		Limit  int    `query:"limit" minimum:"1" maximum:"100" default:"50"`
+		Cursor string `query:"cursor" maxLength:"128" doc:"Opaque cursor from a previous page."`
+	}) (*CertificatesOutput, error) {
+		p, _, err := authorFor(ctx, auth.PermCourseWrite)
+		if err != nil {
+			return nil, err
+		}
+
+		page, err := svc.Issued(ctx, p.TenantID, certify.PageParams{Limit: in.Limit, Cursor: in.Cursor})
+		if err != nil {
+			return nil, certifyError(err)
+		}
+
+		out := &CertificatesOutput{CacheControl: "private, no-store"}
+		out.Body.Certificates = make([]CertificateView, 0, len(page.Certificates))
+		for _, certificate := range page.Certificates {
+			out.Body.Certificates = append(out.Body.Certificates, certificateView(certificate))
+		}
+		out.Body.NextCursor = page.NextCursor
+		out.Body.HasMore = page.HasMore
 		return out, nil
 	})
 
@@ -370,6 +408,9 @@ func templateView(t certify.Template) TemplateView {
 // place that translation happens; the domain never imports net/http.
 func certifyError(err error) error {
 	switch {
+	case errors.Is(err, certify.ErrInvalidPage):
+		return huma.Error422UnprocessableEntity("That page cursor is not one this API issued.")
+
 	case errors.Is(err, certify.ErrNotFound):
 		return huma.Error404NotFound("Not found.")
 

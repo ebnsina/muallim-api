@@ -72,6 +72,12 @@ type Member struct {
 	Role string
 	// Status of the membership: active or suspended.
 	Status string
+
+	// The membership's own id and age, not the user's. They are the sort key a page
+	// of members is cut on, and "since when" is the second question anybody asks
+	// about somebody in a workspace.
+	MembershipID uuid.UUID
+	JoinedAt     time.Time
 }
 
 // ValidRole reports whether role is one this system knows.
