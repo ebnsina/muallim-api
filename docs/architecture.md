@@ -59,7 +59,19 @@ Who may read a lesson is decided by one pure function. An author reads anything,
 
 The whole decision — access, content, and the reader's own progress — is **one query**, asserted by a test, because it runs on the hottest path in the product.
 
-Progress is a materialised roll-up recomputed in the transaction that changes a lesson, so it can never disagree with the rows it summarises. Finishing the last lesson completes the enrolment. Cancelling ends access but keeps progress: re-enrolling reactivates the original row, and the learner finds their place.
+Progress is a materialised roll-up recomputed in the transaction that changes a lesson, so it can never disagree with the rows it summarises. Finishing the last lesson completes the enrolment. Cancelling ends access but keeps progress: re-enrolling reactivates the original row, and the learner finds their place — unless the enrolment was *bought*, which cannot be cancelled at all. Handing the course back while keeping the money is not a thing a learner should be able to do to themselves, and a refund is the way out.
+
+## Selling
+
+The workspace is the merchant. The learner pays the school's own account, and Muallim takes a fee and never holds the money — collecting somebody else's takings makes us liable for their tax, their refunds and their disputes, and in most jurisdictions is money transmission, which is a licence rather than a feature.
+
+`Gateway` is deliberately small: onboard, ask the account what it will do, open a hosted checkout. It stops there because that is where providers stop agreeing. How a payment is *confirmed* is a capability a driver declares — `Webhooker` for the ones that send a signed event (Stripe, and the fake), `Confirmer` for the ones whose truth is a question we have to ask. bKash sends no webhook at all: the learner returns to a callback whose query string proves nothing, and the only authority is a server-to-server execute. SSLCommerz sends an IPN, but its own documentation makes the validation API the authority anyway. A fat interface would have forced both of them to pretend to be Stripe.
+
+Money is confirmed once, however it arrives. `Settle` moves an order only from `pending`, and reports whether it moved, so a webhook delivered three times enrols one learner. The enrolment commits in the same transaction as the paid order.
+
+A refund is issued against the *payment*, not the checkout session that created it: several gateways forget the session the moment money moves. The gateway is called first and the database second — a row marked refunded against money that never moved is a learner locked out of a course they still paid for, which is the worse of the two failures — and the withdrawn enrolment commits with the refunded status.
+
+Stripe needs no per-workspace secret: the platform's key plus a `Stripe-Account` header is the whole model. SSLCommerz and bKash have no such notion — each school is its own merchant — so their credentials sit in `payment_credentials`, sealed with AES-256-GCM under a key that is not in the database. Nothing reads a secret back out.
 
 ## Errors
 
