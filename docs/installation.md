@@ -45,9 +45,13 @@ deployment with no keys still runs — it just sells nothing except through the 
 ```bash
 # The fake gateway. A real driver with signed webhooks that takes no money, and how
 # the whole flow — price, checkout, webhook, enrolment, refund — is exercised with
-# no keys at all. On by default outside production.
+# no keys at all. OFF by default and refused in production: its signed webhook
+# settles a course's access, so a shared secret that ships enabled is a free-
+# enrolment hole. Turn it on explicitly, and give it a secret of your own — the
+# server refuses to boot with the old public default, and the web checkout must be
+# given the SAME value as MUALLIM_FAKE_GATEWAY_SECRET.
 MUALLIM_FAKE_GATEWAY=true
-MUALLIM_FAKE_GATEWAY_SECRET=fake-gateway-secret
+MUALLIM_FAKE_GATEWAY_SECRET=$(openssl rand -hex 32)   # your own; never the default
 
 # Stripe Connect Standard. The platform holds one key and acts on behalf of the
 # school's connected account, so there is nothing to store per workspace.
