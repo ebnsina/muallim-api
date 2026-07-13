@@ -3,7 +3,10 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -103,7 +106,32 @@ func selling(svc *commerce.Service) error {
 	return nil
 }
 
-func registerCommerce(api huma.API, svc *commerce.Service) {
+// RedirectOutput sends a person somewhere. A gateway callback ends in a page,
+// because a person is standing in front of it.
+type RedirectOutput struct {
+	Location string `header:"Location"`
+}
+
+func callbackIDs(tenant, order string) (uuid.UUID, uuid.UUID, error) {
+	tenantID, err := uuid.Parse(tenant)
+	if err != nil {
+		return uuid.Nil, uuid.Nil, huma.Error422UnprocessableEntity("That is not a workspace id.")
+	}
+
+	orderID, err := uuid.Parse(order)
+	if err != nil {
+		return uuid.Nil, uuid.Nil, huma.Error422UnprocessableEntity("That is not an order id.")
+	}
+	return tenantID, orderID, nil
+}
+
+// paymentReturnURL is where the learner lands afterwards. The order id goes with
+// them: the page says what became of the money, and does not have to guess.
+func paymentReturnURL(webBaseURL string, orderID uuid.UUID, settled bool) string {
+	return fmt.Sprintf("%s/receipts?order=%s&settled=%t", strings.TrimRight(webBaseURL, "/"), orderID, settled)
+}
+
+func registerCommerce(api huma.API, svc *commerce.Service, webBaseURL string) {
 	huma.Register(api, huma.Operation{
 		OperationID:   "connect-payments",
 		Method:        http.MethodPost,
@@ -415,44 +443,100 @@ func registerCommerce(api huma.API, svc *commerce.Service) {
 	})
 
 	/*
-		The callback, for a gateway that sends no webhook.
+		bKash's callback, and it is a browser redirect, not a webhook.
 
-		bKash has none: the learner comes back from the app with a payment id in the
-		query string, and the only proof of anything is a server-to-server execute. So
-		this endpoint takes what the browser brought, hands it to the driver, and the
-		driver goes and *asks* the gateway what really happened.
+		bKash sends no webhook at all. The learner comes back from the app to a URL
+		with a payment id on the query string, and that proves nothing — anybody can
+		type a URL. So this hands the query to the driver, the driver goes and *asks*
+		bKash what really happened (execute, server to server), and the answer is what
+		settles the order.
 
-		Unauthenticated, like the webhook, and for the same reason — but unlike the
-		webhook nothing here is trusted: the query string is a hint, not a signature.
-		The tenant and the order come from the path, and the money comes from the
-		gateway's own answer.
+		It is a GET because a browser redirect is a GET, and it ends in a redirect of
+		our own: a person is standing in front of this, and a person is owed a page.
 	*/
 	huma.Register(api, huma.Operation{
-		OperationID: "gateway-callback",
+		OperationID:   "bkash-callback",
+		Method:        http.MethodGet,
+		Path:          "/v1/payments/bkash/callback/{tenant}/{order}",
+		Summary:       "Where bKash returns the learner",
+		Description:   "A browser redirect, carrying bKash's own query string. Nothing in it is trusted: it names a payment, and the driver asks bKash what happened to it.",
+		Tags:          []string{"Billing"},
+		DefaultStatus: http.StatusSeeOther,
+	}, func(ctx context.Context, in *struct {
+		Tenant    string `path:"tenant" format:"uuid"`
+		Order     string `path:"order" format:"uuid"`
+		PaymentID string `query:"paymentID"`
+		Status    string `query:"status" doc:"success, failure, or cancel — bKash's word, and only a hint."`
+		Signature string `query:"signature"`
+	}) (*RedirectOutput, error) {
+		if err := selling(svc); err != nil {
+			return nil, err
+		}
+
+		tenantID, orderID, err := callbackIDs(in.Tenant, in.Order)
+		if err != nil {
+			return nil, err
+		}
+
+		query := map[string]string{
+			"paymentID": in.PaymentID,
+			"status":    in.Status,
+			"signature": in.Signature,
+		}
+
+		// A learner who reloads this page reloads it twice. Confirm is idempotent, and
+		// a failure here is still a page: they are sent back to the course either way,
+		// where the enrolment — or its absence — is the honest answer.
+		if err := svc.Confirm(ctx, tenantID, commerce.GatewayBkash, orderID, query); err != nil {
+			return &RedirectOutput{Location: paymentReturnURL(webBaseURL, orderID, false)}, nil
+		}
+		return &RedirectOutput{Location: paymentReturnURL(webBaseURL, orderID, true)}, nil
+	})
+
+	/*
+		SSLCommerz's IPN, which is a form post and not JSON.
+
+		Unauthenticated like every gateway callback, and its own documentation is clear
+		that the hash is not the last word: the validation API is. So the driver checks
+		the hash with the workspace's store password — which is why this cannot be a
+		`Webhooker`, since verifying it needs to know whose it is first — and then goes
+		back to SSLCommerz and asks.
+
+		The learner's browser is sent to the web app, not here. A redirect is not a
+		payment.
+	*/
+	huma.Register(api, huma.Operation{
+		OperationID: "sslcommerz-ipn",
 		Method:      http.MethodPost,
-		Path:        "/v1/payments/{gateway}/callback/{tenant}/{order}",
-		Summary:     "Where a gateway returns the learner",
+		Path:        "/v1/payments/sslcommerz/ipn/{tenant}/{order}",
+		Summary:     "SSLCommerz's IPN",
+		Description: "Form-encoded, as SSLCommerz sends it. The hash is checked against the workspace's own store password, and the validation API is then asked what actually happened.",
 		Tags:        []string{"Billing"},
 	}, func(ctx context.Context, in *struct {
-		Gateway string            `path:"gateway" enum:"sslcommerz,bkash"`
-		Tenant  string            `path:"tenant" format:"uuid"`
-		Order   string            `path:"order" format:"uuid"`
-		Body    map[string]string `doc:"Whatever the gateway sent back — its own query string or IPN form, verbatim."`
+		Tenant  string `path:"tenant" format:"uuid"`
+		Order   string `path:"order" format:"uuid"`
+		RawBody []byte `contentType:"application/x-www-form-urlencoded"`
 	}) (*struct{}, error) {
 		if err := selling(svc); err != nil {
 			return nil, err
 		}
 
-		tenantID, err := uuid.Parse(in.Tenant)
+		tenantID, orderID, err := callbackIDs(in.Tenant, in.Order)
 		if err != nil {
-			return nil, huma.Error422UnprocessableEntity("That is not a workspace id.")
-		}
-		orderID, err := uuid.Parse(in.Order)
-		if err != nil {
-			return nil, huma.Error422UnprocessableEntity("That is not an order id.")
+			return nil, err
 		}
 
-		if err := svc.Confirm(ctx, tenantID, in.Gateway, orderID, in.Body); err != nil {
+		form, err := url.ParseQuery(string(in.RawBody))
+		if err != nil {
+			return nil, huma.Error400BadRequest("That is not a form.")
+		}
+
+		fields := make(map[string]string, len(form))
+		for key := range form {
+			fields[key] = form.Get(key)
+		}
+
+		if err := svc.Confirm(ctx, tenantID, commerce.GatewaySSLCommerz, orderID, fields); err != nil {
 			return nil, commerceError(err)
 		}
 		return nil, nil

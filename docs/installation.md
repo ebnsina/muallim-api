@@ -77,8 +77,8 @@ What each gateway needs from you once you have the credentials:
 | Gateway | Where the keys go | What else |
 |---|---|---|
 | **Stripe** | The two env vars above | A Connect platform profile in the dashboard, and a **Connect** webhook endpoint (`/v1/webhooks/stripe`) subscribed to `checkout.session.completed`, `checkout.session.async_payment_succeeded` and `checkout.session.async_payment_failed`, with "listen to events on connected accounts" enabled — the charges happen on the schools' accounts, not ours. |
-| **SSLCommerz** | Each workspace pastes its own **store id + store password** into settings (`PUT /v1/billing/credentials`) | Register the IPN URL (`/v1/payments/sslcommerz/ipn`) in the SSLCommerz merchant panel, and enable IPN for the store. |
-| **bKash** | Each workspace pastes its **app key, app secret, username and password** | The callback URL (`/v1/payments/bkash/callback/...`) must be reachable by bKash from the public internet. There is no webhook to fall back on: no callback, no settlement. |
+| **SSLCommerz** | Each workspace pastes its own **store id + store password** into settings (`PUT /v1/billing/credentials`) | Register the IPN URL in the SSLCommerz merchant panel (`/v1/payments/sslcommerz/ipn` — the driver appends the workspace and the order), and enable IPN for the store. |
+| **bKash** | Each workspace pastes its **app key, app secret, username and password** | The callback (`/v1/payments/bkash/callback/{workspace}/{order}`) must be reachable by bKash from the public internet. There is no webhook to fall back on: no callback, no settlement. |
 
 The one that will bite you: bKash blocks a merchant for an hour after more than two
 token refreshes in one, so the driver caches its token per app key and single-flights

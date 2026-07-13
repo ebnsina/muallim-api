@@ -138,14 +138,17 @@ func TestSSLCommerzCheckout(t *testing.T) {
 	}
 
 	want := map[string]string{
-		"store_id":        account.Credentials.PublicID,
-		"store_passwd":    account.Credentials.Secret,
-		"total_amount":    "1200.00",
-		"currency":        "BDT",
-		"tran_id":         order.ID.String(),
-		"success_url":     "https://muallim.test/paid",
-		"cancel_url":      "https://muallim.test/cancelled",
-		"ipn_url":         "https://api.muallim.test/v1/payments/sslcommerz/ipn",
+		"store_id":     account.Credentials.PublicID,
+		"store_passwd": account.Credentials.Secret,
+		"total_amount": "1200.00",
+		"currency":     "BDT",
+		"tran_id":      order.ID.String(),
+		"success_url":  "https://muallim.test/paid",
+		"cancel_url":   "https://muallim.test/cancelled",
+		// The IPN names the workspace and the order: one URL is registered in the
+		// merchant panel, and the tables behind it are filtered by tenant.
+		"ipn_url": "https://api.muallim.test/v1/payments/sslcommerz/ipn/" +
+			order.TenantID.String() + "/" + order.ID.String(),
 		"product_profile": "non-physical-goods",
 		"shipping_method": "NO",
 		"value_a":         order.TenantID.String(),

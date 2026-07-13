@@ -289,6 +289,7 @@ func run() error {
 		Version:     cfg.Version,
 		Logger:      log,
 		CORSOrigins: cfg.CORSOrigins,
+		WebBaseURL:  cfg.WebBaseURL,
 		Tenants:     tenants,
 		Catalog:     courses,
 		Grades:      grades,

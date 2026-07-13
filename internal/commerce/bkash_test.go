@@ -183,8 +183,10 @@ func TestBkashCheckout(t *testing.T) {
 		"currency":              "BDT",
 		"intent":                "sale",
 		"merchantInvoiceNumber": order.ID.String(),
-		// The callback carries the order in a path segment: bKash appends its own query.
-		"callbackURL": "https://muallim.test/pay/bkash/callback/" + order.ID.String(),
+		// The callback names the workspace and the order in path segments: bKash appends
+		// its own query string, and the tables behind it are filtered by tenant.
+		"callbackURL": "https://muallim.test/pay/bkash/callback/" +
+			order.TenantID.String() + "/" + order.ID.String(),
 	}
 	for key, value := range want {
 		if stub.lastCreate[key] != value {

@@ -44,6 +44,10 @@ type Options struct {
 	// Empty means no cross-origin request is allowed.
 	CORSOrigins []string
 
+	// WebBaseURL is where a gateway callback sends the learner when it is done with
+	// them. A person redirected out of a payment app is owed a page, not a 204.
+	WebBaseURL string
+
 	// Services. All may be nil when the handler is built only to emit the OpenAPI
 	// document, since no handler runs in that case. They must be non-nil before
 	// the handler serves a request.
@@ -119,7 +123,7 @@ func New(opts Options) (http.Handler, huma.API) {
 	// no services at all — and an endpoint missing from the contract is an endpoint
 	// no client knows about. The handlers themselves refuse when there is nothing
 	// behind them.
-	registerCommerce(api, opts.Commerce)
+	registerCommerce(api, opts.Commerce, opts.WebBaseURL)
 
 	// Assessment takes the enrolment service too: whether a person may see a quiz
 	// is decided by whether they may see its lesson, and that rule lives there.

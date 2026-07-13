@@ -207,7 +207,7 @@ func (b *Bkash) Checkout(ctx context.Context, account Account, order Order, _ Ch
 		"mode":           "0011",
 		"payerReference": order.UserID.String(),
 		// bKash appends its own query string, so ours is a path segment or it is lost.
-		"callbackURL":           b.callbackBase + "/" + order.ID.String(),
+		"callbackURL":           b.callbackBase + "/" + order.TenantID.String() + "/" + order.ID.String(),
 		"amount":                bkashMajor(order.Price.AmountMinor),
 		"currency":              "BDT",
 		"intent":                "sale",
