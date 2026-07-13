@@ -76,6 +76,8 @@ behind it is a download that 404s. Upload a real file as `student@` instead —
 
 **Ordering: dense positions, one-statement reorders.** Deletes close the gap in the same statement. Reorders use `unnest($1::uuid[]) WITH ORDINALITY`, never one UPDATE per row, and the sibling unique constraint is `DEFERRABLE` so a reversal is legal mid-statement. A submitted order must name every sibling exactly once, or it is refused rather than half-applied.
 
+**An import enrols; it does not sign anybody up.** A cohort arrives as a list of addresses, and an address nobody in the workspace holds is *reported back and skipped* — never turned into an account. An import that quietly minted members would let anybody with `course:write` manufacture them, and joining a workspace is by invitation for a reason. Three queries for any number of learners (`unnest($3::uuid[])`), and every address gets a line in the report: "we enrolled 400" is not what the person who pasted the list needs, the four who were already there is. A purchase is never relabelled by a grant or an import — the source is what says the learner may not simply cancel and be left with neither the course nor their money.
+
 **The access rule is one pure function** (`enroll.decide`), enumerated in a table test. Zero value denies. Clause order is load-bearing — enrolment before preview, or a course with a preview lesson can never reach 100%. Load the entitlement in the same query as the resource: one query, asserted. Content whose visibility depends on the reader is `private, no-store`, never shared-cacheable.
 
 **404 vs 403.** 404 when admitting existence would leak (a draft, a lesson in an invisible course). 403 when the resource is plainly visible and the answer is "enrol first" — there a 404 hides the button.

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+
+	"github.com/google/uuid"
 	"strings"
 	"time"
 
@@ -40,6 +42,25 @@ type ProgressView struct {
 	LessonsCompleted int `json:"lessons_completed"`
 	LessonsTotal     int `json:"lessons_total"`
 	Percent          int `json:"percent" minimum:"0" maximum:"100"`
+}
+
+// ImportResultView is what became of one address.
+type ImportResultView struct {
+	Email   string `json:"email" format:"email"`
+	Outcome string `json:"outcome" enum:"enrolled,already_enrolled,not_a_member" doc:"not_a_member means nobody in this workspace holds that address. No account was created."`
+	UserID  string `json:"user_id,omitempty" format:"uuid"`
+}
+
+// ImportOutput is the report an import hands back: the tally, and every line of it.
+type ImportOutput struct {
+	CacheControl string `header:"Cache-Control"`
+	Body         struct {
+		Enrolled        int `json:"enrolled"`
+		AlreadyEnrolled int `json:"already_enrolled"`
+		NotMembers      int `json:"not_members"`
+
+		Results []ImportResultView `json:"results"`
+	}
 }
 
 // EnrolOutput confirms an enrolment.
@@ -315,6 +336,52 @@ func registerEnrolment(api huma.API, svc *enroll.Service) {
 	})
 
 	huma.Register(api, huma.Operation{
+		OperationID:   "import-enrolments",
+		Method:        http.MethodPost,
+		Path:          "/v1/courses/{slug}/enrolments/import",
+		Summary:       "Enrol a cohort by email address",
+		Description:   "Requires course:write. Three queries for any number of addresses, and it creates no accounts: an address nobody in this workspace holds is reported back as such and skipped, because joining a workspace is by invitation. Every address gets a line in the report — the four that were already enrolled are what the person who pasted the list actually needs to see.",
+		Tags:          []string{"Learning"},
+		DefaultStatus: http.StatusOK,
+		Security:      []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, in *struct {
+		Slug string `path:"slug" maxLength:"200"`
+		Body struct {
+			Emails []string `json:"emails" minItems:"1" maxItems:"500" doc:"Addresses of people who are already members of this workspace."`
+		}
+	}) (*ImportOutput, error) {
+		p, err := requirePermission(ctx, auth.PermCourseWrite)
+		if err != nil {
+			return nil, err
+		}
+
+		results, err := svc.Import(ctx, p.TenantID, in.Slug, in.Body.Emails, actorFrom(ctx, p))
+		if err != nil {
+			return nil, enrolError(err)
+		}
+
+		out := &ImportOutput{CacheControl: lessonCacheControl}
+		out.Body.Results = make([]ImportResultView, 0, len(results))
+		for _, r := range results {
+			view := ImportResultView{Email: r.Email, Outcome: r.Outcome}
+			if r.UserID != uuid.Nil {
+				view.UserID = r.UserID.String()
+			}
+			out.Body.Results = append(out.Body.Results, view)
+
+			switch r.Outcome {
+			case enroll.OutcomeEnrolled:
+				out.Body.Enrolled++
+			case enroll.OutcomeAlready:
+				out.Body.AlreadyEnrolled++
+			case enroll.OutcomeUnknown:
+				out.Body.NotMembers++
+			}
+		}
+		return out, nil
+	})
+
+	huma.Register(api, huma.Operation{
 		OperationID:   "grant-enrolment",
 		Method:        http.MethodPost,
 		Path:          "/v1/courses/{slug}/enrolments",
@@ -390,6 +457,12 @@ func enrolError(err error) error {
 
 	// Cancelling a purchase would hand the course back and keep the money. The way
 	// out of a purchase is a refund, and only the workspace can issue one.
+	case errors.Is(err, enroll.ErrNothingToImport):
+		return huma.Error422UnprocessableEntity("There are no addresses in that list.")
+
+	case errors.Is(err, enroll.ErrTooManyToImport):
+		return huma.Error422UnprocessableEntity("That is more than 500 addresses. Import them in batches.")
+
 	case errors.Is(err, enroll.ErrPurchased):
 		return huma.Error409Conflict("You bought this course. Ask the workspace for a refund — cancelling would not return your money.")
 

@@ -183,7 +183,10 @@ func run() error {
 	gamification := gamify.NewService(db, gamify.NewPostgresRepository())
 
 	learning := enroll.NewService(db, enroll.NewPostgresRepository(), enrolAuditor{recorder},
-		certificates{credentials}, gamifyRewards{gamification})
+		certificates{credentials}, gamifyRewards{gamification}).
+		// Importing a cohort needs to know who holds an address. That is auth's table,
+		// and this is the only place that knows both packages exist.
+		WithDirectory(directory{authRepo})
 
 	grading, err := assess.NewRiverEnqueuer(jobs)
 	if err != nil {

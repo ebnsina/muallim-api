@@ -164,6 +164,10 @@ func TestEnrolmentSentinelsMapToADeliberateStatus(t *testing.T) {
 
 		// 409: cancelling a purchase would hand the course back and keep the money.
 		enroll.ErrPurchased: http.StatusConflict,
+
+		// 422: a list with nothing in it, or more than one request may carry.
+		enroll.ErrNothingToImport: http.StatusUnprocessableEntity,
+		enroll.ErrTooManyToImport: http.StatusUnprocessableEntity,
 	}
 
 	for err, want := range tests {

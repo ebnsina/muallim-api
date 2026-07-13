@@ -39,7 +39,10 @@ var (
 const (
 	ActionEnrolled       = "enrolment.created"
 	ActionEnrolmentEnded = "enrolment.cancelled"
-	ActionCourseFinished = "course.completed"
+
+	// One line for a whole cohort: what was done was moving a list onto a course.
+	ActionEnrolmentImported = "enrolment.imported"
+	ActionCourseFinished    = "course.completed"
 
 	// ActionCourseReopened records a completion being retracted. A finished course
 	// that becomes unfinished is a fact somebody will one day need to explain.

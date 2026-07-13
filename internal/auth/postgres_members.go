@@ -309,3 +309,40 @@ func (r *PostgresRepository) HasAnyMember(ctx context.Context, tx pgx.Tx, tenant
 	}
 	return exists, nil
 }
+
+/*
+MembersByEmail maps addresses to the people in this workspace who hold them.
+
+One query for the whole list — `= ANY($2)` and not an address at a time, because
+the caller is importing a cohort and a query per learner is the N+1 this codebase
+does not write.
+
+Active memberships only. A suspended member is not somebody a course may be given
+to, and an address nobody here holds simply has no key: the caller reports that as
+"not a member", which is the commonest and most useful line in an import's report.
+*/
+func (r *PostgresRepository) MembersByEmail(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, emails []string) (map[string]uuid.UUID, error) {
+	rows, err := tx.Query(ctx,
+		`SELECT lower(u.email), u.id
+		 FROM memberships m
+		 JOIN users u ON u.id = m.user_id
+		 WHERE m.tenant_id = $1 AND m.status = 'active' AND lower(u.email) = ANY($2)`,
+		tenantID, emails)
+	if err != nil {
+		return nil, fmt.Errorf("auth: members by email: %w", err)
+	}
+	defer rows.Close()
+
+	found := make(map[string]uuid.UUID, len(emails))
+	for rows.Next() {
+		var (
+			email  string
+			userID uuid.UUID
+		)
+		if err := rows.Scan(&email, &userID); err != nil {
+			return nil, fmt.Errorf("auth: scan member by email: %w", err)
+		}
+		found[email] = userID
+	}
+	return found, rows.Err()
+}

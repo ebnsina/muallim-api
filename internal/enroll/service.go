@@ -22,6 +22,7 @@ type Repository interface {
 	Enrol(ctx context.Context, tx pgx.Tx, tenantID, courseID, userID uuid.UUID, source string, expiresAt *time.Time) (Enrolment, bool, error)
 	Enrolment(ctx context.Context, tx pgx.Tx, tenantID, courseID, userID uuid.UUID) (Enrolment, error)
 	CancelEnrolment(ctx context.Context, tx pgx.Tx, tenantID, courseID, userID uuid.UUID) error
+	BulkEnrol(ctx context.Context, tx pgx.Tx, tenantID, courseID uuid.UUID, userIDs []uuid.UUID, source string) (map[uuid.UUID]bool, error)
 	ListEnrolments(ctx context.Context, tx pgx.Tx, tenantID, userID uuid.UUID, limit int) ([]EnrolmentWithCourse, error)
 	CompleteEnrolment(ctx context.Context, tx pgx.Tx, tenantID, courseID, userID uuid.UUID) (bool, error)
 	ReopenEnrolment(ctx context.Context, tx pgx.Tx, tenantID, courseID, userID uuid.UUID) (bool, error)
@@ -99,6 +100,7 @@ type Service struct {
 	certificates Certificates
 	rewards      Rewards
 	prices       Prices
+	directory    Directory
 
 	now func() time.Time
 }

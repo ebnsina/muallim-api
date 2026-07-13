@@ -62,7 +62,11 @@ const upsertEnrolmentSQL = `
 	    -- completion behind. status and completed_at state one fact.
 	    completed_at = CASE WHEN enrolments.status IN ('expired', 'cancelled')
 	                        THEN NULL ELSE enrolments.completed_at END,
-	    source     = EXCLUDED.source,
+	    -- A purchase is not overwritten. Granting or importing somebody who already
+	    -- bought the course would relabel their enrolment, and the label is what says
+	    -- they may not simply cancel it and keep neither the course nor their money.
+	    source     = CASE WHEN enrolments.source = 'purchase'
+	                      THEN enrolments.source ELSE EXCLUDED.source END,
 	    expires_at = EXCLUDED.expires_at,
 	    updated_at = now()
 	RETURNING id, course_id, user_id, status, source, expires_at, enrolled_at, completed_at,
@@ -553,4 +557,51 @@ func (r *PostgresRepository) CourseStats(ctx context.Context, tx pgx.Tx, tenantI
 		return CourseAnalytics{}, fmt.Errorf("enroll: course stats: %w", err)
 	}
 	return a, nil
+}
+
+/*
+BulkEnrol enrols a whole cohort in one statement.
+
+`unnest($3::uuid[]) WITH ORDINALITY` and not a loop: a school importing four
+hundred learners would otherwise be four hundred round trips inside one
+transaction, holding a pooled connection for the length of all of them. The
+conflict clause is the same one a single enrolment uses — reactivating a lapsed
+row, and never relabelling a purchase — so an import over an existing cohort
+cannot mean something different from enrolling them one at a time.
+
+It returns what happened to each, because "we enrolled 400" is not what the person
+who pasted the list needs to know: they need the four that were already there.
+*/
+func (r *PostgresRepository) BulkEnrol(ctx context.Context, tx pgx.Tx, tenantID, courseID uuid.UUID, userIDs []uuid.UUID, source string) (map[uuid.UUID]bool, error) {
+	rows, err := tx.Query(ctx,
+		`INSERT INTO enrolments (tenant_id, course_id, user_id, source)
+		 SELECT $1, $2, u, $4
+		 FROM unnest($3::uuid[]) AS u
+		 ON CONFLICT (tenant_id, course_id, user_id) DO UPDATE
+		 SET status       = CASE WHEN enrolments.status IN ('expired', 'cancelled')
+		                         THEN 'active' ELSE enrolments.status END,
+		     completed_at = CASE WHEN enrolments.status IN ('expired', 'cancelled')
+		                         THEN NULL ELSE enrolments.completed_at END,
+		     source       = CASE WHEN enrolments.source = 'purchase'
+		                         THEN enrolments.source ELSE EXCLUDED.source END,
+		     updated_at   = now()
+		 RETURNING user_id, (xmax = 0) AS inserted`,
+		tenantID, courseID, userIDs, source)
+	if err != nil {
+		return nil, fmt.Errorf("enroll: bulk enrol: %w", err)
+	}
+	defer rows.Close()
+
+	added := make(map[uuid.UUID]bool, len(userIDs))
+	for rows.Next() {
+		var (
+			userID   uuid.UUID
+			inserted bool
+		)
+		if err := rows.Scan(&userID, &inserted); err != nil {
+			return nil, fmt.Errorf("enroll: scan bulk enrolment: %w", err)
+		}
+		added[userID] = inserted
+	}
+	return added, rows.Err()
 }
