@@ -604,3 +604,39 @@ func TestCredentialsComeBackToTheDriverAndNotToAnybodyElse(t *testing.T) {
 		t.Fatal("the store password is readable in the table")
 	}
 }
+
+/*
+Every gateway this package names must be a gateway the database will store.
+
+It was not. The columns and the credentials table for SSLCommerz and bKash landed
+without widening the CHECK that enumerates the gateway names, so the drivers were
+written, wired, tested — and refused by Postgres with a 23514 the first time anybody
+tried to save a key. Nothing in Go could have known: the constraint lives in SQL and
+the constant lives here, and only a row travelling between them proves they agree.
+*/
+func TestTheDatabaseAcceptsEveryGatewayWeName(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+	repo := commerce.NewPostgresRepository()
+
+	for _, gateway := range []string{
+		commerce.GatewayStripe,
+		commerce.GatewaySSLCommerz,
+		commerce.GatewayBkash,
+		commerce.GatewayFake,
+	} {
+		t.Run(gateway, func(t *testing.T) {
+			err := f.db.WithTenant(t.Context(), f.tenant, func(ctx context.Context, tx pgx.Tx) error {
+				_, err := repo.UpsertAccount(ctx, tx, commerce.Account{
+					TenantID: f.tenant, Gateway: gateway,
+					ExternalID: "acct_" + gateway, Status: commerce.AccountActive,
+				})
+				return err
+			})
+			if err != nil {
+				t.Fatalf("the database refuses an account for %q: %v", gateway, err)
+			}
+		})
+	}
+}
