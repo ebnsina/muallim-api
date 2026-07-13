@@ -73,6 +73,14 @@ A refund is issued against the *payment*, not the checkout session that created 
 
 Stripe needs no per-workspace secret: the platform's key plus a `Stripe-Account` header is the whole model. SSLCommerz and bKash have no such notion — each school is its own merchant — so their credentials sit in `payment_credentials`, sealed with AES-256-GCM under a key that is not in the database. Nothing reads a secret back out.
 
+## Lists
+
+Every list is bounded, and every list that can outgrow a page carries a cursor. Those are two different promises, and for a while this system kept only the first: members, invitations and a learner's certificates each stopped at a cap and said nothing about stopping, which reads as an answer and is not one. A school with more members than the cap could not be listed to its end.
+
+A cursor is the sort key of the last row of the page before, base64'd so a client cannot come to depend on a sort order we must stay free to change. The query fetches one row more than it needs — that extra row is how "is there more" is answered without a `COUNT(*)` that would read the whole table to say yes or no.
+
+And a keyset with no index covering both the filter and the sort is an `OFFSET` lying about itself: Postgres reads every row, sorts it, and discards all but the page. `EXPLAIN` shows a Sort node, and that is the defect.
+
 ## Errors
 
 Every error response is an [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) `application/problem+json` document carrying a correlation ID, including the ones the standard library would otherwise answer as plain text:

@@ -52,7 +52,7 @@ behind it is a download that 404s. Upload a real file as `student@` instead —
 
 **Never query inside a loop over rows.** Batch children with `= ANY($1)` and stitch with a map. `catalog.CurriculumFor` is the reference: three queries for a course of any size. Every tree-loading endpoint gets a `database.Counter` test asserting an exact query count across growing fixtures — that is what makes an N+1 a build failure rather than a customer's problem.
 
-**Keyset pagination, never `OFFSET`.** Fetch `limit + 1` to detect a next page; never `COUNT(*)`. No list endpoint is unbounded.
+**Keyset pagination, never `OFFSET`.** Fetch `limit + 1` to detect a next page; never `COUNT(*)`. No list endpoint is unbounded — and *bounded is not the same as paginated*. `/v1/members`, `/v1/invitations` and a learner's certificates each capped at a few hundred rows with no cursor, which reads as an answer and is not one: a school with more members than the cap could not be listed to its end, and nothing said so. A list that can grow past a page gets a cursor (`auth.PageParams` / `certify.PageParams`, opaque base64, `next_cursor` + `has_more` on the wire), and a cursor gets an index covering the filter *and* the sort — otherwise the keyset is an `OFFSET` lying about itself, and `EXPLAIN` shows a Sort node to prove it.
 
 **Every hot-path query needs an index covering both filter and sort.** Verify with `EXPLAIN (ANALYZE, COSTS OFF)` at realistic row counts. A `Sort` node or `Seq Scan` on a request path is a defect.
 
