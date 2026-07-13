@@ -155,3 +155,83 @@ func TestEditingACourseThatIsNotThere(t *testing.T) {
 		t.Errorf("EditCourse = %v, want ErrNotFound", err)
 	}
 }
+
+// The preview is resolved by the same driver a lesson's video is: an author's
+// link becomes a player, and only the player is ever framed.
+func TestTheCoursePreviewResolvesToAPlayer(t *testing.T) {
+	t.Parallel()
+
+	db := testDB(t)
+	svc := newService(db)
+	tenantID := seedTenant(t, db)
+	a := seedAuthor(t, db, tenantID)
+	slug := draftCourse(t, svc, tenantID, a)
+
+	source, url := catalog.VideoYouTube, "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+	updated, err := svc.EditCourse(t.Context(), tenantID, slug,
+		catalog.CoursePatch{PreviewSource: &source, PreviewURL: &url}, a)
+	if err != nil {
+		t.Fatalf("EditCourse: %v", err)
+	}
+
+	if updated.Preview.Source != catalog.VideoYouTube {
+		t.Errorf("preview source = %q, want %q", updated.Preview.Source, catalog.VideoYouTube)
+	}
+	if !strings.Contains(updated.Preview.EmbedURL, "dQw4w9WgXcQ") {
+		t.Errorf("the player does not carry the id: %q", updated.Preview.EmbedURL)
+	}
+
+	// The author's own link survives, because it is what they see when they edit.
+	if updated.Preview.URL != url {
+		t.Errorf("preview url = %q, want %q", updated.Preview.URL, url)
+	}
+}
+
+// A source without its URL would keep the player it had — a `hosted` course still
+// framing yesterday's YouTube link.
+func TestAPreviewSourceWithoutItsURLIsRefused(t *testing.T) {
+	t.Parallel()
+
+	db := testDB(t)
+	svc := newService(db)
+	tenantID := seedTenant(t, db)
+	a := seedAuthor(t, db, tenantID)
+	slug := draftCourse(t, svc, tenantID, a)
+
+	source := catalog.VideoYouTube
+	_, err := svc.EditCourse(t.Context(), tenantID, slug,
+		catalog.CoursePatch{PreviewSource: &source}, a)
+
+	if !errors.Is(err, catalog.ErrInvalidCourse) {
+		t.Fatalf("err = %v, want ErrInvalidCourse", err)
+	}
+}
+
+// `none` takes the player with it. A course that stops having a preview must not
+// keep the iframe it used to have.
+func TestRemovingThePreviewTakesThePlayerWithIt(t *testing.T) {
+	t.Parallel()
+
+	db := testDB(t)
+	svc := newService(db)
+	tenantID := seedTenant(t, db)
+	a := seedAuthor(t, db, tenantID)
+	slug := draftCourse(t, svc, tenantID, a)
+
+	source, url := catalog.VideoYouTube, "https://youtu.be/dQw4w9WgXcQ"
+	if _, err := svc.EditCourse(t.Context(), tenantID, slug,
+		catalog.CoursePatch{PreviewSource: &source, PreviewURL: &url}, a); err != nil {
+		t.Fatalf("EditCourse: %v", err)
+	}
+
+	none, blank := catalog.VideoNone, ""
+	cleared, err := svc.EditCourse(t.Context(), tenantID, slug,
+		catalog.CoursePatch{PreviewSource: &none, PreviewURL: &blank}, a)
+	if err != nil {
+		t.Fatalf("EditCourse: %v", err)
+	}
+
+	if cleared.Preview.EmbedURL != "" {
+		t.Errorf("the player survived its removal: %q", cleared.Preview.EmbedURL)
+	}
+}

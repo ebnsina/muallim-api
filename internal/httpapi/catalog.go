@@ -77,6 +77,13 @@ type CourseDetail struct {
 	Requirements []string `json:"requirements"`
 	Language     string   `json:"language"`
 
+	// The preview clip. `preview_embed_url` is written by muallim-api from a
+	// validated id and is the only one of these safe to put in an iframe; a client
+	// that frames `preview_url` is framing whatever an author typed.
+	PreviewSource   string `json:"preview_source" enum:"none,youtube,vimeo,embed,hosted"`
+	PreviewURL      string `json:"preview_url,omitempty"`
+	PreviewEmbedURL string `json:"preview_embed_url,omitempty" format:"uri"`
+
 	// The instructor, the learner count, and the rating are on the summary: a
 	// catalogue card wants them as much as a course page does, and a field that
 	// exists twice is a field that will disagree with itself.
@@ -348,6 +355,11 @@ func registerCourseCopy(api huma.API, svc *catalog.Service) {
 			Language     *string   `json:"language,omitempty" maxLength:"20" doc:"The language it is taught in, as a tag: en, bn, ar."`
 			Objectives   *[]string `json:"objectives,omitempty" maxItems:"20" doc:"What a learner will be able to do. Shown as \"what you'll learn\"."`
 			Requirements *[]string `json:"requirements,omitempty" maxItems:"20" doc:"What a learner needs before starting."`
+
+			// The preview clip. Sent together or not at all: a source without its URL
+			// keeps the player it had, which would play the wrong thing.
+			PreviewSource *string `json:"preview_source,omitempty" enum:"none,youtube,vimeo,embed,hosted" doc:"Who serves the preview. 'none' removes it."`
+			PreviewURL    *string `json:"preview_url,omitempty" maxLength:"2000" doc:"What the author supplied: a YouTube or Vimeo link, or a hosted id."`
 		}
 	}) (*UpdateCourseOutput, error) {
 		p, author, err := authorFor(ctx, auth.PermCourseWrite)
@@ -356,13 +368,15 @@ func registerCourseCopy(api huma.API, svc *catalog.Service) {
 		}
 
 		course, err := svc.EditCourse(ctx, p.TenantID, in.Slug, catalog.CoursePatch{
-			Title:        in.Body.Title,
-			Summary:      in.Body.Summary,
-			Description:  in.Body.Description,
-			Difficulty:   in.Body.Difficulty,
-			Language:     in.Body.Language,
-			Objectives:   in.Body.Objectives,
-			Requirements: in.Body.Requirements,
+			Title:         in.Body.Title,
+			Summary:       in.Body.Summary,
+			Description:   in.Body.Description,
+			Difficulty:    in.Body.Difficulty,
+			Language:      in.Body.Language,
+			Objectives:    in.Body.Objectives,
+			Requirements:  in.Body.Requirements,
+			PreviewSource: in.Body.PreviewSource,
+			PreviewURL:    in.Body.PreviewURL,
 		}, author)
 		if err != nil {
 			return nil, catalogError(err)
@@ -437,12 +451,15 @@ func courseDetail(c catalog.Course, f enroll.CourseFacts) CourseDetail {
 	}
 
 	return CourseDetail{
-		CourseSummary: courseSummary(c, f),
-		Description:   c.Description,
-		Objectives:    objectives,
-		Requirements:  requirements,
-		Language:      c.Language,
-		UpdatedAt:     c.UpdatedAt,
+		CourseSummary:   courseSummary(c, f),
+		Description:     c.Description,
+		Objectives:      objectives,
+		Requirements:    requirements,
+		Language:        c.Language,
+		PreviewSource:   c.Preview.Source,
+		PreviewURL:      c.Preview.URL,
+		PreviewEmbedURL: c.Preview.EmbedURL,
+		UpdatedAt:       c.UpdatedAt,
 	}
 }
 

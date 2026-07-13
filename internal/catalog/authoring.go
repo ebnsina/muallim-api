@@ -119,6 +119,16 @@ func (s *Service) EditCourse(ctx context.Context, tenantID uuid.UUID, slug strin
 		return Course{}, err
 	}
 
+	// Resolved before the transaction opens: it is pure, and a rejected URL should
+	// cost nothing. The player is derived here and never taken from a caller.
+	if p.PreviewSource != nil {
+		preview, err := s.resolveVideo(*p.PreviewSource, *p.PreviewURL)
+		if err != nil {
+			return Course{}, err
+		}
+		p.PreviewSource, p.PreviewURL, p.previewEmbedURL = &preview.Source, &preview.URL, &preview.EmbedURL
+	}
+
 	var updated Course
 	err := s.db.WithTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
 		course, err := s.repo.UpdateCourse(ctx, tx, tenantID, slug, p)
@@ -145,6 +155,12 @@ func (s *Service) EditCourse(ctx context.Context, tenantID uuid.UUID, slug strin
 func (p CoursePatch) validate() error {
 	if p.Title != nil && (strings.TrimSpace(*p.Title) == "" || len(*p.Title) > MaxCourseTitle) {
 		return fmt.Errorf("%w: title", ErrInvalidCourse)
+	}
+
+	// Together or not at all: a source without its URL keeps the player it had, and
+	// a `hosted` course pointing at yesterday's YouTube link is a lie with a play button.
+	if (p.PreviewSource == nil) != (p.PreviewURL == nil) {
+		return fmt.Errorf("%w: preview_source and preview_url must be sent together", ErrInvalidCourse)
 	}
 	if p.Summary != nil && len(*p.Summary) > MaxCourseSummary {
 		return fmt.Errorf("%w: summary is longer than %d characters", ErrInvalidCourse, MaxCourseSummary)

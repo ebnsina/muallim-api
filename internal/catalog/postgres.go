@@ -293,6 +293,7 @@ func (r *PostgresRepository) DeleteAnnouncement(ctx context.Context, tx pgx.Tx, 
 const courseBySlugSQL = `
 	SELECT c.id, c.slug, c.title, c.summary, c.difficulty, c.status, c.published_at, c.drip_mode,
 	       c.description, c.objectives, c.requirements, c.language,
+	       c.preview_source, c.preview_url, c.preview_embed_url,
 	       c.created_by, COALESCE(u.name, ''), c.created_at, c.updated_at
 	FROM courses c
 	LEFT JOIN users u ON u.id = c.created_by
@@ -310,6 +311,7 @@ func (r *PostgresRepository) CourseBySlug(ctx context.Context, tx pgx.Tx, tenant
 		&c.ID, &c.Slug, &c.Title, &c.Summary, &c.Difficulty,
 		&c.Status, &c.PublishedAt, &c.DripMode,
 		&c.Description, &c.Objectives, &c.Requirements, &c.Language,
+		&c.Preview.Source, &c.Preview.URL, &c.Preview.EmbedURL,
 		&c.CreatedBy, &c.InstructorName, &c.CreatedAt, &c.UpdatedAt)
 
 	if err != nil {

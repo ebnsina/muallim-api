@@ -338,19 +338,25 @@ func (r *PostgresRepository) UpdateCourse(ctx context.Context, tx pgx.Tx, tenant
 		         language     = COALESCE($7, language),
 		         objectives   = COALESCE($8, objectives),
 		         requirements = COALESCE($9, requirements),
+		         preview_source    = COALESCE($10, preview_source),
+		         preview_url       = COALESCE($11, preview_url),
+		         preview_embed_url = COALESCE($12, preview_embed_url),
 		         updated_at   = now()
 		     WHERE tenant_id = $1 AND lower(slug) = lower($2)
 		     RETURNING *
 		 )
 		 SELECT c.id, c.slug, c.title, c.summary, c.difficulty, c.status, c.published_at, c.drip_mode,
 		        c.description, c.objectives, c.requirements, c.language,
+		        c.preview_source, c.preview_url, c.preview_embed_url,
 		        c.created_by, COALESCE(u.name, ''), c.created_at, c.updated_at
 		 FROM updated c
 		 LEFT JOIN users u ON u.id = c.created_by`,
-		tenantID, slug, p.Title, p.Summary, p.Description, p.Difficulty, p.Language, p.Objectives, p.Requirements).
+		tenantID, slug, p.Title, p.Summary, p.Description, p.Difficulty, p.Language, p.Objectives, p.Requirements,
+		p.PreviewSource, p.PreviewURL, p.previewEmbedURL).
 		Scan(&c.ID, &c.Slug, &c.Title, &c.Summary, &c.Difficulty, &c.Status,
 			&c.PublishedAt, &c.DripMode,
 			&c.Description, &c.Objectives, &c.Requirements, &c.Language,
+			&c.Preview.Source, &c.Preview.URL, &c.Preview.EmbedURL,
 			&c.CreatedBy, &c.InstructorName, &c.CreatedAt, &c.UpdatedAt)
 
 	if err != nil {

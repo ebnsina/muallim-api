@@ -99,6 +99,10 @@ type Course struct {
 	CreatedBy      *uuid.UUID
 	InstructorName string
 
+	// The preview clip a stranger watches before enrolling. Preview.EmbedURL is the
+	// only one of its fields that may be framed.
+	Preview Video
+
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
@@ -113,6 +117,16 @@ type CoursePatch struct {
 	Language     *string
 	Objectives   *[]string
 	Requirements *[]string
+
+	// The preview clip. Source and URL travel together — a source changed without
+	// its URL would keep a player that plays the wrong thing, exactly as a lesson's
+	// video would.
+	PreviewSource *string
+	PreviewURL    *string
+
+	// Written by EditCourse from the resolved video, never by a caller: an `iframe`
+	// src a request body could set is a request body that runs on this origin.
+	previewEmbedURL *string
 }
 
 // Topic is an ordered section of a course.
