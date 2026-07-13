@@ -84,6 +84,10 @@ behind it is a download that 404s. Upload a real file as `student@` instead —
 
 **Money is `bigint` minor units + `currency char(3)`.** Never a float.
 
+**The workspace sells; Muallim takes a fee and never holds the money.** `commerce` is Stripe Connect *Standard*: the learner pays the school's own connected account, so the school is the merchant and owns its tax, its refunds and its disputes. Collecting a learner's money for somebody else's course would make us liable for all three, and in most jurisdictions is money transmission — a licence, not a feature. A `Gateway` interface with two drivers: `Fake` (a real driver, signed webhooks, takes no money — how the flow is exercised until the Stripe keys land) and `Stripe` (a named, refusing shape until then). A course with no row in `course_prices` is free, which is what every course was before this existed.
+
+**A webhook carries its tenant in signed metadata, and settles in one transaction.** It is unauthenticated by design — a gateway has no session with us — so the signature *is* the authentication, and the tenant comes from metadata the gateway echoed back inside the signed payload. It has to: `WithoutTenant` sees nothing under `FORCE ROW LEVEL SECURITY`. The order and the enrolment commit together, and `Settle`'s `WHERE status = 'pending'` is the whole of the idempotency — a gateway delivers the same event more than once, and the second delivery must enrol nobody twice.
+
 **Enqueue jobs in the transaction that produced them** (`client.InsertTx`). That is the whole reason River is Postgres-backed.
 
 **Anything over ~200ms or touching a third party is a job, not a handler.** Grading, transcoding, email, transcription, analytics. Jobs are retried, so jobs are idempotent.
