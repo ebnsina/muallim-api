@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/google/uuid"
 
 	"github.com/ebnsina/muallim-api/internal/auth"
 	"github.com/ebnsina/muallim-api/internal/commerce"
@@ -21,7 +22,7 @@ type MoneyView struct {
 
 // AccountView is a workspace's payment account, as its authors see it.
 type AccountView struct {
-	Gateway string `json:"gateway" enum:"stripe,fake"`
+	Gateway string `json:"gateway" enum:"stripe,sslcommerz,bkash,fake"`
 	Status  string `json:"status" enum:"pending,active,restricted"`
 
 	// ChargesEnabled is the gateway's own answer, not ours. An account can be
@@ -76,6 +77,13 @@ type ReceiptsOutput struct {
 	}
 }
 
+type OrderOutput struct {
+	CacheControl string `header:"Cache-Control"`
+	Body         struct {
+		Order OrderView `json:"order"`
+	}
+}
+
 // billingCacheControl: what a workspace's account says changes when a gateway
 // decides it does, so nothing here is shared and nothing is stored.
 const billingCacheControl = "private, no-store"
@@ -107,7 +115,7 @@ func registerCommerce(api huma.API, svc *commerce.Service) {
 		Security:      []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, in *struct {
 		Body struct {
-			Gateway   string `json:"gateway" enum:"stripe,fake"`
+			Gateway   string `json:"gateway" enum:"stripe,sslcommerz,bkash,fake"`
 			ReturnURL string `json:"return_url" format:"uri" maxLength:"2000" doc:"Where the gateway sends the author when onboarding ends."`
 		}
 	}) (*OnboardingOutput, error) {
@@ -140,7 +148,7 @@ func registerCommerce(api huma.API, svc *commerce.Service) {
 		Tags:        []string{"Billing"},
 		Security:    []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, in *struct {
-		Gateway string `query:"gateway" enum:"stripe,fake" default:"fake"`
+		Gateway string `query:"gateway" enum:"stripe,sslcommerz,bkash,fake" default:"fake"`
 	}) (*AccountOutput, error) {
 		if err := selling(svc); err != nil {
 			return nil, err
@@ -157,12 +165,7 @@ func registerCommerce(api huma.API, svc *commerce.Service) {
 		}
 
 		out := &AccountOutput{CacheControl: billingCacheControl}
-		out.Body.Account = AccountView{
-			Gateway:        account.Gateway,
-			Status:         account.Status,
-			ChargesEnabled: account.ChargesEnabled,
-			Ready:          account.Ready(),
-		}
+		out.Body.Account = accountView(account)
 		return out, nil
 	})
 
@@ -179,7 +182,7 @@ func registerCommerce(api huma.API, svc *commerce.Service) {
 		Body struct {
 			AmountMinor int64  `json:"amount_minor" minimum:"1" doc:"In the currency's smallest unit."`
 			Currency    string `json:"currency" minLength:"3" maxLength:"3"`
-			Gateway     string `json:"gateway" enum:"stripe,fake"`
+			Gateway     string `json:"gateway" enum:"stripe,sslcommerz,bkash,fake"`
 		}
 	}) (*struct{}, error) {
 		if err := selling(svc); err != nil {
@@ -242,7 +245,7 @@ func registerCommerce(api huma.API, svc *commerce.Service) {
 	}, func(ctx context.Context, in *struct {
 		Slug string `path:"slug" maxLength:"200"`
 		Body struct {
-			Gateway    string `json:"gateway" enum:"stripe,fake"`
+			Gateway    string `json:"gateway" enum:"stripe,sslcommerz,bkash,fake"`
 			SuccessURL string `json:"success_url" format:"uri" maxLength:"2000"`
 			CancelURL  string `json:"cancel_url" format:"uri" maxLength:"2000"`
 		}
@@ -301,6 +304,160 @@ func registerCommerce(api huma.API, svc *commerce.Service) {
 		return out, nil
 	})
 
+	huma.Register(api, huma.Operation{
+		OperationID: "set-payment-credentials",
+		Method:      http.MethodPut,
+		Path:        "/v1/billing/credentials",
+		Summary:     "Give this workspace's own gateway keys",
+		Description: "For the gateways where the school is its own merchant — SSLCommerz, bKash. Requires course:write. The secret is encrypted before it is stored and there is no endpoint that reads it back: a credential you can retrieve is a credential that leaks the day somebody's session does.",
+		Tags:        []string{"Billing"},
+		Security:    []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, in *struct {
+		Body struct {
+			Gateway string `json:"gateway" enum:"sslcommerz,bkash"`
+
+			PublicID string `json:"public_id" minLength:"1" maxLength:"200" doc:"The store id, or the app key. Not secret."`
+			Secret   string `json:"secret" minLength:"1" maxLength:"4000" doc:"The store password, or bKash's app secret, username and password as JSON. Write-only."`
+		}
+	}) (*AccountOutput, error) {
+		if err := selling(svc); err != nil {
+			return nil, err
+		}
+
+		p, author, err := authorFor(ctx, auth.PermCourseWrite)
+		if err != nil {
+			return nil, err
+		}
+
+		creds := commerce.Credentials{PublicID: in.Body.PublicID, Secret: in.Body.Secret}
+		if err := svc.SetCredentials(ctx, p.TenantID, in.Body.Gateway, creds,
+			commerce.Actor{UserID: author.UserID, IP: author.IP, UserAgent: author.UserAgent}); err != nil {
+			return nil, commerceError(err)
+		}
+
+		account, err := svc.AccountOf(ctx, p.TenantID, in.Body.Gateway)
+		if err != nil {
+			return nil, commerceError(err)
+		}
+
+		out := &AccountOutput{CacheControl: billingCacheControl}
+		out.Body.Account = accountView(account)
+		return out, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "list-orders",
+		Method:      http.MethodGet,
+		Path:        "/v1/orders",
+		Summary:     "What this workspace has sold",
+		Description: "Requires course:write. The list a refund is issued from.",
+		Tags:        []string{"Billing"},
+		Security:    []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, in *struct {
+		Limit int `query:"limit" minimum:"1" maximum:"50" default:"20"`
+	}) (*ReceiptsOutput, error) {
+		if err := selling(svc); err != nil {
+			return nil, err
+		}
+
+		p, _, err := authorFor(ctx, auth.PermCourseWrite)
+		if err != nil {
+			return nil, err
+		}
+
+		orders, err := svc.Orders(ctx, p.TenantID, in.Limit)
+		if err != nil {
+			return nil, commerceError(err)
+		}
+
+		out := &ReceiptsOutput{CacheControl: billingCacheControl}
+		out.Body.Orders = make([]OrderView, 0, len(orders))
+		for _, o := range orders {
+			out.Body.Orders = append(out.Body.Orders, orderView(o))
+		}
+		return out, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "refund-order",
+		Method:      http.MethodPost,
+		Path:        "/v1/orders/{id}/refund",
+		Summary:     "Give the money back",
+		Description: "Requires course:write. The gateway is asked first and the database second: a row marked refunded against money that never moved is a learner locked out of a course they still paid for. The enrolment is withdrawn in the same transaction as the status, so the two can never disagree.",
+		Tags:        []string{"Billing"},
+		Security:    []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, in *struct {
+		ID string `path:"id" format:"uuid"`
+	}) (*OrderOutput, error) {
+		if err := selling(svc); err != nil {
+			return nil, err
+		}
+
+		p, author, err := authorFor(ctx, auth.PermCourseWrite)
+		if err != nil {
+			return nil, err
+		}
+
+		orderID, err := uuid.Parse(in.ID)
+		if err != nil {
+			return nil, huma.Error422UnprocessableEntity("That is not an order id.")
+		}
+
+		order, err := svc.Refund(ctx, p.TenantID, orderID,
+			commerce.Actor{UserID: author.UserID, IP: author.IP, UserAgent: author.UserAgent})
+		if err != nil {
+			return nil, commerceError(err)
+		}
+
+		out := &OrderOutput{CacheControl: billingCacheControl}
+		out.Body.Order = orderView(order)
+		return out, nil
+	})
+
+	/*
+		The callback, for a gateway that sends no webhook.
+
+		bKash has none: the learner comes back from the app with a payment id in the
+		query string, and the only proof of anything is a server-to-server execute. So
+		this endpoint takes what the browser brought, hands it to the driver, and the
+		driver goes and *asks* the gateway what really happened.
+
+		Unauthenticated, like the webhook, and for the same reason — but unlike the
+		webhook nothing here is trusted: the query string is a hint, not a signature.
+		The tenant and the order come from the path, and the money comes from the
+		gateway's own answer.
+	*/
+	huma.Register(api, huma.Operation{
+		OperationID: "gateway-callback",
+		Method:      http.MethodPost,
+		Path:        "/v1/payments/{gateway}/callback/{tenant}/{order}",
+		Summary:     "Where a gateway returns the learner",
+		Tags:        []string{"Billing"},
+	}, func(ctx context.Context, in *struct {
+		Gateway string            `path:"gateway" enum:"sslcommerz,bkash"`
+		Tenant  string            `path:"tenant" format:"uuid"`
+		Order   string            `path:"order" format:"uuid"`
+		Body    map[string]string `doc:"Whatever the gateway sent back — its own query string or IPN form, verbatim."`
+	}) (*struct{}, error) {
+		if err := selling(svc); err != nil {
+			return nil, err
+		}
+
+		tenantID, err := uuid.Parse(in.Tenant)
+		if err != nil {
+			return nil, huma.Error422UnprocessableEntity("That is not a workspace id.")
+		}
+		orderID, err := uuid.Parse(in.Order)
+		if err != nil {
+			return nil, huma.Error422UnprocessableEntity("That is not an order id.")
+		}
+
+		if err := svc.Confirm(ctx, tenantID, in.Gateway, orderID, in.Body); err != nil {
+			return nil, commerceError(err)
+		}
+		return nil, nil
+	})
+
 	/*
 		The webhook. Unauthenticated, and that is not an oversight: a gateway has no
 		session with us. Its signature is the authentication, and the tenant comes from
@@ -318,7 +475,7 @@ func registerCommerce(api huma.API, svc *commerce.Service) {
 		Description: "Authenticated by signature, never by session. Deduplicated: a gateway delivers the same event more than once, and the second delivery enrols nobody twice.",
 		Tags:        []string{"Billing"},
 	}, func(ctx context.Context, in *struct {
-		Gateway   string `path:"gateway" enum:"stripe,fake"`
+		Gateway   string `path:"gateway" enum:"stripe,sslcommerz,bkash,fake"`
 		Signature string `header:"X-Signature" doc:"The gateway's signature over the raw body."`
 		RawBody   []byte
 	}) (*struct{}, error) {
@@ -331,6 +488,15 @@ func registerCommerce(api huma.API, svc *commerce.Service) {
 		}
 		return nil, nil
 	})
+}
+
+func accountView(a commerce.Account) AccountView {
+	return AccountView{
+		Gateway:        a.Gateway,
+		Status:         a.Status,
+		ChargesEnabled: a.ChargesEnabled,
+		Ready:          a.Ready(),
+	}
 }
 
 func orderView(o commerce.Order) OrderView {
@@ -375,6 +541,15 @@ func commerceError(err error) error {
 	// verify is a request that was not sent by the gateway.
 	case errors.Is(err, commerce.ErrSignature):
 		return huma.Error400BadRequest("The signature does not verify.")
+
+	case errors.Is(err, commerce.ErrNotPaid):
+		return huma.Error409Conflict("That order took no money, so there is none to give back.")
+
+	case errors.Is(err, commerce.ErrUnsupported):
+		return huma.Error409Conflict("That gateway cannot do that.")
+
+	case errors.Is(err, commerce.ErrCredentials):
+		return huma.Error409Conflict("This workspace has not given its keys for that gateway.")
 	}
 
 	return err

@@ -40,6 +40,7 @@ import (
 	"github.com/ebnsina/muallim-api/internal/platform/database"
 	"github.com/ebnsina/muallim-api/internal/platform/logging"
 	"github.com/ebnsina/muallim-api/internal/platform/ratelimit"
+	vault "github.com/ebnsina/muallim-api/internal/platform/secret"
 	"github.com/ebnsina/muallim-api/internal/platform/server"
 	"github.com/ebnsina/muallim-api/internal/tenant"
 )
@@ -228,27 +229,57 @@ func run() error {
 		self-enrolment: `enroll` declares Prices, `commerce` satisfies it. The adapters
 		are in commerce.go; the two domains stay strangers.
 
-		The Fake gateway is registered whenever it is enabled, and it is what this
-		deployment sells with until the Stripe keys arrive. Stripe is registered only
-		when it has keys: a driver with none refuses at the door, which beats a checkout
-		that leads nowhere.
+		A driver is registered only when it can actually take money. Stripe needs the
+		platform's key; SSLCommerz and bKash need the sealer, because their merchant is
+		the school itself and its secrets are held encrypted. A driver with nothing to
+		work with refuses at the door, which beats a checkout that leads nowhere.
 	*/
 	var gateways []commerce.Gateway
 	if cfg.FakeGatewayEnabled {
 		gateways = append(gateways, commerce.Fake{BaseURL: cfg.WebBaseURL, Secret: cfg.FakeGatewaySecret})
 	}
 	if cfg.StripeSecretKey != "" {
-		gateways = append(gateways, commerce.Stripe{
-			SecretKey:      cfg.StripeSecretKey,
-			WebhookSecret:  cfg.StripeWebhookSecret,
-			FeeBasisPoints: cfg.PlatformFeeBasisPoints,
-		})
+		gateways = append(gateways, commerce.NewStripe(
+			cfg.StripeSecretKey, cfg.StripeWebhookSecret, cfg.PlatformFeeBasisPoints))
+	}
+
+	// The sealer is what makes a workspace-held secret storable at all. No key, no
+	// SSLCommerz and no bKash — and it is said out loud rather than half-started.
+	var sealer *vault.Sealer
+	if cfg.CredentialsKey != "" {
+		sealer, err = vault.NewSealer(cfg.CredentialsKey)
+		if err != nil {
+			return fmt.Errorf("credentials key: %w", err)
+		}
+	}
+
+	if sealer != nil && cfg.SSLCommerzEnabled {
+		base := commerce.SSLCommerzLive
+		if cfg.SSLCommerzSandbox {
+			base = commerce.SSLCommerzSandbox
+		}
+
+		driver, err := commerce.NewSSLCommerz(base, cfg.APIBaseURL+"/v1/payments/sslcommerz/ipn", nil)
+		if err != nil {
+			return fmt.Errorf("sslcommerz: %w", err)
+		}
+		gateways = append(gateways, driver)
+	}
+
+	if sealer != nil && cfg.BkashEnabled {
+		gateways = append(gateways,
+			commerce.NewBkash(cfg.BkashSandbox, cfg.APIBaseURL+"/v1/payments/bkash/callback", nil))
+	}
+
+	if (cfg.SSLCommerzEnabled || cfg.BkashEnabled) && sealer == nil {
+		log.Warn("gateway not started: it holds a workspace's own secrets and MUALLIM_CREDENTIALS_KEY is unset",
+			"sslcommerz", cfg.SSLCommerzEnabled, "bkash", cfg.BkashEnabled)
 	}
 
 	var shop *commerce.Service
 	if len(gateways) > 0 {
 		shop = commerce.NewService(db, commerce.NewPostgresRepository(), commerceAuditor{recorder},
-			purchases{learning}, gateways...)
+			purchases{learning}, sealer, gateways...)
 
 		// The other direction: a course with a price is bought, not self-enrolled.
 		learning = learning.WithPrices(coursePrices{commerce.NewPostgresRepository()})

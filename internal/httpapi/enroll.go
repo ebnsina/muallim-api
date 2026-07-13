@@ -388,6 +388,11 @@ func enrolError(err error) error {
 	case errors.Is(err, enroll.ErrPaymentRequired):
 		return huma.Error402PaymentRequired("This course must be bought before you can enrol on it.")
 
+	// Cancelling a purchase would hand the course back and keep the money. The way
+	// out of a purchase is a refund, and only the workspace can issue one.
+	case errors.Is(err, enroll.ErrPurchased):
+		return huma.Error409Conflict("You bought this course. Ask the workspace for a refund — cancelling would not return your money.")
+
 	case errors.Is(err, enroll.ErrNotFound):
 		return huma.Error404NotFound("Not found.")
 

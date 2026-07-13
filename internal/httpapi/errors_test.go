@@ -159,6 +159,9 @@ func TestEnrolmentSentinelsMapToADeliberateStatus(t *testing.T) {
 		// 402: a bill, not a refusal of the person. The client's job is to send them
 		// to a checkout rather than to an apology.
 		enroll.ErrPaymentRequired: http.StatusPaymentRequired,
+
+		// 409: cancelling a purchase would hand the course back and keep the money.
+		enroll.ErrPurchased: http.StatusConflict,
 	}
 
 	for err, want := range tests {
@@ -178,13 +181,17 @@ func TestCommerceSentinelsMapToADeliberateStatus(t *testing.T) {
 	tests := map[error]int{
 		commerce.ErrNotFound: http.StatusNotFound,
 
-		// Conflicts, all four: the request is well formed and the world is not in the
-		// state it needs. A workspace with no account, an account the gateway will not
-		// charge on, a course that costs nothing, and a course already bought.
+		// Conflicts: the request is well formed and the world is not in the state it
+		// needs. No account, an account the gateway will not charge on, a course that
+		// costs nothing, a course already bought, an order with no money in it, a
+		// gateway that cannot do the thing, and a workspace that never gave its keys.
 		commerce.ErrNoAccount:       http.StatusConflict,
 		commerce.ErrAccountNotReady: http.StatusConflict,
 		commerce.ErrFree:            http.StatusConflict,
 		commerce.ErrAlreadyOwned:    http.StatusConflict,
+		commerce.ErrNotPaid:         http.StatusConflict,
+		commerce.ErrUnsupported:     http.StatusConflict,
+		commerce.ErrCredentials:     http.StatusConflict,
 
 		commerce.ErrInvalidPrice: http.StatusUnprocessableEntity,
 

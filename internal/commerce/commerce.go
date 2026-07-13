@@ -49,13 +49,28 @@ var (
 	// ErrSignature means a webhook did not come from the gateway it claims to. It is
 	// the one error in this package that is somebody attacking, not somebody wrong.
 	ErrSignature = errors.New("commerce: the webhook signature does not verify")
+
+	// ErrNotPaid means somebody tried to refund an order that never took any money.
+	ErrNotPaid = errors.New("commerce: the order is not paid")
+
+	// ErrUnsupported means the driver cannot do what was asked of it — refund a
+	// payment, verify a webhook it never sends. Said plainly, because the alternative
+	// is a button that silently does nothing.
+	ErrUnsupported = errors.New("commerce: the gateway does not support that")
+
+	// ErrCredentials means the workspace's own gateway credentials are missing or
+	// will not decrypt. SSLCommerz and bKash need them; Stripe does not.
+	ErrCredentials = errors.New("commerce: the gateway credentials are missing")
 )
 
 // Gateways. `fake` is not a stub for tests to reach for — it is a real driver a
-// deployment can run, and it is how this ships until the Stripe keys arrive.
+// deployment can run, and it is how a deployment with no keys still exercises the
+// whole flow.
 const (
-	GatewayStripe = "stripe"
-	GatewayFake   = "fake"
+	GatewayStripe     = "stripe"
+	GatewaySSLCommerz = "sslcommerz"
+	GatewayBkash      = "bkash"
+	GatewayFake       = "fake"
 )
 
 // Account statuses.
@@ -99,6 +114,11 @@ type Account struct {
 	// onboarded and still be refused charges, so it is asked rather than inferred.
 	ChargesEnabled bool
 
+	// Credentials is the workspace's own merchant secret, decrypted, and only for the
+	// gateways that have one. It is never persisted from here and never returned by
+	// the API: the service fills it in on its way to a driver, and nowhere else.
+	Credentials Credentials
+
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
@@ -126,6 +146,16 @@ type Order struct {
 	// matched on. Unique with the gateway, which is what makes a replayed webhook a
 	// no-op rather than a second enrolment.
 	ExternalID string
+
+	// PaymentExternalID is the gateway's id for the *payment*, learned when the money
+	// moved. A refund is issued against this, not against the session that led to it:
+	// bKash refunds a trxID, Stripe refunds a payment intent, and neither will take a
+	// checkout id in its place.
+	PaymentExternalID string
+
+	// RefundExternalID is what the gateway called the refund, kept so a support
+	// question about somebody's money has an answer.
+	RefundExternalID string
 
 	PaidAt     *time.Time
 	RefundedAt *time.Time
@@ -176,20 +206,49 @@ type Event struct {
 	// own: metadata we can read is metadata that could have been edited in the
 	// gateway's dashboard.
 	ExternalID string
+
+	// PaymentExternalID is the gateway's id for the payment itself, if the event
+	// carried one. It is what a refund will later be issued against.
+	PaymentExternalID string
 }
 
 /*
-Gateway is a payment provider, from the outside.
+Credentials are a workspace's own merchant credentials with a gateway.
 
-Declared here by the package that needs it. `Checkout` creates a hosted session on
-the *school's* connected account and returns where to send the learner. `Verify`
-turns a raw webhook body into an Event, or refuses it.
+Stripe does not need them — the platform holds one key and acts on behalf of the
+connected account — but SSLCommerz and bKash have no such notion: each school *is*
+the merchant, with its own store id and its own secret. Those secrets are held
+encrypted, and they are handed to a driver at the moment it needs them and never
+returned by the API, logged, or put in an audit entry.
+*/
+type Credentials struct {
+	// PublicID is the store id, the app key: needed to build a request, and not secret.
+	PublicID string
 
-Both are the whole surface. A driver that needed a third method would be a driver
-telling us its model does not fit — which is worth hearing before it is wired in.
+	// Secret is the store password, the app secret. Decrypted only in memory.
+	Secret string
+}
+
+// Has reports whether both halves are present.
+func (c Credentials) Has() bool { return c.PublicID != "" && c.Secret != "" }
+
+/*
+Gateway is a payment provider, from the outside — and only the part every provider
+actually has.
+
+`Checkout` opens a hosted session on the *school's* account and says where to send
+the learner. That, onboarding, and asking the account what it will do are the whole
+of the common ground.
+
+How the money is *confirmed* is not common ground, and pretending otherwise is how
+a driver ends up lying. Stripe tells us in a signed webhook. bKash sends no webhook
+at all: the learner comes back to a callback URL, and the only proof is a
+server-to-server execute. SSLCommerz does both. So confirmation, and refunding, are
+capabilities a driver declares — `Webhooker`, `Confirmer`, `Refunder` — and the
+service asks whether a driver has them rather than making every driver pretend.
 */
 type Gateway interface {
-	// Name is the constant this driver serves: `stripe`, `fake`.
+	// Name is the constant this driver serves: `stripe`, `sslcommerz`, `bkash`, `fake`.
 	Name() string
 
 	// Onboard returns where to send an author to connect their account, and the
@@ -197,15 +256,40 @@ type Gateway interface {
 	Onboard(ctx context.Context, tenantID uuid.UUID, returnURL string) (Onboarding, error)
 
 	// AccountStatus asks the gateway what it will actually do with this account.
-	AccountStatus(ctx context.Context, externalID string) (Account, error)
+	AccountStatus(ctx context.Context, account Account) (Account, error)
 
 	// Checkout opens a hosted session on the connected account. The order is already
 	// written and pending: a session that succeeds against an order that does not
-	// exist is money we cannot account for.
+	// exist is money we cannot account for. It returns where to send the learner and
+	// the gateway's id for the session.
 	Checkout(ctx context.Context, account Account, order Order, urls CheckoutURLs) (string, string, error)
+}
 
-	// Verify authenticates a raw webhook and says what it means.
+// Webhooker is a gateway that tells us, out of band and signed, what happened.
+type Webhooker interface {
+	// Verify authenticates a raw webhook and says what it means. The signature is
+	// whatever header the gateway signs with; a driver that signs the body itself
+	// ignores it.
 	Verify(payload []byte, signature string) (Event, error)
+}
+
+/*
+Confirmer is a gateway whose truth is a question we ask, not an answer it sends.
+
+The learner returns to our callback with a payment id in the query string. That is
+not proof of anything — anybody can type a URL — so the driver goes back to the
+gateway with it and asks what really happened. bKash works this way and only this
+way; SSLCommerz's validation API is the same shape and is the authority even when
+its IPN also arrived.
+*/
+type Confirmer interface {
+	Confirm(ctx context.Context, account Account, order Order, query map[string]string) (Event, error)
+}
+
+// Refunder is a gateway that can give the money back. It refunds the *payment* —
+// order.PaymentExternalID — and returns the gateway's id for the refund.
+type Refunder interface {
+	Refund(ctx context.Context, account Account, order Order) (string, error)
 }
 
 // Onboarding is where to send an author, and what the gateway will call them.

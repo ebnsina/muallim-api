@@ -81,6 +81,10 @@ type Config struct {
 	// there, not at this API.
 	WebBaseURL string
 
+	// APIBaseURL is this server's own origin, and it has to be configured rather than
+	// guessed: a gateway that must reach a callback cannot be told "localhost".
+	APIBaseURL string
+
 	// SMTP delivers mail. With no host configured the process logs messages
 	// instead of sending them, which is a development convenience and a disclosure
 	// bug anywhere else: the body of every message we send contains a single-use
@@ -144,6 +148,18 @@ type Config struct {
 	StripeSecretKey     string
 	StripeWebhookSecret string
 
+	// SSLCommerz and bKash are not platforms: each workspace is its own merchant and
+	// brings its own keys, so there is nothing here but which environment to talk to
+	// and where the gateway should send the learner back.
+	SSLCommerzEnabled bool
+	SSLCommerzSandbox bool
+	BkashEnabled      bool
+	BkashSandbox      bool
+
+	// CredentialsKey seals those workspace-owned secrets at rest: 64 hex characters,
+	// AES-256. Without it the gateways that need credentials do not start.
+	CredentialsKey string
+
 	// PlatformFeeBasisPoints is our cut, in hundredths of a percent. 250 is 2.5%.
 	PlatformFeeBasisPoints int64
 
@@ -192,11 +208,17 @@ func Load() (Config, error) {
 		AuthRateEvery: duration("MUALLIM_AUTH_RATE_EVERY", 6*time.Second),
 
 		WebBaseURL: env("MUALLIM_WEB_BASE_URL", "http://localhost:5173"),
+		APIBaseURL: env("MUALLIM_API_BASE_URL", "http://localhost:8080"),
 
 		FakeGatewayEnabled:     env("MUALLIM_FAKE_GATEWAY", "true") == "true",
 		FakeGatewaySecret:      env("MUALLIM_FAKE_GATEWAY_SECRET", "fake-gateway-secret"),
 		StripeSecretKey:        env("MUALLIM_STRIPE_SECRET_KEY", ""),
 		StripeWebhookSecret:    env("MUALLIM_STRIPE_WEBHOOK_SECRET", ""),
+		SSLCommerzEnabled:      env("MUALLIM_SSLCOMMERZ", "false") == "true",
+		SSLCommerzSandbox:      env("MUALLIM_SSLCOMMERZ_SANDBOX", "true") == "true",
+		BkashEnabled:           env("MUALLIM_BKASH", "false") == "true",
+		BkashSandbox:           env("MUALLIM_BKASH_SANDBOX", "true") == "true",
+		CredentialsKey:         env("MUALLIM_CREDENTIALS_KEY", ""),
 		PlatformFeeBasisPoints: int64(number("MUALLIM_PLATFORM_FEE_BPS", 250)),
 		SMTPHost:               env("MUALLIM_SMTP_HOST", ""),
 		SMTPPort:               number("MUALLIM_SMTP_PORT", 587),

@@ -219,14 +219,31 @@ func (s *Service) Enrol(ctx context.Context, tenantID uuid.UUID, slug string, ac
 	return enrolment, nil
 }
 
-// Cancel ends a learner's access without destroying their progress. Re-enrolling
-// restores both.
+/*
+Cancel ends a learner's access without destroying their progress. Re-enrolling
+restores both.
+
+A purchase is not cancellable this way, and that is the whole of ErrPurchased. The
+button used to hand back the course and keep the money: the enrolment went, the
+paid order stayed paid, and re-enrolling asked the learner to buy what they had
+already bought. Money comes back through a refund, which the workspace issues and
+which withdraws the enrolment itself — one path, not two that can disagree.
+*/
 func (s *Service) Cancel(ctx context.Context, tenantID uuid.UUID, slug string, actor Actor) error {
 	return s.db.WithTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
 		courseID, _, err := s.repo.CourseBySlug(ctx, tx, tenantID, slug)
 		if err != nil {
 			return err
 		}
+
+		enrolment, err := s.repo.Enrolment(ctx, tx, tenantID, courseID, actor.UserID)
+		if err != nil {
+			return err
+		}
+		if enrolment.Source == SourcePurchase {
+			return ErrPurchased
+		}
+
 		if err := s.repo.CancelEnrolment(ctx, tx, tenantID, courseID, actor.UserID); err != nil {
 			return err
 		}

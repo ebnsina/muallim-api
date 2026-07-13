@@ -37,6 +37,53 @@ Every setting is an environment variable prefixed `MUALLIM_`; `.env.example` lis
 
 Assignment uploads go to an S3-compatible store. `make storage-up` starts a local MinIO on `:9002`, with its console on `:9003`. Without it, `MUALLIM_S3_ENDPOINT` is unset and the API refuses every upload with a 503.
 
+## Payments
+
+Four drivers. A driver is registered only when it can actually take money, so a
+deployment with no keys still runs — it just sells nothing except through the fake.
+
+```bash
+# The fake gateway. A real driver with signed webhooks that takes no money, and how
+# the whole flow — price, checkout, webhook, enrolment, refund — is exercised with
+# no keys at all. On by default outside production.
+MUALLIM_FAKE_GATEWAY=true
+MUALLIM_FAKE_GATEWAY_SECRET=fake-gateway-secret
+
+# Stripe Connect Standard. The platform holds one key and acts on behalf of the
+# school's connected account, so there is nothing to store per workspace.
+MUALLIM_STRIPE_SECRET_KEY=sk_live_...
+MUALLIM_STRIPE_WEBHOOK_SECRET=whsec_...        # the CONNECT endpoint's secret, not the account one
+MUALLIM_PLATFORM_FEE_BPS=250                   # our cut, in hundredths of a percent
+
+# SSLCommerz and bKash (Bangladesh). Neither has a platform account: each school is
+# its own merchant and gives us its own keys, so these two need the sealer.
+MUALLIM_SSLCOMMERZ=true
+MUALLIM_SSLCOMMERZ_SANDBOX=true
+MUALLIM_BKASH=true
+MUALLIM_BKASH_SANDBOX=true
+
+# 64 hex characters — AES-256. Seals a workspace's own gateway secrets at rest.
+# Without it, SSLCommerz and bKash do not start, and the API says so.
+#   openssl rand -hex 32
+MUALLIM_CREDENTIALS_KEY=...
+
+# This server's own origin. A gateway that must reach a callback cannot be told
+# "localhost", so it is configured rather than guessed.
+MUALLIM_API_BASE_URL=https://api.example.com
+```
+
+What each gateway needs from you once you have the credentials:
+
+| Gateway | Where the keys go | What else |
+|---|---|---|
+| **Stripe** | The two env vars above | A Connect platform profile in the dashboard, and a **Connect** webhook endpoint (`/v1/webhooks/stripe`) subscribed to `checkout.session.completed`, `checkout.session.async_payment_succeeded` and `checkout.session.async_payment_failed`, with "listen to events on connected accounts" enabled — the charges happen on the schools' accounts, not ours. |
+| **SSLCommerz** | Each workspace pastes its own **store id + store password** into settings (`PUT /v1/billing/credentials`) | Register the IPN URL (`/v1/payments/sslcommerz/ipn`) in the SSLCommerz merchant panel, and enable IPN for the store. |
+| **bKash** | Each workspace pastes its **app key, app secret, username and password** | The callback URL (`/v1/payments/bkash/callback/...`) must be reachable by bKash from the public internet. There is no webhook to fall back on: no callback, no settlement. |
+
+The one that will bite you: bKash blocks a merchant for an hour after more than two
+token refreshes in one, so the driver caches its token per app key and single-flights
+the grant. Do not add a code path that grants a token per request.
+
 ## Development
 
 ```bash

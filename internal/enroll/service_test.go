@@ -583,3 +583,57 @@ func (a certifyAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUI
 func newIssuer(db *database.DB) issuer {
 	return issuer{certify.NewService(db, certify.NewPostgresRepository(), certifyAuditor{audit.NewRecorder()})}
 }
+
+/*
+The hole this closes: cancelling a purchase used to hand the course back and keep
+the money.
+
+The enrolment went, the paid order stayed paid, and re-enrolling asked the learner
+to buy what they had already bought. Money comes back through a refund, which the
+workspace issues and which withdraws the enrolment itself — one path out, not two
+that can disagree.
+*/
+func TestALearnerCannotCancelACourseTheyBought(t *testing.T) {
+	t.Parallel()
+
+	db := testDB(t)
+	svc := newService(db)
+	tenantID := seedTenant(t, db)
+	learner := seedUser(t, db, tenantID)
+	slug, lessons := seedCourse(t, db, tenantID, 2, true)
+
+	// Enrolled the way a purchase enrols somebody: by the workspace, on its behalf.
+	if _, err := svc.Grant(t.Context(), tenantID, slug, learner, actorFor(seedUser(t, db, tenantID))); err != nil {
+		t.Fatal(err)
+	}
+	markPurchased(t, db, tenantID, slug, learner)
+
+	err := svc.Cancel(t.Context(), tenantID, slug, actorFor(learner))
+	if !errors.Is(err, enroll.ErrPurchased) {
+		t.Fatalf("cancelling a purchase returned %v, want ErrPurchased", err)
+	}
+
+	// And the course is still theirs. A refusal that took the lesson away anyway
+	// would be the same bug wearing an error message.
+	if _, _, err := svc.Lesson(t.Context(), tenantID, lessons[0], enroll.Reader{UserID: learner}); err != nil {
+		t.Errorf("the refusal took the course away anyway: %v", err)
+	}
+}
+
+// markPurchased is what commerce does when a webhook arrives: the enrolment's source
+// says it was bought, and that is what makes it un-cancellable.
+func markPurchased(t *testing.T, db *database.DB, tenantID uuid.UUID, slug string, learner uuid.UUID) {
+	t.Helper()
+
+	err := db.WithTenant(t.Context(), tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		_, err := tx.Exec(ctx,
+			`UPDATE enrolments SET source = 'purchase'
+			 WHERE tenant_id = $1 AND user_id = $2
+			   AND course_id = (SELECT id FROM courses WHERE tenant_id = $1 AND slug = $3)`,
+			tenantID, learner, slug)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("mark purchased: %v", err)
+	}
+}

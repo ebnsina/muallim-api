@@ -155,13 +155,15 @@ func (r *PostgresRepository) Prices(ctx context.Context, tx pgx.Tx, tenantID uui
 }
 
 const orderColumns = `id, tenant_id, course_id, user_id, amount_minor, currency, status,
-	                  gateway, external_id, paid_at, refunded_at, created_at, updated_at`
+	                  gateway, external_id, payment_external_id, refund_external_id,
+	                  paid_at, refunded_at, created_at, updated_at`
 
 func scanOrder(row pgx.Row) (Order, error) {
 	var o Order
 	err := row.Scan(&o.ID, &o.TenantID, &o.CourseID, &o.UserID,
 		&o.Price.AmountMinor, &o.Price.Currency, &o.Status,
-		&o.Gateway, &o.ExternalID, &o.PaidAt, &o.RefundedAt, &o.CreatedAt, &o.UpdatedAt)
+		&o.Gateway, &o.ExternalID, &o.PaymentExternalID, &o.RefundExternalID,
+		&o.PaidAt, &o.RefundedAt, &o.CreatedAt, &o.UpdatedAt)
 	return o, err
 }
 
@@ -281,4 +283,92 @@ func (r *PostgresRepository) Settle(ctx context.Context, tx pgx.Tx, tenantID, or
 		return false, fmt.Errorf("commerce: settle order: %w", err)
 	}
 	return tag.RowsAffected() == 1, nil
+}
+
+// AttachPayment records the gateway's id for the money itself, learned when it moved.
+func (r *PostgresRepository) AttachPayment(ctx context.Context, tx pgx.Tx, tenantID, orderID uuid.UUID, paymentID string) error {
+	_, err := tx.Exec(ctx,
+		`UPDATE orders SET payment_external_id = $3, updated_at = now()
+		 WHERE tenant_id = $1 AND id = $2`,
+		tenantID, orderID, paymentID)
+
+	if err != nil {
+		return fmt.Errorf("commerce: attach payment: %w", err)
+	}
+	return nil
+}
+
+// AttachRefund records what the gateway called the refund.
+func (r *PostgresRepository) AttachRefund(ctx context.Context, tx pgx.Tx, tenantID, orderID uuid.UUID, refundID string) error {
+	_, err := tx.Exec(ctx,
+		`UPDATE orders SET refund_external_id = $3, updated_at = now()
+		 WHERE tenant_id = $1 AND id = $2`,
+		tenantID, orderID, refundID)
+
+	if err != nil {
+		return fmt.Errorf("commerce: attach refund: %w", err)
+	}
+	return nil
+}
+
+// OrdersOfTenant is a workspace's own sales, newest first.
+func (r *PostgresRepository) OrdersOfTenant(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, limit int) ([]Order, error) {
+	rows, err := tx.Query(ctx,
+		`SELECT `+orderColumns+` FROM orders
+		 WHERE tenant_id = $1
+		 ORDER BY created_at DESC, id DESC
+		 LIMIT $2`,
+		tenantID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("commerce: list tenant orders: %w", err)
+	}
+	defer rows.Close()
+
+	var orders []Order
+	for rows.Next() {
+		o, err := scanOrder(rows)
+		if err != nil {
+			return nil, fmt.Errorf("commerce: scan order: %w", err)
+		}
+		orders = append(orders, o)
+	}
+	return orders, rows.Err()
+}
+
+// Credentials returns the public half and the sealed secret. The repository never
+// sees the key that opens it.
+func (r *PostgresRepository) Credentials(ctx context.Context, tx pgx.Tx, tenantID, accountID uuid.UUID) (string, []byte, error) {
+	var (
+		publicID string
+		cipher   []byte
+	)
+	err := tx.QueryRow(ctx,
+		`SELECT public_id, secret_cipher FROM payment_credentials
+		 WHERE tenant_id = $1 AND account_id = $2`,
+		tenantID, accountID).Scan(&publicID, &cipher)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", nil, ErrNotFound
+		}
+		return "", nil, fmt.Errorf("commerce: load credentials: %w", err)
+	}
+	return publicID, cipher, nil
+}
+
+// SetCredentials writes them, or replaces the ones that were there.
+func (r *PostgresRepository) SetCredentials(ctx context.Context, tx pgx.Tx, tenantID, accountID uuid.UUID, publicID string, cipher []byte) error {
+	_, err := tx.Exec(ctx,
+		`INSERT INTO payment_credentials (account_id, tenant_id, public_id, secret_cipher)
+		 VALUES ($1, $2, $3, $4)
+		 ON CONFLICT (account_id) DO UPDATE
+		 SET public_id     = EXCLUDED.public_id,
+		     secret_cipher = EXCLUDED.secret_cipher,
+		     updated_at    = now()`,
+		accountID, tenantID, publicID, cipher)
+
+	if err != nil {
+		return fmt.Errorf("commerce: set credentials: %w", err)
+	}
+	return nil
 }

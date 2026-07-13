@@ -47,8 +47,9 @@ func (f Fake) Onboard(_ context.Context, tenantID uuid.UUID, returnURL string) (
 
 // AccountStatus says yes. A fake account that could be restricted would be a fake
 // with an opinion, and it has none.
-func (f Fake) AccountStatus(_ context.Context, externalID string) (Account, error) {
-	return Account{ExternalID: externalID, Status: AccountActive, ChargesEnabled: true}, nil
+func (f Fake) AccountStatus(_ context.Context, account Account) (Account, error) {
+	account.Status, account.ChargesEnabled = AccountActive, true
+	return account, nil
 }
 
 // Checkout returns a URL the web app can render as a page with two buttons, and the
@@ -115,5 +116,28 @@ func (f Fake) Verify(payload []byte, signature string) (Event, error) {
 		kind = EventFailed
 	}
 
-	return Event{Kind: kind, TenantID: tenantID, OrderID: orderID, ExternalID: body.Session}, nil
+	// A real gateway learns the payment's own id only when the money moves, and a
+	// refund is issued against that rather than against the session. The fake says so
+	// too, or the refund path would never be exercised until the day it had to be.
+	return Event{
+		Kind: kind, TenantID: tenantID, OrderID: orderID,
+		ExternalID:        body.Session,
+		PaymentExternalID: "pi_fake_" + orderID.String(),
+	}, nil
 }
+
+// Refund takes no money, so it gives none back — but it answers like a gateway that
+// did, which is what the flow above it is entitled to expect from a driver.
+func (f Fake) Refund(_ context.Context, _ Account, order Order) (string, error) {
+	if order.Status != OrderPaid {
+		return "", ErrNotPaid
+	}
+	return "re_fake_" + order.ID.String(), nil
+}
+
+// The fake is a real driver, and these are the capabilities it really has.
+var (
+	_ Gateway   = (*Fake)(nil)
+	_ Webhooker = (*Fake)(nil)
+	_ Refunder  = (*Fake)(nil)
+)

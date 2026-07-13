@@ -19,6 +19,11 @@ import (
 // them to a checkout rather than to an apology.
 var ErrPaymentRequired = errors.New("enroll: the course must be bought")
 
+// ErrPurchased means the learner is trying to cancel an enrolment they bought.
+// Cancelling would hand back the course and keep the money; a refund is the only
+// way out, and only the workspace can issue one.
+var ErrPurchased = errors.New("enroll: a purchased enrolment is ended by a refund")
+
 // Sentinel errors.
 var (
 	ErrNotFound        = errors.New("enroll: not found")

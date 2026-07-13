@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -17,6 +18,7 @@ import (
 	"github.com/ebnsina/muallim-api/internal/commerce"
 	"github.com/ebnsina/muallim-api/internal/enroll"
 	"github.com/ebnsina/muallim-api/internal/platform/database"
+	"github.com/ebnsina/muallim-api/internal/platform/secret"
 )
 
 func testDB(t *testing.T) *database.DB {
@@ -80,8 +82,13 @@ func newFixture(t *testing.T) fixture {
 	enrolments := enroll.NewService(db, enroll.NewPostgresRepository(), enrolAuditor{audit.NewRecorder()}, nil, nil)
 	fake := commerce.Fake{BaseURL: "http://localhost:5173", Secret: "test-secret"}
 
+	sealer, err := secret.NewSealer(strings.Repeat("ab", 32))
+	if err != nil {
+		t.Fatalf("sealer: %v", err)
+	}
+
 	svc := commerce.NewService(db, commerce.NewPostgresRepository(),
-		commerceAuditor{audit.NewRecorder()}, purchases{enrolments}, fake)
+		commerceAuditor{audit.NewRecorder()}, purchases{enrolments}, sealer, fake)
 
 	return fixture{
 		db: db, svc: svc, enrol: enrolments, fake: fake,
@@ -481,4 +488,119 @@ func (a enrolAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID,
 		ActorID: e.ActorID, Action: e.Action, TargetType: e.TargetType, TargetID: e.TargetID,
 		IP: e.IP, UserAgent: e.UserAgent, Metadata: e.Metadata,
 	})
+}
+
+/*
+The refund a workspace issues, rather than one a gateway announced.
+
+The money goes back and the course goes away, in one transaction. Before this
+existed the learner could cancel a purchased enrolment themselves: the enrolment
+went, the paid order stayed paid, and re-enrolling asked them to buy what they had
+already bought.
+*/
+func TestRefundingAnOrderWithdrawsTheEnrolment(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+	f.connected(t)
+	f.priced(t, 120000, "bdt")
+
+	checkout, err := f.svc.Buy(t.Context(), f.tenant, f.course, f.learner,
+		commerce.GatewayFake, commerce.CheckoutURLs{Success: "/ok", Cancel: "/no"}, commerce.Actor{UserID: f.learner})
+	if err != nil {
+		t.Fatalf("Buy: %v", err)
+	}
+	if err := f.webhook(t, "paid", checkout.Order); err != nil {
+		t.Fatalf("webhook: %v", err)
+	}
+	if !enrolled(t, f, f.learner) {
+		t.Fatal("the learner paid and was not enrolled")
+	}
+
+	order, err := f.svc.Refund(t.Context(), f.tenant, checkout.Order.ID, f.actor)
+	if err != nil {
+		t.Fatalf("Refund: %v", err)
+	}
+
+	if order.Status != commerce.OrderRefunded {
+		t.Errorf("the order is %q, want refunded", order.Status)
+	}
+	if order.RefundExternalID == "" {
+		t.Error("a refund with no id from the gateway is a refund nobody can trace")
+	}
+	if enrolled(t, f, f.learner) {
+		t.Error("the money went back and the learner kept the course")
+	}
+}
+
+// A second refund finds nothing to refund. The gateway would refuse it anyway, and
+// the order is the only place that can say so first.
+func TestRefundingTwiceIsRefused(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+	f.connected(t)
+	f.priced(t, 120000, "bdt")
+
+	checkout, err := f.svc.Buy(t.Context(), f.tenant, f.course, f.learner,
+		commerce.GatewayFake, commerce.CheckoutURLs{Success: "/ok", Cancel: "/no"}, commerce.Actor{UserID: f.learner})
+	if err != nil {
+		t.Fatalf("Buy: %v", err)
+	}
+	if err := f.webhook(t, "paid", checkout.Order); err != nil {
+		t.Fatalf("webhook: %v", err)
+	}
+	if _, err := f.svc.Refund(t.Context(), f.tenant, checkout.Order.ID, f.actor); err != nil {
+		t.Fatalf("Refund: %v", err)
+	}
+
+	if _, err := f.svc.Refund(t.Context(), f.tenant, checkout.Order.ID, f.actor); !errors.Is(err, commerce.ErrNotPaid) {
+		t.Fatalf("a second refund returned %v, want ErrNotPaid", err)
+	}
+}
+
+// An order nobody paid has no money in it to give back.
+func TestRefundingAnUnpaidOrderIsRefused(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+	f.connected(t)
+	f.priced(t, 120000, "bdt")
+
+	checkout, err := f.svc.Buy(t.Context(), f.tenant, f.course, f.learner,
+		commerce.GatewayFake, commerce.CheckoutURLs{Success: "/ok", Cancel: "/no"}, commerce.Actor{UserID: f.learner})
+	if err != nil {
+		t.Fatalf("Buy: %v", err)
+	}
+
+	if _, err := f.svc.Refund(t.Context(), f.tenant, checkout.Order.ID, f.actor); !errors.Is(err, commerce.ErrNotPaid) {
+		t.Fatalf("refunding a pending order returned %v, want ErrNotPaid", err)
+	}
+}
+
+// The seal is not decoration: what the driver is handed must be what the workspace
+// typed, and what the table holds must not be.
+func TestCredentialsComeBackToTheDriverAndNotToAnybodyElse(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+
+	err := f.svc.SetCredentials(t.Context(), f.tenant, commerce.GatewayFake,
+		commerce.Credentials{PublicID: "store-42", Secret: "hunter2"}, f.actor)
+	if err != nil {
+		t.Fatalf("SetCredentials: %v", err)
+	}
+
+	var cipher []byte
+	err = f.db.WithTenantReadOnly(t.Context(), f.tenant, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT secret_cipher FROM payment_credentials WHERE tenant_id = $1`,
+			f.tenant).Scan(&cipher)
+	})
+	if err != nil {
+		t.Fatalf("read the ciphertext: %v", err)
+	}
+
+	if strings.Contains(string(cipher), "hunter2") {
+		t.Fatal("the store password is readable in the table")
+	}
 }
