@@ -36,6 +36,8 @@ behind it is a download that 404s. Upload a real file as `student@` instead —
 
 ## Rules that are easy to violate
 
+**Docs are part of the change, not a follow-up.** A rule in CLAUDE.md that the code has outgrown is worse than no rule: it is a confident instruction to do the wrong thing, and the next person — or the next model — will follow it. So a convention that changes is rewritten in the *same* commit that changes it, a new endpoint appears in `docs/` when it ships, and `make spec` runs whenever the contract moves. A stale doc has no test, so nothing will ever fail to tell you.
+
 **Comments are one line, two at most.** Say the one thing the code cannot. No multi-paragraph essays above a function, however tempting — trim to the load-bearing sentence.
 
 **Never assume a library API.** Query Context7 (`resolve-library-id` → `query-docs`) before writing against any dependency. Verify with `go doc`. Training data lags releases.
