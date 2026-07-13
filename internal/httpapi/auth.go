@@ -260,6 +260,67 @@ func registerAuth(api huma.API, svc *auth.Service) {
 		out.Body.User = userView(user, role)
 		return out, nil
 	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "rename-me",
+		Method:      http.MethodPatch,
+		Path:        "/v1/me",
+		Summary:     "Change your own name",
+		Description: "Your own row, your own name. No permission beyond being signed in.",
+		Tags:        []string{"Auth"},
+		Security:    []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, in *struct {
+		Body struct {
+			Name string `json:"name" minLength:"1" maxLength:"120"`
+		}
+	}) (*MeOutput, error) {
+		p, err := requirePrincipal(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		user, err := svc.Rename(ctx, p, in.Body.Name, requestContextFrom(ctx))
+		if err != nil {
+			return nil, authError(err)
+		}
+
+		// The role is not the user's to change, so it is read back rather than assumed.
+		_, role, err := svc.Me(ctx, p)
+		if err != nil {
+			return nil, authError(err)
+		}
+
+		out := &MeOutput{CacheControl: "private, no-store"}
+		out.Body.User = userView(user, role)
+		return out, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "change-my-password",
+		Method:        http.MethodPost,
+		Path:          "/v1/me/password",
+		Summary:       "Change your own password",
+		Description:   "The current password is required, and a token is not enough: a stolen session would otherwise be enough to lock somebody out of their own account for good. Every other session ends — the browser making this request keeps its own, because signing somebody out of the tab where they were being careful is a punishment for being careful.",
+		Tags:          []string{"Auth"},
+		DefaultStatus: http.StatusNoContent,
+		Security:      []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, in *struct {
+		Body struct {
+			CurrentPassword string `json:"current_password" minLength:"1" maxLength:"1000"`
+			NewPassword     string `json:"new_password" minLength:"12" maxLength:"1000"`
+		}
+	}) (*struct{}, error) {
+		p, err := requirePrincipal(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		err = svc.ChangePassword(ctx, p, in.Body.CurrentPassword, in.Body.NewPassword, requestContextFrom(ctx))
+		if err != nil {
+			return nil, authError(err)
+		}
+		return nil, nil
+	})
 }
 
 func userView(u auth.User, role string) UserView {
@@ -289,6 +350,9 @@ func authError(err error) error {
 	switch {
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		return huma.Error401Unauthorized("Those credentials are not valid.")
+
+	case errors.Is(err, auth.ErrNameInvalid):
+		return huma.Error422UnprocessableEntity("A name cannot be empty, and cannot be longer than 120 characters.")
 
 	case errors.Is(err, auth.ErrUnauthenticated):
 		// The middleware normally answers this before a handler runs. Mapped anyway:

@@ -28,6 +28,11 @@ type MembershipRepository interface {
 	UpdateMemberRole(ctx context.Context, tx pgx.Tx, tenantID, userID uuid.UUID, role string) error
 	RemoveMember(ctx context.Context, tx pgx.Tx, tenantID, userID uuid.UUID) error
 	RevokeAllUserSessions(ctx context.Context, tx pgx.Tx, tenantID, userID uuid.UUID) error
+
+	// RevokeOtherUserSessions ends every session but the one asking. Somebody changing
+	// their password is usually somebody who thinks another person is in their account;
+	// signing them out of the tab where they were being careful is a punishment for it.
+	RevokeOtherUserSessions(ctx context.Context, tx pgx.Tx, tenantID, userID, keep uuid.UUID) error
 	HasAnyMember(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) (bool, error)
 }
 

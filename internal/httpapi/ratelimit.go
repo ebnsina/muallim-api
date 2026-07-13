@@ -30,6 +30,10 @@ var throttledPrefixes = []string{
 
 	// Covers /email/verify and /email/verify/resend (sends mail).
 	"/v1/auth/email/verify",
+
+	// Changing a password verifies the old one, which is another 64 MiB hash. The
+	// caller is signed in, and a signed-in attacker is still an attacker with a loop.
+	"/v1/me/password",
 }
 
 // throttle limits credential-verifying endpoints per client address per path.

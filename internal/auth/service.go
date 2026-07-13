@@ -22,6 +22,12 @@ type Repository interface {
 	CredentialsByEmail(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, email string) (User, Membership, string, error)
 	UserByID(ctx context.Context, tx pgx.Tx, tenantID, userID uuid.UUID) (User, string, error)
 
+	// The two things a person may change about themselves. The hash is read to be
+	// checked and never returned: a password change that did not first prove the old
+	// one is a session hijack with a nicer name.
+	SetName(ctx context.Context, tx pgx.Tx, tenantID, userID uuid.UUID, name string) error
+	PasswordHash(ctx context.Context, tx pgx.Tx, tenantID, userID uuid.UUID) (string, error)
+
 	CreateSession(ctx context.Context, tx pgx.Tx, s Session, digest []byte, rc RequestContext) error
 	SessionByDigest(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, digest []byte) (Session, error)
 	RotateSession(ctx context.Context, tx pgx.Tx, tenantID, oldID, newID uuid.UUID) error

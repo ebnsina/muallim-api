@@ -114,6 +114,7 @@ func TestMembershipSentinelsMapToADeliberateStatus(t *testing.T) {
 	tests := map[error]int{
 		auth.ErrInvitationInvalid:  http.StatusNotFound,
 		auth.ErrInvalidCredentials: http.StatusUnauthorized,
+		auth.ErrNameInvalid:        http.StatusUnprocessableEntity,
 		auth.ErrAlreadyMember:      http.StatusConflict,
 		auth.ErrInvitationPending:  http.StatusConflict,
 		auth.ErrRegistrationClosed: http.StatusForbidden,
