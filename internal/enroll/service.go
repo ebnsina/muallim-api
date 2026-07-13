@@ -691,3 +691,25 @@ func (s *Service) Facts(ctx context.Context, tenantID uuid.UUID, courseIDs []uui
 	}
 	return facts, nil
 }
+
+/*
+GrantInTx enrols somebody inside a transaction the caller already owns.
+
+For a caller that must enrol as part of something else: `commerce` marks an order
+paid and enrols the buyer, and the two have to commit together or a learner is out
+of pocket and locked out. Every other caller wants Enrol or Grant, which own their
+own transaction and their own audit line.
+
+The source is the caller's, because only they know why: a purchase is not a self
+enrolment, and the difference is what a support conversation turns on.
+*/
+func (s *Service) GrantInTx(ctx context.Context, tx pgx.Tx, tenantID, courseID, userID uuid.UUID, source string) error {
+	_, _, err := s.repo.Enrol(ctx, tx, tenantID, courseID, userID, source, nil)
+	return err
+}
+
+// CancelInTx withdraws an enrolment inside the caller's transaction — a refund, and
+// nothing else so far. Progress survives: cancelling is not erasing.
+func (s *Service) CancelInTx(ctx context.Context, tx pgx.Tx, tenantID, courseID, userID uuid.UUID) error {
+	return s.repo.CancelEnrolment(ctx, tx, tenantID, courseID, userID)
+}
