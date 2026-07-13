@@ -66,11 +66,15 @@ token would otherwise be enough to lock the owner out of their own account for g
 It is the same refusal as a wrong password at the door — ErrInvalidCredentials — and
 it says nothing more than that.
 
-Every other session then ends. The person who just changed their password is,
-overwhelmingly often, a person who thinks somebody else is in their account, and the
-answer to that has to be "not any more" rather than "not on new logins". The browser
-in front of us keeps its session: signing somebody out of the tab where they were
-being careful is a punishment for being careful.
+Every other session is then revoked, and it is worth being exact about what that
+buys. The refresh token dies at once, so no other browser can renew itself. The
+access tokens already out there are signed, stateless and good for another fifteen
+minutes — checking them against the database on every request is the cost this
+system deliberately does not pay. So an intruder is locked out within the quarter
+hour, not within the second, and the UI says so rather than implying otherwise.
+
+The browser in front of us keeps its session: signing somebody out of the tab where
+they were being careful is a punishment for being careful.
 
 Both hashes are computed outside the transaction. Argon2id holds 64 MiB while it
 runs, and a transaction held open across it holds a pooled connection with it.

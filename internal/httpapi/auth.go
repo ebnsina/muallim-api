@@ -300,7 +300,7 @@ func registerAuth(api huma.API, svc *auth.Service) {
 		Method:        http.MethodPost,
 		Path:          "/v1/me/password",
 		Summary:       "Change your own password",
-		Description:   "The current password is required, and a token is not enough: a stolen session would otherwise be enough to lock somebody out of their own account for good. Every other session ends — the browser making this request keeps its own, because signing somebody out of the tab where they were being careful is a punishment for being careful.",
+		Description:   "The current password is required, and a token is not enough: a stolen session would otherwise be enough to lock somebody out of their own account for good. Every other session is revoked and can no longer be renewed; access tokens already issued are stateless and expire within fifteen minutes. The browser making this request keeps its own session.",
 		Tags:          []string{"Auth"},
 		DefaultStatus: http.StatusNoContent,
 		Security:      []map[string][]string{{"bearer": {}}},
