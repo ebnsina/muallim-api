@@ -19,6 +19,7 @@ type Repository interface {
 	UpsertAccount(ctx context.Context, tx pgx.Tx, a Account) (Account, error)
 
 	Price(ctx context.Context, tx pgx.Tx, tenantID, courseID uuid.UUID) (Money, error)
+	Prices(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, courseIDs []uuid.UUID) (map[uuid.UUID]Money, error)
 	SetPrice(ctx context.Context, tx pgx.Tx, tenantID, courseID uuid.UUID, m Money) error
 	ClearPrice(ctx context.Context, tx pgx.Tx, tenantID, courseID uuid.UUID) error
 
@@ -245,6 +246,25 @@ func (s *Service) ClearPrice(ctx context.Context, tenantID uuid.UUID, slug strin
 			IP: actor.IP, UserAgent: actor.UserAgent,
 		})
 	})
+}
+
+// PricesOf returns the price of each course on a page. One query, whatever the page
+// holds; a course with no key is free.
+func (s *Service) PricesOf(ctx context.Context, tenantID uuid.UUID, courseIDs []uuid.UUID) (map[uuid.UUID]Money, error) {
+	if len(courseIDs) == 0 {
+		return map[uuid.UUID]Money{}, nil
+	}
+
+	var prices map[uuid.UUID]Money
+	err := s.db.WithTenantReadOnly(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		prices, err = s.repo.Prices(ctx, tx, tenantID, courseIDs)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return prices, nil
 }
 
 // PriceOf returns what a course costs, and whether it costs anything at all.

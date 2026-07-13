@@ -26,6 +26,7 @@ import (
 	"github.com/ebnsina/muallim-api/internal/auth"
 	"github.com/ebnsina/muallim-api/internal/catalog"
 	"github.com/ebnsina/muallim-api/internal/certify"
+	"github.com/ebnsina/muallim-api/internal/commerce"
 	"github.com/ebnsina/muallim-api/internal/comms"
 	"github.com/ebnsina/muallim-api/internal/enroll"
 	"github.com/ebnsina/muallim-api/internal/forum"
@@ -219,6 +220,40 @@ func run() error {
 	assignments := assign.NewService(db, assign.NewPostgresRepository(), store,
 		assignAuditor{recorder}, deletions, learning, assignmentGrades{grades}, assignNotifier{notifications})
 
+	/*
+		Commerce, and the two directions it is wired in.
+
+		A paid order enrols its buyer: `commerce` declares Enrolments, `enroll`
+		satisfies it, and neither has heard of the other. And a priced course refuses
+		self-enrolment: `enroll` declares Prices, `commerce` satisfies it. The adapters
+		are in commerce.go; the two domains stay strangers.
+
+		The Fake gateway is registered whenever it is enabled, and it is what this
+		deployment sells with until the Stripe keys arrive. Stripe is registered only
+		when it has keys: a driver with none refuses at the door, which beats a checkout
+		that leads nowhere.
+	*/
+	var gateways []commerce.Gateway
+	if cfg.FakeGatewayEnabled {
+		gateways = append(gateways, commerce.Fake{BaseURL: cfg.WebBaseURL, Secret: cfg.FakeGatewaySecret})
+	}
+	if cfg.StripeSecretKey != "" {
+		gateways = append(gateways, commerce.Stripe{
+			SecretKey:      cfg.StripeSecretKey,
+			WebhookSecret:  cfg.StripeWebhookSecret,
+			FeeBasisPoints: cfg.PlatformFeeBasisPoints,
+		})
+	}
+
+	var shop *commerce.Service
+	if len(gateways) > 0 {
+		shop = commerce.NewService(db, commerce.NewPostgresRepository(), commerceAuditor{recorder},
+			purchases{learning}, gateways...)
+
+		// The other direction: a course with a price is bought, not self-enrolled.
+		learning = learning.WithPrices(coursePrices{commerce.NewPostgresRepository()})
+	}
+
 	handler, _ := httpapi.New(httpapi.Options{
 		Version:     cfg.Version,
 		Logger:      log,
@@ -235,6 +270,7 @@ func run() error {
 		Enrol:       learning,
 		Assess:      quizzes,
 		Assign:      assignments,
+		Commerce:    shop,
 		DB:          db,
 		AuthLimiter: ratelimit.New(ratelimit.Options{
 			Burst: cfg.AuthRateBurst,

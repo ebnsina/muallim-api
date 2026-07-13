@@ -18,6 +18,7 @@ import (
 	"github.com/ebnsina/muallim-api/internal/auth"
 	"github.com/ebnsina/muallim-api/internal/catalog"
 	"github.com/ebnsina/muallim-api/internal/certify"
+	"github.com/ebnsina/muallim-api/internal/commerce"
 	"github.com/ebnsina/muallim-api/internal/enroll"
 	"github.com/ebnsina/muallim-api/internal/forum"
 	"github.com/ebnsina/muallim-api/internal/gamify"
@@ -58,7 +59,12 @@ type Options struct {
 	Notify  *notify.Service
 	Forum   *forum.Service
 	Gamify  *gamify.Service
-	DB      Pinger
+
+	// Commerce may be nil: a deployment with no gateway configured sells nothing,
+	// and every course in it is free — which is exactly what this product was
+	// before there was such a thing as a price.
+	Commerce *commerce.Service
+	DB       Pinger
 
 	// AuthLimiter throttles credential-verifying endpoints. Nil disables it, which
 	// is what a transport test that hammers login wants.
@@ -93,7 +99,13 @@ func New(opts Options) (http.Handler, huma.API) {
 	registerReadiness(api, opts.DB)
 	registerAuth(api, opts.Auth)
 	registerMembers(api, opts.Auth)
-	registerCatalog(api, opts.Catalog, opts.Enrol)
+	// The pricing is the commerce service, or nothing: a deployment that sells
+	// nothing has no prices to show, and every course in it is free.
+	var pricing coursePricing
+	if opts.Commerce != nil {
+		pricing = opts.Commerce
+	}
+	registerCatalog(api, opts.Catalog, opts.Enrol, pricing)
 	registerCatalogWrites(api, opts.Catalog)
 	registerCourseCopy(api, opts.Catalog)
 	registerAnnouncements(api, opts.Catalog)
@@ -102,6 +114,12 @@ func New(opts Options) (http.Handler, huma.API) {
 	registerEnrolment(api, opts.Enrol)
 	registerReviews(api, opts.Enrol)
 	registerAnalytics(api, opts.Enrol)
+
+	// Registered even when nil, because the spec is dumped from a handler built with
+	// no services at all — and an endpoint missing from the contract is an endpoint
+	// no client knows about. The handlers themselves refuse when there is nothing
+	// behind them.
+	registerCommerce(api, opts.Commerce)
 
 	// Assessment takes the enrolment service too: whether a person may see a quiz
 	// is decided by whether they may see its lesson, and that rule lives there.

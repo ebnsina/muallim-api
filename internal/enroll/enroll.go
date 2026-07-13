@@ -14,6 +14,11 @@ import (
 	"github.com/google/uuid"
 )
 
+// ErrPaymentRequired means the course has a price and this learner has not paid it.
+// It is not a refusal of the person — it is a bill, and the client's job is to send
+// them to a checkout rather than to an apology.
+var ErrPaymentRequired = errors.New("enroll: the course must be bought")
+
 // Sentinel errors.
 var (
 	ErrNotFound        = errors.New("enroll: not found")

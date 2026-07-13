@@ -15,6 +15,7 @@ import (
 	"github.com/ebnsina/muallim-api/internal/auth"
 	"github.com/ebnsina/muallim-api/internal/catalog"
 	"github.com/ebnsina/muallim-api/internal/certify"
+	"github.com/ebnsina/muallim-api/internal/commerce"
 	"github.com/ebnsina/muallim-api/internal/enroll"
 	"github.com/ebnsina/muallim-api/internal/forum"
 	"github.com/ebnsina/muallim-api/internal/grade"
@@ -154,6 +155,10 @@ func TestEnrolmentSentinelsMapToADeliberateStatus(t *testing.T) {
 
 		// And a dripped lesson the learner can already see in the curriculum.
 		enroll.ErrLessonLocked: http.StatusForbidden,
+
+		// 402: a bill, not a refusal of the person. The client's job is to send them
+		// to a checkout rather than to an apology.
+		enroll.ErrPaymentRequired: http.StatusPaymentRequired,
 	}
 
 	for err, want := range tests {
@@ -162,6 +167,41 @@ func TestEnrolmentSentinelsMapToADeliberateStatus(t *testing.T) {
 		}
 		wrapped := fmt.Errorf("enroll: doing a thing: %w", err)
 		if got := statusOf(enrolError(wrapped)); got != want {
+			t.Errorf("wrapped %v mapped to %d, want %d", err, got, want)
+		}
+	}
+}
+
+func TestCommerceSentinelsMapToADeliberateStatus(t *testing.T) {
+	t.Parallel()
+
+	tests := map[error]int{
+		commerce.ErrNotFound: http.StatusNotFound,
+
+		// Conflicts, all four: the request is well formed and the world is not in the
+		// state it needs. A workspace with no account, an account the gateway will not
+		// charge on, a course that costs nothing, and a course already bought.
+		commerce.ErrNoAccount:       http.StatusConflict,
+		commerce.ErrAccountNotReady: http.StatusConflict,
+		commerce.ErrFree:            http.StatusConflict,
+		commerce.ErrAlreadyOwned:    http.StatusConflict,
+
+		commerce.ErrInvalidPrice: http.StatusUnprocessableEntity,
+
+		// 503: the deployment cannot do this, and the caller did nothing wrong.
+		commerce.ErrGatewayUnavailable: http.StatusServiceUnavailable,
+
+		// 400 and never 401: a WWW-Authenticate on a webhook invites a retry with a
+		// password, and there is no password. It was not sent by the gateway.
+		commerce.ErrSignature: http.StatusBadRequest,
+	}
+
+	for err, want := range tests {
+		if got := statusOf(commerceError(err)); got != want {
+			t.Errorf("%v mapped to %d, want %d", err, got, want)
+		}
+		wrapped := fmt.Errorf("commerce: doing a thing: %w", err)
+		if got := statusOf(commerceError(wrapped)); got != want {
 			t.Errorf("wrapped %v mapped to %d, want %d", err, got, want)
 		}
 	}

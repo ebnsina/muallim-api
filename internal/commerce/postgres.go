@@ -125,6 +125,35 @@ func (r *PostgresRepository) CourseBySlug(ctx context.Context, tx pgx.Tx, tenant
 	return id, nil
 }
 
+// Prices is the price of each course on a page, keyed by course. A course with no
+// price simply has no key: the caller reads that as free, which is what it is.
+//
+// One query for the page. A price per card is the N+1 this codebase does not write.
+func (r *PostgresRepository) Prices(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, courseIDs []uuid.UUID) (map[uuid.UUID]Money, error) {
+	rows, err := tx.Query(ctx,
+		`SELECT course_id, amount_minor, currency
+		 FROM course_prices
+		 WHERE tenant_id = $1 AND course_id = ANY($2)`,
+		tenantID, courseIDs)
+	if err != nil {
+		return nil, fmt.Errorf("commerce: prices: %w", err)
+	}
+	defer rows.Close()
+
+	prices := make(map[uuid.UUID]Money, len(courseIDs))
+	for rows.Next() {
+		var (
+			id uuid.UUID
+			m  Money
+		)
+		if err := rows.Scan(&id, &m.AmountMinor, &m.Currency); err != nil {
+			return nil, fmt.Errorf("commerce: scan price: %w", err)
+		}
+		prices[id] = m
+	}
+	return prices, rows.Err()
+}
+
 const orderColumns = `id, tenant_id, course_id, user_id, amount_minor, currency, status,
 	                  gateway, external_id, paid_at, refunded_at, created_at, updated_at`
 

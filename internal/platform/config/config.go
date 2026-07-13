@@ -130,6 +130,23 @@ type Config struct {
 	// S3PathStyle addresses a bucket as `endpoint/bucket/key`. MinIO needs it.
 	S3PathStyle bool
 
+	/*
+		Payments. The workspace is the merchant; Muallim takes a fee.
+
+		A deployment with neither gateway sells nothing, and every course in it is
+		free — which is what this product was before commerce existed. The fake
+		gateway takes no money and is how the whole flow is exercised until the
+		Stripe keys arrive; it is on by default outside production.
+	*/
+	FakeGatewayEnabled bool
+	FakeGatewaySecret  string
+
+	StripeSecretKey     string
+	StripeWebhookSecret string
+
+	// PlatformFeeBasisPoints is our cut, in hundredths of a percent. 250 is 2.5%.
+	PlatformFeeBasisPoints int64
+
 	// WorkerMaxWorkers bounds how many jobs the worker process runs at once.
 	WorkerMaxWorkers int
 
@@ -174,13 +191,19 @@ func Load() (Config, error) {
 		AuthRateBurst: number("MUALLIM_AUTH_RATE_BURST", 10),
 		AuthRateEvery: duration("MUALLIM_AUTH_RATE_EVERY", 6*time.Second),
 
-		WebBaseURL:   env("MUALLIM_WEB_BASE_URL", "http://localhost:5173"),
-		SMTPHost:     env("MUALLIM_SMTP_HOST", ""),
-		SMTPPort:     number("MUALLIM_SMTP_PORT", 587),
-		SMTPUsername: env("MUALLIM_SMTP_USERNAME", ""),
-		SMTPPassword: env("MUALLIM_SMTP_PASSWORD", ""),
-		MailFrom:     env("MUALLIM_MAIL_FROM", "Muallim <no-reply@localhost>"),
-		MailFile:     env("MUALLIM_MAIL_FILE", ""),
+		WebBaseURL: env("MUALLIM_WEB_BASE_URL", "http://localhost:5173"),
+
+		FakeGatewayEnabled:     env("MUALLIM_FAKE_GATEWAY", "true") == "true",
+		FakeGatewaySecret:      env("MUALLIM_FAKE_GATEWAY_SECRET", "fake-gateway-secret"),
+		StripeSecretKey:        env("MUALLIM_STRIPE_SECRET_KEY", ""),
+		StripeWebhookSecret:    env("MUALLIM_STRIPE_WEBHOOK_SECRET", ""),
+		PlatformFeeBasisPoints: int64(number("MUALLIM_PLATFORM_FEE_BPS", 250)),
+		SMTPHost:               env("MUALLIM_SMTP_HOST", ""),
+		SMTPPort:               number("MUALLIM_SMTP_PORT", 587),
+		SMTPUsername:           env("MUALLIM_SMTP_USERNAME", ""),
+		SMTPPassword:           env("MUALLIM_SMTP_PASSWORD", ""),
+		MailFrom:               env("MUALLIM_MAIL_FROM", "Muallim <no-reply@localhost>"),
+		MailFile:               env("MUALLIM_MAIL_FILE", ""),
 
 		StreamCustomer: env("MUALLIM_CLOUDFLARE_STREAM_CUSTOMER", ""),
 		EmbedHosts:     list(env("MUALLIM_EMBED_ALLOWED_HOSTS", "")),

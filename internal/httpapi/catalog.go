@@ -11,6 +11,7 @@ import (
 
 	"github.com/ebnsina/muallim-api/internal/auth"
 	"github.com/ebnsina/muallim-api/internal/catalog"
+	"github.com/ebnsina/muallim-api/internal/commerce"
 	"github.com/ebnsina/muallim-api/internal/enroll"
 	"github.com/ebnsina/muallim-api/internal/tenant"
 )
@@ -65,6 +66,10 @@ type CourseSummary struct {
 	// reviews behind it, so it is never sent as a bare nought.
 	RatingAverage float64 `json:"rating_average,omitempty"`
 	RatingCount   int     `json:"rating_count,omitempty"`
+
+	// The price. Absent is free, which is what every course is until somebody prices
+	// one — and what they all were before this API could take money at all.
+	Price *MoneyView `json:"price,omitempty"`
 }
 
 // CourseDetail is a course as it appears on its own page: the summary, plus the
@@ -150,7 +155,40 @@ type courseFacts interface {
 	Facts(ctx context.Context, tenantID uuid.UUID, courseIDs []uuid.UUID) (map[uuid.UUID]enroll.CourseFacts, error)
 }
 
-func registerCatalog(api huma.API, svc *catalog.Service, facts courseFacts) {
+// coursePricing is what a course costs, batched by id. Nil when this deployment
+// sells nothing, and then every course is free — which is what they all were.
+type coursePricing interface {
+	PricesOf(ctx context.Context, tenantID uuid.UUID, courseIDs []uuid.UUID) (map[uuid.UUID]commerce.Money, error)
+}
+
+// priceView renders a price, or nothing at all for a course that has none.
+func priceView(m commerce.Money, ok bool) *MoneyView {
+	if !ok {
+		return nil
+	}
+	return &MoneyView{AmountMinor: m.AmountMinor, Currency: m.Currency}
+}
+
+/*
+pricesFor loads the price of every course on a page.
+
+One call for the page, and nil when nothing is for sale. A price per card would be
+the N+1 this codebase does not write, and a deployment with no gateway pays for
+nothing at all.
+*/
+func pricesFor(ctx context.Context, pricing coursePricing, courses []catalog.Course) (map[uuid.UUID]commerce.Money, error) {
+	if pricing == nil || len(courses) == 0 {
+		return map[uuid.UUID]commerce.Money{}, nil
+	}
+
+	ids := make([]uuid.UUID, len(courses))
+	for i, c := range courses {
+		ids[i] = c.ID
+	}
+	return pricing.PricesOf(ctx, tenant.ID(ctx), ids)
+}
+
+func registerCatalog(api huma.API, svc *catalog.Service, facts courseFacts, pricing coursePricing) {
 	huma.Register(api, huma.Operation{
 		OperationID: "list-courses",
 		Method:      http.MethodGet,
@@ -188,11 +226,18 @@ func registerCatalog(api huma.API, svc *catalog.Service, facts courseFacts) {
 		if err != nil {
 			return nil, catalogError(err)
 		}
+		prices, err := pricesFor(ctx, pricing, page.Courses)
+		if err != nil {
+			return nil, catalogError(err)
+		}
 
 		out := &ListCoursesOutput{CacheControl: catalogCacheControl}
 		out.Body.Courses = make([]CourseSummary, 0, len(page.Courses))
 		for _, c := range page.Courses {
-			out.Body.Courses = append(out.Body.Courses, courseSummary(c, known[c.ID]))
+			summary := courseSummary(c, known[c.ID])
+			price, sold := prices[c.ID]
+			summary.Price = priceView(price, sold)
+			out.Body.Courses = append(out.Body.Courses, summary)
 		}
 		out.Body.NextCursor = page.NextCursor
 		out.Body.HasMore = page.HasMore
@@ -235,12 +280,19 @@ func registerCatalog(api huma.API, svc *catalog.Service, facts courseFacts) {
 		if err != nil {
 			return nil, catalogError(err)
 		}
+		prices, err := pricesFor(ctx, pricing, page.Courses)
+		if err != nil {
+			return nil, catalogError(err)
+		}
 
 		// Drafts must never reach a shared cache, whoever asked for them.
 		out := &ListCoursesOutput{CacheControl: draftCacheControl}
 		out.Body.Courses = make([]CourseSummary, 0, len(page.Courses))
 		for _, c := range page.Courses {
-			out.Body.Courses = append(out.Body.Courses, courseSummary(c, known[c.ID]))
+			summary := courseSummary(c, known[c.ID])
+			price, sold := prices[c.ID]
+			summary.Price = priceView(price, sold)
+			out.Body.Courses = append(out.Body.Courses, summary)
 		}
 		out.Body.NextCursor = page.NextCursor
 		out.Body.HasMore = page.HasMore
@@ -289,8 +341,15 @@ func registerCatalog(api huma.API, svc *catalog.Service, facts courseFacts) {
 			known = page[curriculum.Course.ID]
 		}
 
+		prices, err := pricesFor(ctx, pricing, []catalog.Course{curriculum.Course})
+		if err != nil {
+			return nil, catalogError(err)
+		}
+
 		out := &CurriculumOutput{CacheControl: cacheControl}
 		out.Body.Course = courseDetail(curriculum.Course, known)
+		price, sold := prices[curriculum.Course.ID]
+		out.Body.Course.Price = priceView(price, sold)
 		out.Body.Topics = make([]TopicView, 0, len(curriculum.Topics))
 		for _, t := range curriculum.Topics {
 			lessons := make([]LessonView, 0, len(t.Lessons))

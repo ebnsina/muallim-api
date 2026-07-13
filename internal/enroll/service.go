@@ -76,12 +76,29 @@ type Rewards interface {
 	CourseCompleted(ctx context.Context, tx pgx.Tx, tenantID, userID, courseID uuid.UUID) error
 }
 
+/*
+Prices says whether a course costs money.
+
+Declared here by the package that needs it, and satisfied in cmd/ over commerce —
+a domain may not import a sibling, and enrolment has no business knowing what a
+gateway is. It takes the caller's transaction, so the price is read in the same
+transaction that would have written the enrolment: a price set between the check
+and the write is a course given away for free.
+
+A Service built without one lets every course be self-enrolled, which is exactly
+what this product did before there was any such thing as a price.
+*/
+type Prices interface {
+	Priced(ctx context.Context, tx pgx.Tx, tenantID, courseID uuid.UUID) (bool, error)
+}
+
 type Service struct {
 	db           *database.DB
 	repo         Repository
 	audit        AuditRecorder
 	certificates Certificates
 	rewards      Rewards
+	prices       Prices
 
 	now func() time.Time
 }
@@ -89,6 +106,13 @@ type Service struct {
 // NewService returns a Service.
 func NewService(db *database.DB, repo Repository, recorder AuditRecorder, certificates Certificates, rewards Rewards) *Service {
 	return &Service{db: db, repo: repo, audit: recorder, certificates: certificates, rewards: rewards, now: time.Now}
+}
+
+// WithPrices teaches the service that courses can cost money. A Service without it
+// behaves exactly as this product did before commerce existed.
+func (s *Service) WithPrices(p Prices) *Service {
+	s.prices = p
+	return s
 }
 
 // hasLiveEnrolment reports whether the learner is already in the course.
@@ -141,6 +165,19 @@ func (s *Service) Enrol(ctx context.Context, tenantID uuid.UUID, slug string, ac
 		// A learner who already holds a live enrolment is not checked at all. They
 		// are in the course; a prerequisite added afterwards must not turn their next
 		// click into a 403 and their progress into something they cannot reach.
+		// A course with a price is not self-enrolled: it is bought. Grant still
+		// overrides — an administrator placing somebody on a course has decided they
+		// belong there, and a comped seat is a thing schools give.
+		if source == SourceSelf && s.prices != nil {
+			priced, err := s.prices.Priced(ctx, tx, tenantID, courseID)
+			if err != nil {
+				return err
+			}
+			if priced && !s.hasLiveEnrolment(ctx, tx, tenantID, courseID, actor.UserID) {
+				return ErrPaymentRequired
+			}
+		}
+
 		if source == SourceSelf && !s.hasLiveEnrolment(ctx, tx, tenantID, courseID, actor.UserID) {
 			missing, err := s.repo.MissingPrerequisites(ctx, tx, tenantID, courseID, actor.UserID)
 			if err != nil {

@@ -383,6 +383,11 @@ func enrolError(err error) error {
 	}
 
 	switch {
+	// 402: not a refusal of the person, a bill. The client's job is to send them to
+	// a checkout, not to an apology.
+	case errors.Is(err, enroll.ErrPaymentRequired):
+		return huma.Error402PaymentRequired("This course must be bought before you can enrol on it.")
+
 	case errors.Is(err, enroll.ErrNotFound):
 		return huma.Error404NotFound("Not found.")
 
