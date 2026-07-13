@@ -71,6 +71,8 @@ Money is confirmed once, however it arrives. `Settle` moves an order only from `
 
 A refund is issued against the *payment*, not the checkout session that created it: several gateways forget the session the moment money moves. The gateway is called first and the database second — a row marked refunded against money that never moved is a learner locked out of a course they still paid for, which is the worse of the two failures — and the withdrawn enrolment commits with the refunded status.
 
+Some gateways do not finish a refund when they accept it. SSLCommerz answers `processing` and settles later, so a refund there is not done when the order is marked refunded — it is *started*. A capability, `RefundConfirmer`, marks the drivers whose refund is asynchronous, and a River job chases them: it snoozes on `processing` (a snooze does not spend an attempt, so a bank refund can be chased for days), records the confirmation when the money moves, and — the case that matters — writes `order.refund_failed` loudly when the gateway takes the refund back after accepting it, because that is a learner left without both the course and the money, and only a person can put it right. The job runs in the worker, and the worker builds only the gateways that have background work.
+
 Stripe needs no per-workspace secret: the platform's key plus a `Stripe-Account` header is the whole model. SSLCommerz and bKash have no such notion — each school is its own merchant — so their credentials sit in `payment_credentials`, sealed with AES-256-GCM under a key that is not in the database. Nothing reads a secret back out.
 
 ## Lists

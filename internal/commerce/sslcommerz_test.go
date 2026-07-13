@@ -490,3 +490,40 @@ func TestSSLCommerzMoneyRoundTrip(t *testing.T) {
 		t.Error("majorToMinor accepted a string that is not money")
 	}
 }
+
+// RefundStatus turns SSLCommerz's three answers into the three RefundStates the
+// polling job acts on. `cancelled` is the one that must not read as done — it is a
+// learner out the course and the money.
+func TestSSLCommerzRefundStatus(t *testing.T) {
+	t.Parallel()
+
+	for status, want := range map[string]RefundState{
+		"refunded":   RefundDone,
+		"processing": RefundPending,
+		"cancelled":  RefundFailed,
+		"anything":   RefundPending, // an answer we do not know is not "done"
+	} {
+		t.Run(status, func(t *testing.T) {
+			t.Parallel()
+
+			account := sslAccount()
+			order := sslOrder(account, 120_000, "BDT")
+			order.Status, order.RefundExternalID = OrderRefunded, "ref_1"
+
+			driver := sslDriver(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Query().Get("refund_ref_id") != "ref_1" {
+					t.Errorf("refund_ref_id = %q", r.URL.Query().Get("refund_ref_id"))
+				}
+				_, _ = w.Write([]byte(`{"APIConnect":"DONE","status":"` + status + `"}`))
+			})
+
+			got, err := driver.RefundStatus(context.Background(), account, order)
+			if err != nil {
+				t.Fatalf("RefundStatus: %v", err)
+			}
+			if got != want {
+				t.Errorf("status %q → %q, want %q", status, got, want)
+			}
+		})
+	}
+}

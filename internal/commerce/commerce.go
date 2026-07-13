@@ -292,6 +292,34 @@ type Refunder interface {
 	Refund(ctx context.Context, account Account, order Order) (string, error)
 }
 
+// RefundState is what a gateway says has become of a refund it accepted.
+type RefundState string
+
+const (
+	// RefundDone: the money has moved. There is nothing left to chase.
+	RefundDone RefundState = "done"
+
+	// RefundPending: the gateway accepted it and has not finished. Ask again later.
+	RefundPending RefundState = "pending"
+
+	// RefundFailed: the gateway will not, after all, give the money back. The order is
+	// already marked refunded and the enrolment already withdrawn, so this is the one
+	// state that needs a person: the learner lost the course and never got the money.
+	RefundFailed RefundState = "failed"
+)
+
+/*
+RefundConfirmer is a gateway whose refund is not final when it is accepted.
+
+SSLCommerz refunds asynchronously: the initiate call returns `processing`, and
+whether the money actually moved is a separate question, asked against the refund's
+own id. A driver that settles a refund synchronously — Stripe, bKash, the fake —
+does not implement this, and no confirmation is scheduled for it.
+*/
+type RefundConfirmer interface {
+	RefundStatus(ctx context.Context, account Account, order Order) (RefundState, error)
+}
+
 // Onboarding is where to send an author, and what the gateway will call them.
 type Onboarding struct {
 	URL        string

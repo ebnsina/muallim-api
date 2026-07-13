@@ -284,6 +284,14 @@ func run() error {
 		shop = commerce.NewService(db, commerce.NewPostgresRepository(), commerceAuditor{recorder},
 			purchases{learning}, sealer, gateways...)
 
+		// An asynchronous refund — SSLCommerz — is chased by a job worked in cmd/worker.
+		// Enqueued here, in the transaction that wrote the refund.
+		refundPoll, err := commerce.NewRefundPollEnqueuer(jobs)
+		if err != nil {
+			return err
+		}
+		shop = shop.WithRefundPoller(refundPoll)
+
 		// The other direction: a course with a price is bought, not self-enrolled.
 		learning = learning.WithPrices(coursePrices{commerce.NewPostgresRepository()})
 	}

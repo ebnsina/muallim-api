@@ -24,6 +24,7 @@ import (
 	"github.com/ebnsina/muallim-api/internal/audit"
 	"github.com/ebnsina/muallim-api/internal/auth"
 	"github.com/ebnsina/muallim-api/internal/certify"
+	"github.com/ebnsina/muallim-api/internal/commerce"
 	"github.com/ebnsina/muallim-api/internal/comms"
 	"github.com/ebnsina/muallim-api/internal/enroll"
 	"github.com/ebnsina/muallim-api/internal/gamify"
@@ -33,6 +34,7 @@ import (
 	"github.com/ebnsina/muallim-api/internal/platform/database"
 	"github.com/ebnsina/muallim-api/internal/platform/logging"
 	"github.com/ebnsina/muallim-api/internal/platform/mailer"
+	vault "github.com/ebnsina/muallim-api/internal/platform/secret"
 )
 
 // erasureInterval is how often orphaned users are swept. Daily: often enough
@@ -183,6 +185,38 @@ func run() error {
 		return err
 	}
 
+	/*
+		The refund-confirmation worker, and only the gateways that have background work.
+
+		SSLCommerz is the sole gateway whose refund is not final when accepted, so it is
+		the only one this process needs to resolve — an order on any other gateway never
+		gets a poll job. No sealer or no SSLCommerz means no such orders exist to chase,
+		and the worker is simply not registered.
+	*/
+	var refundConfirm *commerce.ConfirmRefundWorker
+	if cfg.CredentialsKey != "" && cfg.SSLCommerzEnabled {
+		sealer, err := vault.NewSealer(cfg.CredentialsKey)
+		if err != nil {
+			return fmt.Errorf("credentials key: %w", err)
+		}
+
+		base := commerce.SSLCommerzLive
+		if cfg.SSLCommerzSandbox {
+			base = commerce.SSLCommerzSandbox
+		}
+		sslcommerz, err := commerce.NewSSLCommerz(base, cfg.APIBaseURL+"/v1/payments/sslcommerz/ipn", nil)
+		if err != nil {
+			return fmt.Errorf("sslcommerz: %w", err)
+		}
+
+		shop := commerce.NewService(db, commerce.NewPostgresRepository(),
+			commerceAuditor{audit.NewRecorder()}, purchases{learning}, sealer, sslcommerz)
+
+		if refundConfirm, err = commerce.NewConfirmRefundWorker(shop, log); err != nil {
+			return err
+		}
+	}
+
 	workers := river.NewWorkers()
 	river.AddWorker(workers, emails)
 	river.AddWorker(workers, orphans)
@@ -191,6 +225,9 @@ func run() error {
 	river.AddWorker(workers, deletions)
 	river.AddWorker(workers, fanout)
 	river.AddWorker(workers, digests)
+	if refundConfirm != nil {
+		river.AddWorker(workers, refundConfirm)
+	}
 
 	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Logger:  log,

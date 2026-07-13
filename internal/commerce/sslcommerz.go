@@ -70,9 +70,10 @@ func NewSSLCommerz(baseURL, ipnURL string, client *http.Client) (*SSLCommerz, er
 }
 
 var (
-	_ Gateway   = (*SSLCommerz)(nil)
-	_ Confirmer = (*SSLCommerz)(nil)
-	_ Refunder  = (*SSLCommerz)(nil)
+	_ Gateway         = (*SSLCommerz)(nil)
+	_ Confirmer       = (*SSLCommerz)(nil)
+	_ Refunder        = (*SSLCommerz)(nil)
+	_ RefundConfirmer = (*SSLCommerz)(nil)
 )
 
 // Name is the gateway this driver serves.
@@ -296,6 +297,53 @@ func (s *SSLCommerz) Refund(ctx context.Context, account Account, order Order) (
 			ErrGatewayUnavailable, out.APIConnect, out.Status, out.Errors)
 	}
 	return out.RefundRefID, nil
+}
+
+// sslRefundStatusResponse is the refund-status query's reply.
+type sslRefundStatusResponse struct {
+	APIConnect string `json:"APIConnect"`
+	Status     string `json:"status"`
+}
+
+/*
+RefundStatus asks what became of a refund we started.
+
+The same endpoint as the initiate, distinguished by sending refund_ref_id and no
+amount. `refunded` is the money moved; `processing` is not finished; `cancelled` is
+the gateway declining after having accepted — the one answer that needs a person.
+*/
+func (s *SSLCommerz) RefundStatus(ctx context.Context, account Account, order Order) (RefundState, error) {
+	if !account.Credentials.Has() {
+		return "", fmt.Errorf("%w: sslcommerz needs a store id and password", ErrCredentials)
+	}
+	if order.RefundExternalID == "" {
+		return "", fmt.Errorf("%w: the order has no refund to chase", ErrNotFound)
+	}
+
+	q := url.Values{
+		"refund_ref_id": {order.RefundExternalID},
+		"store_id":      {account.Credentials.PublicID},
+		"store_passwd":  {account.Credentials.Secret},
+		"format":        {"json"},
+		"v":             {"1"},
+	}
+	var out sslRefundStatusResponse
+	if err := s.get(ctx, "/validator/api/merchantTransIDvalidationAPI.php", q, &out); err != nil {
+		return "", err
+	}
+
+	switch strings.ToLower(out.Status) {
+	case "refunded":
+		return RefundDone, nil
+	case "processing":
+		return RefundPending, nil
+	case "cancelled":
+		return RefundFailed, nil
+	default:
+		// An answer we do not understand is not a licence to declare success. Chase it
+		// again rather than close it on a status the docs did not promise.
+		return RefundPending, nil
+	}
 }
 
 // ---------------------------------------------------------------- the hash

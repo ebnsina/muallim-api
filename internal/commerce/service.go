@@ -65,6 +65,18 @@ type Sealer interface {
 	Open(ciphertext, aad []byte) (string, error)
 }
 
+/*
+RefundPoller schedules the confirmation of an asynchronous refund.
+
+Declared here, satisfied in cmd over River, and taking the caller's transaction so
+the job exists if and only if the refund was written. A gateway that refunds
+synchronously never reaches this; a nil poller means none are scheduled, which is
+what the spec-only build and the unconcerned tests carry.
+*/
+type RefundPoller interface {
+	PollRefund(ctx context.Context, tx pgx.Tx, tenantID, orderID uuid.UUID) error
+}
+
 // credentialAAD is what a workspace's sealed secret is bound to: the tenant that
 // owns it and the gateway it is for. Move the ciphertext to another row and this no
 // longer matches, so GCM refuses it instead of decrypting a secret into wrong hands.
@@ -113,6 +125,11 @@ const (
 	ActionOrderPaid        = "order.paid"
 	ActionOrderRefunded    = "order.refunded"
 	ActionCredentialsSet   = "payment_account.credentials_set"
+
+	// A refund a gateway confirmed asynchronously, and one it took back after
+	// accepting — the second is the line a support case is opened from.
+	ActionRefundConfirmed = "order.refund_confirmed"
+	ActionRefundFailed    = "order.refund_failed"
 )
 
 // MaxOrdersListed bounds a learner's receipts.
@@ -132,7 +149,16 @@ type Service struct {
 	audit    AuditRecorder
 	enrol    Enrolments
 	seal     Sealer
+	poller   RefundPoller
 	gateways map[string]Gateway
+}
+
+// WithRefundPoller teaches the service to chase a gateway's asynchronous refund.
+// Without one, a refund that a gateway only accepts is never confirmed — which is
+// exactly the state this deployment was in before the poller existed.
+func (s *Service) WithRefundPoller(p RefundPoller) *Service {
+	s.poller = p
+	return s
 }
 
 // NewService returns a Service. The gateways are the drivers this deployment runs.
@@ -769,6 +795,14 @@ func (s *Service) Refund(ctx context.Context, tenantID, orderID uuid.UUID, actor
 			return err
 		}
 
+		// A gateway whose refund is not final when it is accepted gets chased, in this
+		// same transaction: the job exists only if the refund was written.
+		if _, async := driver.(RefundConfirmer); async && s.poller != nil {
+			if err := s.poller.PollRefund(ctx, tx, tenantID, order.ID); err != nil {
+				return err
+			}
+		}
+
 		return s.audit.Record(ctx, tx, tenantID, AuditEntry{
 			ActorID: &actor.UserID, Action: ActionOrderRefunded,
 			TargetType: "order", TargetID: order.ID.String(),
@@ -786,6 +820,77 @@ func (s *Service) Refund(ctx context.Context, tenantID, orderID uuid.UUID, actor
 
 	order.Status, order.RefundExternalID = OrderRefunded, refundID
 	return order, nil
+}
+
+/*
+ConfirmRefund asks a gateway what became of a refund it accepted, and records it.
+
+The order is already `refunded` and the enrolment already withdrawn — that happened
+when the refund was initiated. This only learns whether the money actually moved.
+
+`RefundDone` is recorded and closed. `RefundPending` returns to the caller so the
+job it runs under can ask again later. `RefundFailed` is the one that matters: the
+gateway declined after accepting, so the learner has lost the course and never got
+their money, and that is written to the audit trail loudly rather than swallowed —
+because only a person can put it right.
+*/
+func (s *Service) ConfirmRefund(ctx context.Context, tenantID, orderID uuid.UUID) (RefundState, error) {
+	var order Order
+	err := s.db.WithTenantReadOnly(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		order, err = s.repo.OrderByID(ctx, tx, tenantID, orderID)
+		return err
+	})
+	if err != nil {
+		return "", err
+	}
+
+	// Somebody could have moved it on since the job was queued. Only a refunded order
+	// with a refund id has anything to chase.
+	if order.Status != OrderRefunded || order.RefundExternalID == "" {
+		return RefundDone, nil
+	}
+
+	driver, err := s.driver(order.Gateway)
+	if err != nil {
+		return "", err
+	}
+	confirmer, ok := driver.(RefundConfirmer)
+	if !ok {
+		// The refund was synchronous after all; there is nothing to confirm.
+		return RefundDone, nil
+	}
+
+	account, err := s.account(ctx, tenantID, order.Gateway)
+	if err != nil {
+		return "", err
+	}
+
+	state, err := confirmer.RefundStatus(ctx, account, order)
+	if err != nil {
+		return "", fmt.Errorf("commerce: refund status: %w", err)
+	}
+	if state == RefundPending {
+		return RefundPending, nil
+	}
+
+	action := ActionRefundConfirmed
+	if state == RefundFailed {
+		action = ActionRefundFailed
+	}
+
+	err = s.db.WithTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		return s.audit.Record(ctx, tx, tenantID, AuditEntry{
+			Action: action, TargetType: "order", TargetID: order.ID.String(),
+			Metadata: map[string]any{
+				"refund_id": order.RefundExternalID, "gateway": order.Gateway,
+			},
+		})
+	})
+	if err != nil {
+		return "", err
+	}
+	return state, nil
 }
 
 // Orders are a workspace's own sales, newest first — what a refund is issued from.
