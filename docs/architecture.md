@@ -13,6 +13,7 @@ internal/auth           identity, sessions, RBAC, invitations, membership
 internal/audit          append-only audit trail
 internal/catalog        courses, topics, lessons, authoring
 internal/enroll         enrolments, access rules, progress
+internal/academics      institution spine: years, terms, classes, sections, subjects, students, guardians, attendance
 internal/httpapi        transport: routes, middleware, RFC 9457 problem documents
 migrations/             embedded goose SQL
 ```

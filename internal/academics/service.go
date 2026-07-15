@@ -2,6 +2,7 @@ package academics
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -46,6 +47,10 @@ type Repository interface {
 	AddGuardian(ctx context.Context, tx pgx.Tx, tenantID, studentID uuid.UUID, n NewGuardian) (Guardian, error)
 	GuardiansOf(ctx context.Context, tx pgx.Tx, tenantID, studentID uuid.UUID) ([]Guardian, error)
 	RemoveGuardian(ctx context.Context, tx pgx.Tx, tenantID, studentID, guardianID uuid.UUID) error
+
+	MarkAttendance(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, m AttendanceMark) (int, error)
+	Register(ctx context.Context, tx pgx.Tx, tenantID, sectionID uuid.UUID, on time.Time) ([]RegisterEntry, error)
+	StudentAttendance(ctx context.Context, tx pgx.Tx, tenantID, studentID uuid.UUID, from, to time.Time) ([]AttendanceDay, AttendanceSummary, error)
 }
 
 // AuditRecorder writes an audit line in the transaction of the thing it describes.

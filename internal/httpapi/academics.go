@@ -709,6 +709,7 @@ func academicsError(err error) error {
 		errors.Is(err, academics.ErrInvalidStudent),
 		errors.Is(err, academics.ErrInvalidGuardian),
 		errors.Is(err, academics.ErrInvalidSubject),
+		errors.Is(err, academics.ErrInvalidAttendance),
 		errors.Is(err, academics.ErrInvalidInstitutionType):
 		return huma.Error422UnprocessableEntity(err.Error())
 

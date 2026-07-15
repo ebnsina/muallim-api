@@ -149,6 +149,7 @@ func New(opts Options) (http.Handler, huma.API) {
 	registerAcademics(api, opts.Academics)
 	registerSubjects(api, opts.Academics)
 	registerStudents(api, opts.Academics)
+	registerAttendance(api, opts.Academics)
 	registerGamification(api, opts.Gamify)
 
 	// Order matters, outermost first.

@@ -64,6 +64,7 @@ const (
 	ActionYearCreated    = "academic_year.created"
 	ActionYearSetCurrent = "academic_year.set_current"
 	ActionClassCreated   = "grade_level.created"
+	ActionAttendanceMark = "attendance.marked"
 )
 
 // AcademicYear is the calendar everything is scheduled within.

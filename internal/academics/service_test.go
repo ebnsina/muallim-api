@@ -54,6 +54,28 @@ func seedTenant(t *testing.T, db *database.DB) uuid.UUID {
 	return id
 }
 
+// seedUser creates a global user so a marked_by / actor foreign key resolves.
+func seedUser(t *testing.T, db *database.DB) uuid.UUID {
+	t.Helper()
+
+	id := uuid.New()
+	err := db.WithoutTenant(t.Context(), func(ctx context.Context, tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO users (id, email, password_hash) VALUES ($1, $2, 'x')`,
+			id, "u"+id.String()[:8]+"@example.test")
+		return err
+	})
+	if err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.WithoutTenant(context.Background(), func(ctx context.Context, tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `DELETE FROM users WHERE id = $1`, id)
+			return err
+		})
+	})
+	return id
+}
+
 type stubAuditor struct{}
 
 func (stubAuditor) Record(context.Context, pgx.Tx, uuid.UUID, academics.AuditEntry) error {
@@ -321,5 +343,91 @@ func TestSubjects(t *testing.T) {
 	}
 	if len(subjects) != 2 || subjects[0].Name != "Bangla" {
 		t.Fatalf("subjects not sorted by name: %+v", subjects)
+	}
+}
+
+func TestAttendance(t *testing.T) {
+	t.Parallel()
+
+	db := testDB(t)
+	tenant := seedTenant(t, db)
+	svc := newService(db)
+	author := academics.Author{UserID: seedUser(t, db)}
+
+	class, err := svc.CreateClass(t.Context(), tenant, academics.NewGradeLevel{Name: "Class 6", Rank: 6}, author)
+	if err != nil {
+		t.Fatalf("create class: %v", err)
+	}
+	section, err := svc.CreateSection(t.Context(), tenant, class.ID, academics.NewSection{Name: "A"})
+	if err != nil {
+		t.Fatalf("create section: %v", err)
+	}
+	amina, err := svc.AdmitStudent(t.Context(), tenant, academics.NewStudent{
+		AdmissionNo: "2025-001", FullName: "Amina Rahman", GradeLevelID: &class.ID, SectionID: &section.ID, Roll: 1,
+	}, author)
+	if err != nil {
+		t.Fatalf("admit amina: %v", err)
+	}
+	bilal, err := svc.AdmitStudent(t.Context(), tenant, academics.NewStudent{
+		AdmissionNo: "2025-002", FullName: "Bilal Ahmed", GradeLevelID: &class.ID, SectionID: &section.ID, Roll: 2,
+	}, author)
+	if err != nil {
+		t.Fatalf("admit bilal: %v", err)
+	}
+
+	day := time.Date(2026, 1, 5, 0, 0, 0, 0, time.UTC)
+
+	// An unknown status is refused before any row is written.
+	if _, err := svc.MarkAttendance(t.Context(), tenant, academics.AttendanceMark{
+		SectionID: &section.ID, OnDate: day,
+		Entries: []academics.AttendanceEntry{{StudentID: amina.ID, Status: "here"}},
+	}, author); !errors.Is(err, academics.ErrInvalidAttendance) {
+		t.Fatalf("an unknown status was accepted: %v", err)
+	}
+
+	marked, err := svc.MarkAttendance(t.Context(), tenant, academics.AttendanceMark{
+		SectionID: &section.ID, OnDate: day,
+		Entries: []academics.AttendanceEntry{
+			{StudentID: amina.ID, Status: academics.Present},
+			{StudentID: bilal.ID, Status: academics.Absent},
+		},
+	}, author)
+	if err != nil {
+		t.Fatalf("mark: %v", err)
+	}
+	if marked != 2 {
+		t.Fatalf("marked %d, want 2", marked)
+	}
+
+	// Re-marking the same day updates in place — no second row stacks up.
+	if _, err := svc.MarkAttendance(t.Context(), tenant, academics.AttendanceMark{
+		SectionID: &section.ID, OnDate: day,
+		Entries: []academics.AttendanceEntry{{StudentID: bilal.ID, Status: academics.Late}},
+	}, author); err != nil {
+		t.Fatalf("re-mark: %v", err)
+	}
+
+	reg, err := svc.Register(t.Context(), tenant, section.ID, day)
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if len(reg) != 2 || reg[0].FullName != "Amina Rahman" {
+		t.Fatalf("register not sorted by name: %+v", reg)
+	}
+	for _, e := range reg {
+		if e.StudentID == bilal.ID && e.Status != academics.Late {
+			t.Errorf("bilal is %q, want the re-marked late", e.Status)
+		}
+	}
+
+	// The month covers the marked day; the tally counts it once.
+	from := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2026, 1, 31, 0, 0, 0, 0, time.UTC)
+	days, summary, err := svc.StudentAttendance(t.Context(), tenant, bilal.ID, from, to)
+	if err != nil {
+		t.Fatalf("student attendance: %v", err)
+	}
+	if len(days) != 1 || summary.Total != 1 || summary.Late != 1 {
+		t.Fatalf("bilal's tally is %+v (%d days), want one late day", summary, len(days))
 	}
 }
