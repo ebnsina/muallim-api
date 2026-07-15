@@ -40,6 +40,7 @@ import (
 	"github.com/ebnsina/muallim-api/internal/learn"
 	"github.com/ebnsina/muallim-api/internal/notices"
 	"github.com/ebnsina/muallim-api/internal/notify"
+	"github.com/ebnsina/muallim-api/internal/overview"
 	"github.com/ebnsina/muallim-api/internal/platform/cache"
 	"github.com/ebnsina/muallim-api/internal/platform/config"
 	"github.com/ebnsina/muallim-api/internal/platform/database"
@@ -237,6 +238,9 @@ func run() error {
 	// The madrasa memorization log: Sabaq, Sabqi, Manzil per student.
 	memorization := hifz.NewService(db, hifz.NewPostgresRepository())
 
+	// The institution dashboard read-model: counts and sums for the admin home.
+	dashboard := overview.NewService(db, overview.NewPostgresRepository())
+
 	// `learning` satisfies assess.Completions: passing a quiz completes its lesson,
 	// in the transaction that recorded the grade. The interface is declared by
 	// assess and satisfied by enroll, which have never heard of each other. The
@@ -342,6 +346,7 @@ func run() error {
 		Staff:       people,
 		Notices:     noticeboard,
 		Hifz:        memorization,
+		Overview:    dashboard,
 		Auth:        identities,
 		Enrol:       learning,
 		Assess:      quizzes,

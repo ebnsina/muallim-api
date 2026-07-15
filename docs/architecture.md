@@ -19,6 +19,7 @@ internal/fees           fee structures, invoices, payments, student ledgers
 internal/staff          the people who run the institution: teachers and the office
 internal/notices        guardian broadcasts, fanned out to email/SMS in the posting txn
 internal/hifz           madrasa Quran-memorization log: Sabaq, Sabqi, Manzil
+internal/overview       institution dashboard read-model: counts and sums at a glance
 internal/httpapi        transport: routes, middleware, RFC 9457 problem documents
 migrations/             embedded goose SQL
 ```
