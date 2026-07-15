@@ -346,6 +346,57 @@ func TestSubjects(t *testing.T) {
 	}
 }
 
+func TestTimetable(t *testing.T) {
+	t.Parallel()
+
+	db := testDB(t)
+	tenant := seedTenant(t, db)
+	svc := newService(db)
+	author := academics.Author{UserID: uuid.New()}
+
+	class, err := svc.CreateClass(t.Context(), tenant, academics.NewGradeLevel{Name: "Class 6", Rank: 6}, author)
+	if err != nil {
+		t.Fatalf("create class: %v", err)
+	}
+	section, err := svc.CreateSection(t.Context(), tenant, class.ID, academics.NewSection{Name: "A"})
+	if err != nil {
+		t.Fatalf("create section: %v", err)
+	}
+
+	// A slot ending before it starts is refused.
+	if _, err := svc.AddPeriod(t.Context(), tenant, academics.NewPeriod{
+		SectionID: section.ID, DayOfWeek: 0, StartsAt: "10:00", EndsAt: "09:00",
+	}); !errors.Is(err, academics.ErrInvalidPeriod) {
+		t.Fatalf("a backwards period was accepted: %v", err)
+	}
+
+	if _, err := svc.AddPeriod(t.Context(), tenant, academics.NewPeriod{
+		SectionID: section.ID, DayOfWeek: 0, StartsAt: "09:00", EndsAt: "09:45", TeacherName: "Mr Karim", Room: "201",
+	}); err != nil {
+		t.Fatalf("add period: %v", err)
+	}
+	if _, err := svc.AddPeriod(t.Context(), tenant, academics.NewPeriod{
+		SectionID: section.ID, DayOfWeek: 0, StartsAt: "10:00", EndsAt: "10:45",
+	}); err != nil {
+		t.Fatalf("add second period: %v", err)
+	}
+
+	// The same slot twice is a conflict, not a duplicate.
+	if _, err := svc.AddPeriod(t.Context(), tenant, academics.NewPeriod{
+		SectionID: section.ID, DayOfWeek: 0, StartsAt: "09:00", EndsAt: "09:45",
+	}); !errors.Is(err, academics.ErrInvalidPeriod) {
+		t.Fatalf("a duplicate slot was accepted: %v", err)
+	}
+
+	grid, err := svc.SectionTimetable(t.Context(), tenant, section.ID)
+	if err != nil {
+		t.Fatalf("timetable: %v", err)
+	}
+	if len(grid) != 2 || grid[0].StartsAt != "09:00" {
+		t.Fatalf("timetable not in grid order: %+v", grid)
+	}
+}
+
 func TestAttendance(t *testing.T) {
 	t.Parallel()
 

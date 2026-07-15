@@ -160,6 +160,7 @@ func New(opts Options) (http.Handler, huma.API) {
 	registerSubjects(api, opts.Academics)
 	registerStudents(api, opts.Academics)
 	registerAttendance(api, opts.Academics)
+	registerTimetable(api, opts.Academics)
 	registerExams(api, opts.Exams)
 	registerFees(api, opts.Fees)
 	registerGamification(api, opts.Gamify)

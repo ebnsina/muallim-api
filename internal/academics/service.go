@@ -51,6 +51,10 @@ type Repository interface {
 	MarkAttendance(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, m AttendanceMark) (int, error)
 	Register(ctx context.Context, tx pgx.Tx, tenantID, sectionID uuid.UUID, on time.Time) ([]RegisterEntry, error)
 	StudentAttendance(ctx context.Context, tx pgx.Tx, tenantID, studentID uuid.UUID, from, to time.Time) ([]AttendanceDay, AttendanceSummary, error)
+
+	CreatePeriod(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, n NewPeriod) (Period, error)
+	SectionTimetable(ctx context.Context, tx pgx.Tx, tenantID, sectionID uuid.UUID) ([]Period, error)
+	DeletePeriod(ctx context.Context, tx pgx.Tx, tenantID, periodID uuid.UUID) error
 }
 
 // AuditRecorder writes an audit line in the transaction of the thing it describes.
