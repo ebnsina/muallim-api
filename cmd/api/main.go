@@ -31,6 +31,7 @@ import (
 	"github.com/ebnsina/muallim-api/internal/comms"
 	"github.com/ebnsina/muallim-api/internal/enroll"
 	"github.com/ebnsina/muallim-api/internal/exams"
+	"github.com/ebnsina/muallim-api/internal/fees"
 	"github.com/ebnsina/muallim-api/internal/forum"
 	"github.com/ebnsina/muallim-api/internal/gamify"
 	"github.com/ebnsina/muallim-api/internal/grade"
@@ -220,6 +221,9 @@ func run() error {
 	// Assessment on top of the spine: grading scales, exams, marks, report cards.
 	examining := exams.NewService(db, exams.NewPostgresRepository(), examsAuditor{recorder})
 
+	// Institutional billing: fee structures, invoices, payments, student ledgers.
+	billing := fees.NewService(db, fees.NewPostgresRepository(), feesAuditor{recorder})
+
 	// `learning` satisfies assess.Completions: passing a quiz completes its lesson,
 	// in the transaction that recorded the grade. The interface is declared by
 	// assess and satisfied by enroll, which have never heard of each other. The
@@ -321,6 +325,7 @@ func run() error {
 		Gamify:      gamification,
 		Academics:   schooling,
 		Exams:       examining,
+		Fees:        billing,
 		Auth:        identities,
 		Enrol:       learning,
 		Assess:      quizzes,

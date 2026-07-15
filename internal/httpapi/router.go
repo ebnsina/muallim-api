@@ -22,6 +22,7 @@ import (
 	"github.com/ebnsina/muallim-api/internal/commerce"
 	"github.com/ebnsina/muallim-api/internal/enroll"
 	"github.com/ebnsina/muallim-api/internal/exams"
+	"github.com/ebnsina/muallim-api/internal/fees"
 	"github.com/ebnsina/muallim-api/internal/forum"
 	"github.com/ebnsina/muallim-api/internal/gamify"
 	"github.com/ebnsina/muallim-api/internal/grade"
@@ -73,6 +74,10 @@ type Options struct {
 	// Exams is the assessment layer — grading scales, exams, marks, report cards. Nil
 	// alongside Academics in an LMS-only deployment.
 	Exams *exams.Service
+
+	// Fees is the institutional billing layer — fee structures, invoices, payments.
+	// Nil alongside Academics in an LMS-only deployment.
+	Fees *fees.Service
 
 	// Commerce may be nil: a deployment with no gateway configured sells nothing,
 	// and every course in it is free — which is exactly what this product was
@@ -156,6 +161,7 @@ func New(opts Options) (http.Handler, huma.API) {
 	registerStudents(api, opts.Academics)
 	registerAttendance(api, opts.Academics)
 	registerExams(api, opts.Exams)
+	registerFees(api, opts.Fees)
 	registerGamification(api, opts.Gamify)
 
 	// Order matters, outermost first.
