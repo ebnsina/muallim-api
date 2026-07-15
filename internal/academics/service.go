@@ -32,6 +32,16 @@ type Repository interface {
 	CreateSection(ctx context.Context, tx pgx.Tx, tenantID, classID uuid.UUID, n NewSection) (Section, error)
 	Sections(ctx context.Context, tx pgx.Tx, tenantID, classID uuid.UUID) ([]Section, error)
 	DeleteSection(ctx context.Context, tx pgx.Tx, tenantID, sectionID uuid.UUID) error
+
+	CreateStudent(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, n NewStudent) (Student, error)
+	Roster(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, filter RosterFilter, after *cursor, limit int) ([]Student, error)
+	StudentByID(ctx context.Context, tx pgx.Tx, tenantID, studentID uuid.UUID) (Student, error)
+	UpdateStudent(ctx context.Context, tx pgx.Tx, tenantID, studentID uuid.UUID, p StudentPatch) (Student, error)
+	DeleteStudent(ctx context.Context, tx pgx.Tx, tenantID, studentID uuid.UUID) error
+
+	AddGuardian(ctx context.Context, tx pgx.Tx, tenantID, studentID uuid.UUID, n NewGuardian) (Guardian, error)
+	GuardiansOf(ctx context.Context, tx pgx.Tx, tenantID, studentID uuid.UUID) ([]Guardian, error)
+	RemoveGuardian(ctx context.Context, tx pgx.Tx, tenantID, studentID, guardianID uuid.UUID) error
 }
 
 // AuditRecorder writes an audit line in the transaction of the thing it describes.

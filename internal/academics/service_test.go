@@ -212,3 +212,85 @@ func TestTermsClassesSections(t *testing.T) {
 		t.Fatalf("%d sections, want 1", len(sections))
 	}
 }
+
+// A student is admitted, appears on the roster, gains a guardian, and the admission
+// number is unique.
+func TestStudentsAndGuardians(t *testing.T) {
+	t.Parallel()
+
+	db := testDB(t)
+	tenant := seedTenant(t, db)
+	svc := newService(db)
+	author := academics.Author{UserID: uuid.New()}
+
+	class, err := svc.CreateClass(t.Context(), tenant, academics.NewGradeLevel{Name: "Class 6", Rank: 6}, author)
+	if err != nil {
+		t.Fatalf("create class: %v", err)
+	}
+
+	amina, err := svc.AdmitStudent(t.Context(), tenant, academics.NewStudent{
+		AdmissionNo: "2025-001", FullName: "Amina Rahman", GradeLevelID: &class.ID, Roll: 1,
+	}, author)
+	if err != nil {
+		t.Fatalf("admit amina: %v", err)
+	}
+	if _, err := svc.AdmitStudent(t.Context(), tenant, academics.NewStudent{
+		AdmissionNo: "2025-002", FullName: "Bilal Ahmed", GradeLevelID: &class.ID, Roll: 2,
+	}, author); err != nil {
+		t.Fatalf("admit bilal: %v", err)
+	}
+
+	// A duplicate admission number is refused.
+	if _, err := svc.AdmitStudent(t.Context(), tenant, academics.NewStudent{
+		AdmissionNo: "2025-001", FullName: "Someone Else",
+	}, author); !errors.Is(err, academics.ErrAdmissionTaken) {
+		t.Fatalf("a duplicate admission number was accepted: %v", err)
+	}
+
+	// The roster is sorted by name, and the grade filter narrows it.
+	page, err := svc.Roster(t.Context(), tenant, academics.RosterFilter{GradeLevelID: &class.ID},
+		academics.PageParams{Limit: 50})
+	if err != nil {
+		t.Fatalf("roster: %v", err)
+	}
+	if len(page.Students) != 2 || page.Students[0].FullName != "Amina Rahman" {
+		t.Fatalf("roster not sorted by name: %+v", page.Students)
+	}
+
+	// A guardian, made primary, then a second: the primary flag is exclusive.
+	if _, err := svc.AddGuardian(t.Context(), tenant, amina.ID, academics.NewGuardian{
+		FullName: "Rahman Ali", Relation: "father", Phone: "01700000000", IsPrimary: true,
+	}); err != nil {
+		t.Fatalf("add guardian: %v", err)
+	}
+	if _, err := svc.AddGuardian(t.Context(), tenant, amina.ID, academics.NewGuardian{
+		FullName: "Fatima Rahman", Relation: "mother", IsPrimary: true,
+	}); err != nil {
+		t.Fatalf("add second guardian: %v", err)
+	}
+
+	guardians, err := svc.Guardians(t.Context(), tenant, amina.ID)
+	if err != nil {
+		t.Fatalf("list guardians: %v", err)
+	}
+	if len(guardians) != 2 {
+		t.Fatalf("%d guardians, want 2", len(guardians))
+	}
+	primaries := 0
+	for _, g := range guardians {
+		if g.IsPrimary {
+			primaries++
+			if g.FullName != "Fatima Rahman" {
+				t.Errorf("primary is %s, want the most recent (Fatima)", g.FullName)
+			}
+		}
+	}
+	if primaries != 1 {
+		t.Fatalf("%d primary guardians, want exactly 1", primaries)
+	}
+
+	// A guardian against a student that does not exist is a not-found.
+	if _, err := svc.AddGuardian(t.Context(), tenant, uuid.New(), academics.NewGuardian{FullName: "Nobody"}); !errors.Is(err, academics.ErrNotFound) {
+		t.Fatalf("a guardian against a missing student was accepted: %v", err)
+	}
+}

@@ -593,10 +593,18 @@ func academicsError(err error) error {
 	case errors.Is(err, academics.ErrNameTaken):
 		return huma.Error409Conflict("That name is already used in this workspace.")
 
+	case errors.Is(err, academics.ErrAdmissionTaken):
+		return huma.Error409Conflict("That admission number is already used in this workspace.")
+
+	case errors.Is(err, academics.ErrInvalidPage):
+		return huma.Error422UnprocessableEntity("That page cursor is not valid.")
+
 	case errors.Is(err, academics.ErrInvalidYear),
 		errors.Is(err, academics.ErrInvalidTerm),
 		errors.Is(err, academics.ErrInvalidClass),
 		errors.Is(err, academics.ErrInvalidSection),
+		errors.Is(err, academics.ErrInvalidStudent),
+		errors.Is(err, academics.ErrInvalidGuardian),
 		errors.Is(err, academics.ErrInvalidInstitutionType):
 		return huma.Error422UnprocessableEntity(err.Error())
 

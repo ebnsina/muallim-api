@@ -192,10 +192,14 @@ func TestAcademicsSentinelsMapToADeliberateStatus(t *testing.T) {
 	tests := map[error]int{
 		academics.ErrNotFound:               http.StatusNotFound,
 		academics.ErrNameTaken:              http.StatusConflict,
+		academics.ErrAdmissionTaken:         http.StatusConflict,
+		academics.ErrInvalidPage:            http.StatusUnprocessableEntity,
 		academics.ErrInvalidYear:            http.StatusUnprocessableEntity,
 		academics.ErrInvalidTerm:            http.StatusUnprocessableEntity,
 		academics.ErrInvalidClass:           http.StatusUnprocessableEntity,
 		academics.ErrInvalidSection:         http.StatusUnprocessableEntity,
+		academics.ErrInvalidStudent:         http.StatusUnprocessableEntity,
+		academics.ErrInvalidGuardian:        http.StatusUnprocessableEntity,
 		academics.ErrInvalidInstitutionType: http.StatusUnprocessableEntity,
 	}
 
