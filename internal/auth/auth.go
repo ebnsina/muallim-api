@@ -66,6 +66,11 @@ const (
 	// thread or post. Separate from course:write: moderating the community is not
 	// the same job as authoring a course, though the same roles happen to do both.
 	PermForumModerate = "forum:moderate"
+
+	// PermAcademicsManage sets up the institution's structure — its type, academic
+	// years and terms, classes and sections. An administrative act, not a teaching
+	// one: an instructor authors courses but does not redraw the school.
+	PermAcademicsManage = "academics:manage"
 )
 
 // rolePermissions is the entire authorisation model. It is a map rather than a
@@ -76,13 +81,13 @@ var rolePermissions = map[string]map[string]bool{
 		PermCourseRead: true, PermCourseWrite: true, PermCoursePublish: true,
 		PermSubmissionGrade: true,
 		PermUserRead:        true, PermUserManage: true, PermTenantManage: true,
-		PermForumModerate: true,
+		PermForumModerate: true, PermAcademicsManage: true,
 	},
 	RoleAdmin: {
 		PermCourseRead: true, PermCourseWrite: true, PermCoursePublish: true,
 		PermSubmissionGrade: true,
 		PermUserRead:        true, PermUserManage: true,
-		PermForumModerate: true,
+		PermForumModerate: true, PermAcademicsManage: true,
 	},
 	RoleInstructor: {
 		PermCourseRead: true, PermCourseWrite: true, PermCoursePublish: true,

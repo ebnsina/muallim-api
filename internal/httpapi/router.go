@@ -13,6 +13,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
 
+	"github.com/ebnsina/muallim-api/internal/academics"
 	"github.com/ebnsina/muallim-api/internal/assess"
 	"github.com/ebnsina/muallim-api/internal/assign"
 	"github.com/ebnsina/muallim-api/internal/auth"
@@ -63,6 +64,10 @@ type Options struct {
 	Notify  *notify.Service
 	Forum   *forum.Service
 	Gamify  *gamify.Service
+
+	// Academics is the institution layer — years, terms, classes, sections. Nil in a
+	// deployment that only runs the LMS without the school-management surface.
+	Academics *academics.Service
 
 	// Commerce may be nil: a deployment with no gateway configured sells nothing,
 	// and every course in it is free — which is exactly what this product was
@@ -141,6 +146,7 @@ func New(opts Options) (http.Handler, huma.API) {
 	registerQA(api, opts.Learn)
 	registerNotifications(api, opts.Notify)
 	registerForum(api, opts.Forum)
+	registerAcademics(api, opts.Academics)
 	registerGamification(api, opts.Gamify)
 
 	// Order matters, outermost first.

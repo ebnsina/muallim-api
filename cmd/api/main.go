@@ -20,6 +20,7 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
+	"github.com/ebnsina/muallim-api/internal/academics"
 	"github.com/ebnsina/muallim-api/internal/assess"
 	"github.com/ebnsina/muallim-api/internal/assign"
 	"github.com/ebnsina/muallim-api/internal/audit"
@@ -211,6 +212,10 @@ func run() error {
 
 	community := forum.NewService(db, forum.NewPostgresRepository(), forumNotifier{notifications})
 
+	// The institution layer: academic years and terms, classes and sections. The
+	// spine the school-management surface (attendance, exams, fees) will hang off.
+	schooling := academics.NewService(db, academics.NewPostgresRepository(), academicsAuditor{recorder})
+
 	// `learning` satisfies assess.Completions: passing a quiz completes its lesson,
 	// in the transaction that recorded the grade. The interface is declared by
 	// assess and satisfied by enroll, which have never heard of each other. The
@@ -310,6 +315,7 @@ func run() error {
 		Notify:      notifications,
 		Forum:       community,
 		Gamify:      gamification,
+		Academics:   schooling,
 		Auth:        identities,
 		Enrol:       learning,
 		Assess:      quizzes,

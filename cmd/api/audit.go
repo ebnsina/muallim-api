@@ -6,6 +6,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/ebnsina/muallim-api/internal/academics"
 	"github.com/ebnsina/muallim-api/internal/assess"
 	"github.com/ebnsina/muallim-api/internal/assign"
 	"github.com/ebnsina/muallim-api/internal/audit"
@@ -35,6 +36,20 @@ func (a authAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, 
 		TargetID:   e.TargetID,
 		IP:         e.IP,
 		UserAgent:  e.UserAgent,
+		Metadata:   e.Metadata,
+	})
+}
+
+type academicsAuditor struct{ recorder *audit.Recorder }
+
+var _ academics.AuditRecorder = academicsAuditor{}
+
+func (a academicsAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, e academics.AuditEntry) error {
+	return a.recorder.Record(ctx, tx, tenantID, audit.Entry{
+		ActorID:    e.ActorID,
+		Action:     e.Action,
+		TargetType: e.TargetType,
+		TargetID:   e.TargetID,
 		Metadata:   e.Metadata,
 	})
 }
