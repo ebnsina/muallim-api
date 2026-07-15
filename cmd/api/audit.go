@@ -13,9 +13,11 @@ import (
 	"github.com/ebnsina/muallim-api/internal/auth"
 	"github.com/ebnsina/muallim-api/internal/catalog"
 	"github.com/ebnsina/muallim-api/internal/certify"
+	"github.com/ebnsina/muallim-api/internal/comms"
 	"github.com/ebnsina/muallim-api/internal/enroll"
 	"github.com/ebnsina/muallim-api/internal/exams"
 	"github.com/ebnsina/muallim-api/internal/fees"
+	"github.com/ebnsina/muallim-api/internal/notices"
 	"github.com/ebnsina/muallim-api/internal/staff"
 )
 
@@ -83,6 +85,35 @@ func (a feesAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, 
 		TargetID:   e.TargetID,
 		Metadata:   e.Metadata,
 	})
+}
+
+type noticesAuditor struct{ recorder *audit.Recorder }
+
+var _ notices.AuditRecorder = noticesAuditor{}
+
+func (a noticesAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, e notices.AuditEntry) error {
+	return a.recorder.Record(ctx, tx, tenantID, audit.Entry{
+		ActorID:    e.ActorID,
+		Action:     e.Action,
+		TargetType: e.TargetType,
+		TargetID:   e.TargetID,
+		Metadata:   e.Metadata,
+	})
+}
+
+// noticeBroadcaster satisfies notices.Broadcaster by enqueuing each guardian's
+// copy through the email outbox, in the posting transaction. A Bangladesh SMS
+// driver will slot in here behind the same seam.
+type noticeBroadcaster struct{ outbox *comms.Enqueuer }
+
+var _ notices.Broadcaster = noticeBroadcaster{}
+
+func (b noticeBroadcaster) SendNotice(ctx context.Context, tx pgx.Tx, to, name, subject, body string) error {
+	text := body
+	if name != "" {
+		text = "Dear " + name + ",\n\n" + body
+	}
+	return b.outbox.SendRendered(ctx, tx, to, subject, text)
 }
 
 type staffAuditor struct{ recorder *audit.Recorder }

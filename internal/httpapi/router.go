@@ -27,6 +27,7 @@ import (
 	"github.com/ebnsina/muallim-api/internal/gamify"
 	"github.com/ebnsina/muallim-api/internal/grade"
 	"github.com/ebnsina/muallim-api/internal/learn"
+	"github.com/ebnsina/muallim-api/internal/notices"
 	"github.com/ebnsina/muallim-api/internal/notify"
 	"github.com/ebnsina/muallim-api/internal/platform/ratelimit"
 	"github.com/ebnsina/muallim-api/internal/staff"
@@ -83,6 +84,10 @@ type Options struct {
 	// Staff is the people layer — teachers and the office. Nil alongside Academics in
 	// an LMS-only deployment.
 	Staff *staff.Service
+
+	// Notices posts guardian broadcasts. Nil alongside Academics in an LMS-only
+	// deployment.
+	Notices *notices.Service
 
 	// Commerce may be nil: a deployment with no gateway configured sells nothing,
 	// and every course in it is free — which is exactly what this product was
@@ -169,6 +174,7 @@ func New(opts Options) (http.Handler, huma.API) {
 	registerExams(api, opts.Exams)
 	registerFees(api, opts.Fees)
 	registerStaff(api, opts.Staff)
+	registerNotices(api, opts.Notices)
 	registerGamification(api, opts.Gamify)
 
 	// Order matters, outermost first.

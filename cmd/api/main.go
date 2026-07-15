@@ -37,6 +37,7 @@ import (
 	"github.com/ebnsina/muallim-api/internal/grade"
 	"github.com/ebnsina/muallim-api/internal/httpapi"
 	"github.com/ebnsina/muallim-api/internal/learn"
+	"github.com/ebnsina/muallim-api/internal/notices"
 	"github.com/ebnsina/muallim-api/internal/notify"
 	"github.com/ebnsina/muallim-api/internal/platform/cache"
 	"github.com/ebnsina/muallim-api/internal/platform/config"
@@ -228,6 +229,10 @@ func run() error {
 	// The people who run the institution: teachers and the office.
 	people := staff.NewService(db, staff.NewPostgresRepository(), staffAuditor{recorder})
 
+	// Guardian notices: a school posts a message and it fans out to guardians by
+	// email, in the posting transaction. `outbox` is the same enqueuer auth uses.
+	noticeboard := notices.NewService(db, notices.NewPostgresRepository(), noticeBroadcaster{outbox}, noticesAuditor{recorder})
+
 	// `learning` satisfies assess.Completions: passing a quiz completes its lesson,
 	// in the transaction that recorded the grade. The interface is declared by
 	// assess and satisfied by enroll, which have never heard of each other. The
@@ -331,6 +336,7 @@ func run() error {
 		Exams:       examining,
 		Fees:        billing,
 		Staff:       people,
+		Notices:     noticeboard,
 		Auth:        identities,
 		Enrol:       learning,
 		Assess:      quizzes,
