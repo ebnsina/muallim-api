@@ -1,12 +1,15 @@
 package catalog_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -16,6 +19,7 @@ import (
 	"github.com/ebnsina/muallim-api/internal/audit"
 	"github.com/ebnsina/muallim-api/internal/catalog"
 	"github.com/ebnsina/muallim-api/internal/media"
+	"github.com/ebnsina/muallim-api/internal/platform/blob"
 	"github.com/ebnsina/muallim-api/internal/platform/database"
 )
 
@@ -144,8 +148,42 @@ func newVideos() testVideos {
 }
 
 func newService(db *database.DB) *catalog.Service {
+	return newServiceWithStore(db, blob.Unconfigured{})
+}
+
+func newServiceWithStore(db *database.DB, store blob.Store) *catalog.Service {
 	repo := catalog.NewPostgresRepository()
-	return catalog.NewService(db, repo, repo, repo, testAuditor{audit.NewRecorder()}, newVideos(), nil)
+	return catalog.NewService(db, repo, repo, repo, testAuditor{audit.NewRecorder()}, newVideos(), nil, store)
+}
+
+// testStore is the real object store, or a skip — a thumbnail upload is the
+// question the store exists to answer.
+func testStore(t *testing.T) *blob.S3 {
+	t.Helper()
+
+	endpoint := os.Getenv("MUALLIM_TEST_S3_ENDPOINT")
+	if endpoint == "" {
+		t.Skip("MUALLIM_TEST_S3_ENDPOINT is not set; skipping object-store tests")
+	}
+	store, err := blob.NewS3(blob.Options{
+		Endpoint:  endpoint,
+		Bucket:    catalogEnvOr("MUALLIM_TEST_S3_BUCKET", "muallim-uploads"),
+		AccessKey: catalogEnvOr("MUALLIM_TEST_S3_ACCESS_KEY", "muallim"),
+		SecretKey: catalogEnvOr("MUALLIM_TEST_S3_SECRET_KEY", "muallim-secret-key"),
+		Region:    "auto",
+		PathStyle: true,
+	})
+	if err != nil {
+		t.Fatalf("object store: %v", err)
+	}
+	return store
+}
+
+func catalogEnvOr(name, fallback string) string {
+	if value := os.Getenv(name); value != "" {
+		return value
+	}
+	return fallback
 }
 
 // The regression guard. Loading a curriculum must cost a fixed number of queries
@@ -266,5 +304,76 @@ func TestCurriculumNotFound(t *testing.T) {
 	_, err := newService(db).Curriculum(t.Context(), tenantID, "no-such-course", true)
 	if err == nil {
 		t.Fatal("expected an error for a missing course")
+	}
+}
+
+// uploadTo performs the PUT a browser would, against a signed URL.
+func uploadTo(t *testing.T, signed blob.Upload, body []byte) {
+	t.Helper()
+
+	request, err := http.NewRequest(signed.Method, signed.URL, bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("build the upload: %v", err)
+	}
+	for name, values := range signed.Headers {
+		for _, value := range values {
+			request.Header.Add(name, value)
+		}
+	}
+	if declared := request.Header.Get("Content-Length"); declared != "" {
+		request.ContentLength, _ = strconv.ParseInt(declared, 10, 64)
+	}
+
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("upload: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("the store refused the upload: %d", response.StatusCode)
+	}
+}
+
+// A course thumbnail goes to the object store, a foreign key is refused, and the
+// stored image resolves to a signed inline URL.
+func TestCourseThumbnail(t *testing.T) {
+	t.Parallel()
+
+	store := testStore(t) // skips without MUALLIM_TEST_S3_ENDPOINT
+	db := testDB(t)
+	tenantID := seedTenant(t, db)
+	seedCourse(t, db, tenantID, "photography", 1, 1)
+	svc := newServiceWithStore(db, store)
+
+	body := []byte("not-really-a-png-but-nonempty-bytes")
+	signed, key, err := svc.PresignImage(t.Context(), tenantID, "photography", "image/png", int64(len(body)))
+	if err != nil {
+		t.Fatalf("presign: %v", err)
+	}
+	uploadTo(t, signed, body)
+
+	if err := svc.ConfirmImage(t.Context(), tenantID, "photography", key); err != nil {
+		t.Fatalf("confirm: %v", err)
+	}
+
+	// A key from another course or workspace is refused.
+	err = svc.ConfirmImage(t.Context(), tenantID, "photography", "t/other/courses/deadbeef/x.png")
+	if !errors.Is(err, catalog.ErrInvalidImage) {
+		t.Fatalf("a foreign key was accepted: %v", err)
+	}
+
+	// The stored image resolves to a signed URL.
+	url, err := svc.ImageURL(t.Context(), tenantID, "photography", false)
+	if err != nil {
+		t.Fatalf("image url: %v", err)
+	}
+	if url == "" {
+		t.Fatal("no image url returned")
+	}
+
+	// A course with no image is a 404, not an empty URL.
+	seedCourse(t, db, tenantID, "painting", 1, 1)
+	if _, err := svc.ImageURL(t.Context(), tenantID, "painting", false); !errors.Is(err, catalog.ErrNoImage) {
+		t.Fatalf("a course with no image did not report ErrNoImage: %v", err)
 	}
 }

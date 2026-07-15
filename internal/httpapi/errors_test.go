@@ -75,6 +75,9 @@ func TestEveryDomainSentinelMapsToADeliberateStatus(t *testing.T) {
 		{"prerequisite cycle", catalog.ErrPrerequisiteCycle, http.StatusUnprocessableEntity},
 		{"prerequisite exists", catalog.ErrPrerequisiteExists, http.StatusConflict},
 		{"invalid drip mode", catalog.ErrInvalidDripMode, http.StatusUnprocessableEntity},
+		{"invalid image", catalog.ErrInvalidImage, http.StatusUnprocessableEntity},
+		{"no image", catalog.ErrNoImage, http.StatusNotFound},
+		{"no store", catalog.ErrNoStore, http.StatusServiceUnavailable},
 	}
 
 	for _, tt := range tests {
@@ -86,7 +89,8 @@ func TestEveryDomainSentinelMapsToADeliberateStatus(t *testing.T) {
 				catalog.ErrInvalidAnnouncement, catalog.ErrInvalidVideo,
 				catalog.ErrIncompleteOrder, catalog.ErrEmptyCourse, catalog.ErrAlreadyPublished,
 				catalog.ErrPrerequisiteCycle, catalog.ErrPrerequisiteExists,
-				catalog.ErrInvalidDripMode,
+				catalog.ErrInvalidDripMode, catalog.ErrInvalidImage, catalog.ErrNoImage,
+				catalog.ErrNoStore,
 			} {
 				if errors.Is(tt.err, catalogErr) {
 					mapper = catalogError

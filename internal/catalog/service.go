@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/ebnsina/muallim-api/internal/platform/blob"
 	"github.com/ebnsina/muallim-api/internal/platform/database"
 )
 
@@ -43,11 +44,13 @@ type Service struct {
 	audit     AuditRecorder
 	video     VideoResolver
 	announce  AnnouncementNotifier
+	store     blob.Store
 }
 
-// NewService returns a Service.
-func NewService(db *database.DB, repo Repository, authoring AuthoringRepository, prereqs PrerequisiteRepository, recorder AuditRecorder, video VideoResolver, announce AnnouncementNotifier) *Service {
-	return &Service{db: db, repo: repo, authoring: authoring, prereqs: prereqs, audit: recorder, video: video, announce: announce}
+// NewService returns a Service. The store holds course thumbnails; a nil-behaving
+// (Unconfigured) store refuses those uploads.
+func NewService(db *database.DB, repo Repository, authoring AuthoringRepository, prereqs PrerequisiteRepository, recorder AuditRecorder, video VideoResolver, announce AnnouncementNotifier, store blob.Store) *Service {
+	return &Service{db: db, repo: repo, authoring: authoring, prereqs: prereqs, audit: recorder, video: video, announce: announce, store: store}
 }
 
 // ListCourses returns one page of a tenant's courses.

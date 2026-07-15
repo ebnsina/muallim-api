@@ -320,6 +320,27 @@ func (r *PostgresRepository) SetCourseStatus(ctx context.Context, tx pgx.Tx, ten
 	return c, nil
 }
 
+// SetCourseImage records a course's thumbnail key and returns the key it replaced,
+// so the caller can delete the object now orphaned. One statement, and the previous
+// key is read in the same one that overwrites it.
+func (r *PostgresRepository) SetCourseImage(ctx context.Context, tx pgx.Tx, tenantID, courseID uuid.UUID, imageKey string) (string, error) {
+	var previous string
+	err := tx.QueryRow(ctx,
+		`WITH prev AS (SELECT image_key FROM courses WHERE tenant_id = $1 AND id = $2)
+		 UPDATE courses SET image_key = $3, updated_at = now()
+		 WHERE tenant_id = $1 AND id = $2
+		 RETURNING (SELECT image_key FROM prev)`,
+		tenantID, courseID, imageKey).Scan(&previous)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", ErrNotFound
+		}
+		return "", fmt.Errorf("catalog: set course image: %w", err)
+	}
+	return previous, nil
+}
+
 // UpdateCourse writes a course's copy. A nil field in the patch coalesces back to
 // the stored value, so one statement serves every combination of fields.
 //

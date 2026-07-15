@@ -30,6 +30,16 @@ var (
 	// ErrInvalidCourse is copy that would not fit on a page: an empty title, or a
 	// description, objective, or requirement past its bound.
 	ErrInvalidCourse = errors.New("catalog: course is not valid")
+
+	// ErrInvalidImage means a thumbnail's type, size, or key was refused.
+	ErrInvalidImage = errors.New("catalog: the image is not valid")
+
+	// ErrNoImage means a course has no thumbnail to serve.
+	ErrNoImage = errors.New("catalog: the course has no image")
+
+	// ErrNoStore means this deployment has no object store, so a thumbnail has
+	// nowhere to go.
+	ErrNoStore = errors.New("catalog: no object store is configured")
 )
 
 // A course's copy is bounded. An unbounded text column reachable from a write
@@ -102,6 +112,10 @@ type Course struct {
 	// The preview clip a stranger watches before enrolling. Preview.EmbedURL is the
 	// only one of its fields that may be framed.
 	Preview Video
+
+	// ImageKey names the thumbnail object in the store, empty for a course with
+	// none. Never a URL: the bytes are private and served through a signed redirect.
+	ImageKey string
 
 	CreatedAt time.Time
 	UpdatedAt time.Time

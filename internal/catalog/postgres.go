@@ -37,7 +37,7 @@ func NewPostgresRepository() *PostgresRepository { return &PostgresRepository{} 
 // clean index seek a test pins it to. See instructorNames.
 const listPublishedCoursesSQL = `
 	SELECT id, slug, title, summary, difficulty, status, published_at, drip_mode,
-	       created_by, created_at, updated_at
+	       image_key, created_by, created_at, updated_at
 	FROM courses
 	WHERE tenant_id = $1
 	  AND status = 'published'
@@ -57,7 +57,7 @@ const listPublishedCoursesSQL = `
 // statement gets an index that covers its filter and its sort.
 const listAllCoursesSQL = `
 	SELECT id, slug, title, summary, difficulty, status, published_at, drip_mode,
-	       created_by, created_at, updated_at
+	       image_key, created_by, created_at, updated_at
 	FROM courses
 	WHERE tenant_id = $1
 	  AND ($2::timestamptz IS NULL OR (created_at, id) < ($2, $3))
@@ -112,7 +112,7 @@ func (r *PostgresRepository) ListCourses(ctx context.Context, tx pgx.Tx, tenantI
 	courses, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Course, error) {
 		var c Course
 		err := row.Scan(&c.ID, &c.Slug, &c.Title, &c.Summary, &c.Difficulty,
-			&c.Status, &c.PublishedAt, &c.DripMode, &c.CreatedBy, &c.CreatedAt, &c.UpdatedAt)
+			&c.Status, &c.PublishedAt, &c.DripMode, &c.ImageKey, &c.CreatedBy, &c.CreatedAt, &c.UpdatedAt)
 		return c, err
 	})
 	if err != nil {
@@ -293,7 +293,7 @@ func (r *PostgresRepository) DeleteAnnouncement(ctx context.Context, tx pgx.Tx, 
 const courseBySlugSQL = `
 	SELECT c.id, c.slug, c.title, c.summary, c.difficulty, c.status, c.published_at, c.drip_mode,
 	       c.description, c.objectives, c.requirements, c.language,
-	       c.preview_source, c.preview_url, c.preview_embed_url,
+	       c.preview_source, c.preview_url, c.preview_embed_url, c.image_key,
 	       c.created_by, COALESCE(u.name, ''), c.created_at, c.updated_at
 	FROM courses c
 	LEFT JOIN users u ON u.id = c.created_by
@@ -311,7 +311,7 @@ func (r *PostgresRepository) CourseBySlug(ctx context.Context, tx pgx.Tx, tenant
 		&c.ID, &c.Slug, &c.Title, &c.Summary, &c.Difficulty,
 		&c.Status, &c.PublishedAt, &c.DripMode,
 		&c.Description, &c.Objectives, &c.Requirements, &c.Language,
-		&c.Preview.Source, &c.Preview.URL, &c.Preview.EmbedURL,
+		&c.Preview.Source, &c.Preview.URL, &c.Preview.EmbedURL, &c.ImageKey,
 		&c.CreatedBy, &c.InstructorName, &c.CreatedAt, &c.UpdatedAt)
 
 	if err != nil {

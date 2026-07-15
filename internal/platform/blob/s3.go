@@ -127,6 +127,27 @@ func (s *S3) PresignGet(ctx context.Context, key, downloadName string, ttl time.
 	return request.URL, nil
 }
 
+// PresignGetImage signs a URL that displays an image inline, with a fixed image
+// content type.
+//
+// Inline is safe where PresignGet's attachment is not, and for one reason: the
+// only caller puts the URL in an <img>, which decodes bytes as an image and never
+// runs them, and the store answers from an origin that is not the app's. The type
+// is the caller's constrained one, never the uploader's claim.
+func (s *S3) PresignGetImage(ctx context.Context, key, contentType string, ttl time.Duration) (string, error) {
+	request, err := s.presign.PresignGetObject(ctx, &s3.GetObjectInput{
+		Bucket:                     aws.String(s.bucket),
+		Key:                        aws.String(key),
+		ResponseContentDisposition: aws.String("inline"),
+		ResponseContentType:        aws.String(contentType),
+	}, func(o *s3.PresignOptions) { o.Expires = ttl })
+
+	if err != nil {
+		return "", fmt.Errorf("blob: sign an image view of %s: %w", key, err)
+	}
+	return request.URL, nil
+}
+
 // Head reports what is really at a key.
 func (s *S3) Head(ctx context.Context, key string) (Object, error) {
 	out, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{

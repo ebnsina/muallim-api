@@ -110,6 +110,7 @@ type AuthoringRepository interface {
 	CountLessons(ctx context.Context, tx pgx.Tx, tenantID, courseID uuid.UUID) (int, error)
 	SetCourseStatus(ctx context.Context, tx pgx.Tx, tenantID, courseID uuid.UUID, status string) (Course, error)
 	SetDripMode(ctx context.Context, tx pgx.Tx, tenantID, courseID uuid.UUID, mode string) (Course, error)
+	SetCourseImage(ctx context.Context, tx pgx.Tx, tenantID, courseID uuid.UUID, imageKey string) (string, error)
 }
 
 // EditCourse rewrites a course's copy — its pitch, what it teaches, and what it

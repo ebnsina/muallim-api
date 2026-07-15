@@ -67,6 +67,13 @@ type Store interface {
 	// is a check on a header that same stranger set.
 	PresignGet(ctx context.Context, key, downloadName string, ttl time.Duration) (string, error)
 
+	// PresignGetImage signs a URL that displays an image inline, with the given
+	// content type. Unlike PresignGet it is not `attachment`, because a thumbnail is
+	// put in an <img> — which never executes its payload whatever the bytes are — and
+	// the store is a separate origin from the app. contentType must be an image type
+	// the caller has constrained; the store serves exactly it, never the uploader's.
+	PresignGetImage(ctx context.Context, key, contentType string, ttl time.Duration) (string, error)
+
 	// Head reports what is actually at a key, which is not necessarily what a
 	// client said it would put there.
 	Head(ctx context.Context, key string) (Object, error)
@@ -93,6 +100,10 @@ func (Unconfigured) PresignPut(context.Context, string, int64, time.Duration) (U
 }
 
 func (Unconfigured) PresignGet(context.Context, string, string, time.Duration) (string, error) {
+	return "", ErrNotConfigured
+}
+
+func (Unconfigured) PresignGetImage(context.Context, string, string, time.Duration) (string, error) {
 	return "", ErrNotConfigured
 }
 

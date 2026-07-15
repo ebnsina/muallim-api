@@ -172,8 +172,13 @@ func run() error {
 		return err
 	}
 
+	store, err := newObjectStore(cfg, log)
+	if err != nil {
+		return err
+	}
+
 	catalogRepo := catalog.NewPostgresRepository()
-	courses := catalog.NewService(db, catalogRepo, catalogRepo, catalogRepo, catalogAuditor{recorder}, videos, notifyJobs)
+	courses := catalog.NewService(db, catalogRepo, catalogRepo, catalogRepo, catalogAuditor{recorder}, videos, notifyJobs, store)
 	// Certificates are issued in the transaction that finishes a course. `enroll`
 	// declares the interface; certify satisfies it; neither has heard of the other.
 	credentials := certify.NewService(db, certify.NewPostgresRepository(), certifyAuditor{recorder})
@@ -205,11 +210,6 @@ func run() error {
 	notes := learn.NewService(db, learn.NewPostgresRepository(), learnNotifier{notifications})
 
 	community := forum.NewService(db, forum.NewPostgresRepository(), forumNotifier{notifications})
-
-	store, err := newObjectStore(cfg, log)
-	if err != nil {
-		return err
-	}
 
 	// `learning` satisfies assess.Completions: passing a quiz completes its lesson,
 	// in the transaction that recorded the grade. The interface is declared by

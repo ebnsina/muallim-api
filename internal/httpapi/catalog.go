@@ -70,6 +70,12 @@ type CourseSummary struct {
 	// The price. Absent is free, which is what every course is until somebody prices
 	// one — and what they all were before this API could take money at all.
 	Price *MoneyView `json:"price,omitempty"`
+
+	// ImageURL is a stable path to the course thumbnail, absent when there is none.
+	// It is not the signed object URL — that rotates and would break this response's
+	// ETag — but a redirect endpoint that signs one on demand, so a card and a page
+	// stay cacheable while the bytes stay private.
+	ImageURL string `json:"image_url,omitempty"`
 }
 
 // CourseDetail is a course as it appears on its own page: the summary, plus the
@@ -376,6 +382,36 @@ func registerCatalog(api huma.API, svc *catalog.Service, facts courseFacts, pric
 		out.Body.DurationSeconds = int(curriculum.TotalDuration().Seconds())
 		return out, nil
 	})
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "get-course-image",
+		Method:        http.MethodGet,
+		Path:          "/v1/courses/{slug}/image",
+		Summary:       "Redirect to a course's thumbnail",
+		DefaultStatus: http.StatusFound,
+		Description: "A 302 to a short-lived signed URL for the thumbnail, served inline. A draft's image is " +
+			"only visible to someone who may edit the course; everyone else gets 404, as they do for the course.",
+		Tags: []string{"Catalog"},
+	}, func(ctx context.Context, in *struct {
+		Slug string `path:"slug" maxLength:"200"`
+	}) (*ImageRedirect, error) {
+		// Same visibility as the course itself: only an author sees a draft's image.
+		p, isAuthor := principalFrom(ctx)
+		canSeeDrafts := isAuthor && p.Can(auth.PermCourseWrite)
+
+		url, err := svc.ImageURL(ctx, tenant.ID(ctx), in.Slug, canSeeDrafts)
+		if err != nil {
+			return nil, catalogError(err)
+		}
+		return &ImageRedirect{Location: url, CacheControl: "private, no-store"}, nil
+	})
+}
+
+// ImageRedirect is a 302 to a signed thumbnail URL. The Location is the signed
+// object URL; no-store because it rotates and is private to this viewer.
+type ImageRedirect struct {
+	Location     string `header:"Location"`
+	CacheControl string `header:"Cache-Control"`
 }
 
 // CreateCourseOutput is a newly drafted course.
@@ -496,6 +532,70 @@ func registerCatalogWrites(api huma.API, svc *catalog.Service) {
 		out.Body.Course = courseSummary(course, enroll.CourseFacts{})
 		return out, nil
 	})
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "presign-course-image",
+		Method:        http.MethodPost,
+		Path:          "/v1/courses/{slug}/image/uploads",
+		Summary:       "Ask for a URL to upload a course thumbnail to",
+		DefaultStatus: http.StatusCreated,
+		Description: "Requires course:write. Returns a URL that accepts one image of the declared size for " +
+			"fifteen minutes; the bytes go straight to the object store. Confirm the upload to record it.",
+		Tags:     []string{"Catalog"},
+		Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, in *struct {
+		Slug string `path:"slug" maxLength:"200"`
+		Body struct {
+			ContentType string `json:"content_type" enum:"image/png,image/jpeg,image/webp"`
+			Bytes       int64  `json:"bytes" minimum:"1" maximum:"5242880"`
+		}
+	}) (*PresignOutput, error) {
+		p, err := requirePermission(ctx, auth.PermCourseWrite)
+		if err != nil {
+			return nil, err
+		}
+
+		upload, key, err := svc.PresignImage(ctx, p.TenantID, in.Slug, in.Body.ContentType, in.Body.Bytes)
+		if err != nil {
+			return nil, catalogError(err)
+		}
+
+		out := &PresignOutput{CacheControl: "private, no-store"}
+		out.Body.UploadURL = upload.URL
+		out.Body.Method = upload.Method
+		out.Body.Headers = upload.Headers
+		out.Body.Key = key
+		out.Body.ExpiresAt = upload.ExpiresAt
+		return out, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "confirm-course-image",
+		Method:        http.MethodPut,
+		Path:          "/v1/courses/{slug}/image",
+		Summary:       "Record a thumbnail you uploaded",
+		DefaultStatus: http.StatusNoContent,
+		Description: "Requires course:write. The object store is asked what is really at the key before it is " +
+			"recorded; a key that is not this course's, or that nothing was uploaded to, is refused. The " +
+			"image it replaces is deleted.",
+		Tags:     []string{"Catalog"},
+		Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, in *struct {
+		Slug string `path:"slug" maxLength:"200"`
+		Body struct {
+			Key string `json:"key" minLength:"1" maxLength:"1024"`
+		}
+	}) (*struct{}, error) {
+		p, err := requirePermission(ctx, auth.PermCourseWrite)
+		if err != nil {
+			return nil, err
+		}
+
+		if err := svc.ConfirmImage(ctx, p.TenantID, in.Slug, in.Body.Key); err != nil {
+			return nil, catalogError(err)
+		}
+		return &struct{}{}, nil
+	})
 }
 
 // courseDetail maps a course to its page view. The slices are never nil: `[]` and
@@ -562,7 +662,18 @@ func courseSummary(c catalog.Course, f enroll.CourseFacts) CourseSummary {
 		LearnerCount:  f.Learners,
 		RatingAverage: f.RatingAverage,
 		RatingCount:   f.RatingCount,
+		ImageURL:      courseImageURL(c),
 	}
+}
+
+// courseImageURL is the stable redirect path for a course's thumbnail, or empty
+// when it has none. The path carries the slug a card already holds; the endpoint it
+// points at signs the object URL on demand and applies the course's own visibility.
+func courseImageURL(c catalog.Course) string {
+	if c.ImageKey == "" {
+		return ""
+	}
+	return "/v1/courses/" + c.Slug + "/image"
 }
 
 // optionalUUID reads a query parameter that may simply not be there. An empty
@@ -635,6 +746,18 @@ func catalogError(err error) error {
 
 	case errors.Is(err, catalog.ErrAlreadyPublished):
 		return huma.Error409Conflict("That course is already published.")
+
+	case errors.Is(err, catalog.ErrInvalidImage):
+		return huma.Error422UnprocessableEntity(err.Error())
+
+	case errors.Is(err, catalog.ErrNoImage):
+		// 404: a course with no thumbnail has nothing at this path, same as a course
+		// that does not exist — the redirect endpoint reveals no more than the page.
+		return huma.Error404NotFound("That course has no image.")
+
+	case errors.Is(err, catalog.ErrNoStore):
+		return huma.Error503ServiceUnavailable("Image uploads are not available on this server.")
+
 	default:
 		// Anything unexpected: the wrapped cause is logged with a correlation ID by
 		// the recovery and access-log middleware; the client learns nothing more.
