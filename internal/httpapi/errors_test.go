@@ -25,6 +25,7 @@ import (
 	"github.com/ebnsina/muallim-api/internal/learn"
 	"github.com/ebnsina/muallim-api/internal/notify"
 	"github.com/ebnsina/muallim-api/internal/platform/blob"
+	"github.com/ebnsina/muallim-api/internal/staff"
 )
 
 // statusOf extracts the HTTP status a mapped error will render as, or 500 when
@@ -239,6 +240,27 @@ func TestExamsSentinelsMapToADeliberateStatus(t *testing.T) {
 		}
 		wrapped := fmt.Errorf("exams: doing a thing: %w", err)
 		if got := statusOf(examsError(wrapped)); got != want {
+			t.Errorf("wrapped %v mapped to %d, want %d", err, got, want)
+		}
+	}
+}
+
+func TestStaffSentinelsMapToADeliberateStatus(t *testing.T) {
+	t.Parallel()
+
+	tests := map[error]int{
+		staff.ErrNotFound:     http.StatusNotFound,
+		staff.ErrStaffNoTaken: http.StatusConflict,
+		staff.ErrInvalidPage:  http.StatusUnprocessableEntity,
+		staff.ErrInvalidStaff: http.StatusUnprocessableEntity,
+	}
+
+	for err, want := range tests {
+		if got := statusOf(staffError(err)); got != want {
+			t.Errorf("%v mapped to %d, want %d", err, got, want)
+		}
+		wrapped := fmt.Errorf("staff: doing a thing: %w", err)
+		if got := statusOf(staffError(wrapped)); got != want {
 			t.Errorf("wrapped %v mapped to %d, want %d", err, got, want)
 		}
 	}

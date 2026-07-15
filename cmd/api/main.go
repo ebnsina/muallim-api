@@ -45,6 +45,7 @@ import (
 	"github.com/ebnsina/muallim-api/internal/platform/ratelimit"
 	vault "github.com/ebnsina/muallim-api/internal/platform/secret"
 	"github.com/ebnsina/muallim-api/internal/platform/server"
+	"github.com/ebnsina/muallim-api/internal/staff"
 	"github.com/ebnsina/muallim-api/internal/tenant"
 )
 
@@ -224,6 +225,9 @@ func run() error {
 	// Institutional billing: fee structures, invoices, payments, student ledgers.
 	billing := fees.NewService(db, fees.NewPostgresRepository(), feesAuditor{recorder})
 
+	// The people who run the institution: teachers and the office.
+	people := staff.NewService(db, staff.NewPostgresRepository(), staffAuditor{recorder})
+
 	// `learning` satisfies assess.Completions: passing a quiz completes its lesson,
 	// in the transaction that recorded the grade. The interface is declared by
 	// assess and satisfied by enroll, which have never heard of each other. The
@@ -326,6 +330,7 @@ func run() error {
 		Academics:   schooling,
 		Exams:       examining,
 		Fees:        billing,
+		Staff:       people,
 		Auth:        identities,
 		Enrol:       learning,
 		Assess:      quizzes,

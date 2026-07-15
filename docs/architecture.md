@@ -16,6 +16,7 @@ internal/enroll         enrolments, access rules, progress
 internal/academics      institution spine: years, terms, classes, sections, subjects, students, guardians, attendance, timetable
 internal/exams          grading scales, exams, marks, computed report cards
 internal/fees           fee structures, invoices, payments, student ledgers
+internal/staff          the people who run the institution: teachers and the office
 internal/httpapi        transport: routes, middleware, RFC 9457 problem documents
 migrations/             embedded goose SQL
 ```

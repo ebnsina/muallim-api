@@ -29,6 +29,7 @@ import (
 	"github.com/ebnsina/muallim-api/internal/learn"
 	"github.com/ebnsina/muallim-api/internal/notify"
 	"github.com/ebnsina/muallim-api/internal/platform/ratelimit"
+	"github.com/ebnsina/muallim-api/internal/staff"
 	"github.com/ebnsina/muallim-api/internal/tenant"
 )
 
@@ -78,6 +79,10 @@ type Options struct {
 	// Fees is the institutional billing layer — fee structures, invoices, payments.
 	// Nil alongside Academics in an LMS-only deployment.
 	Fees *fees.Service
+
+	// Staff is the people layer — teachers and the office. Nil alongside Academics in
+	// an LMS-only deployment.
+	Staff *staff.Service
 
 	// Commerce may be nil: a deployment with no gateway configured sells nothing,
 	// and every course in it is free — which is exactly what this product was
@@ -163,6 +168,7 @@ func New(opts Options) (http.Handler, huma.API) {
 	registerTimetable(api, opts.Academics)
 	registerExams(api, opts.Exams)
 	registerFees(api, opts.Fees)
+	registerStaff(api, opts.Staff)
 	registerGamification(api, opts.Gamify)
 
 	// Order matters, outermost first.
