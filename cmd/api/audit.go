@@ -102,18 +102,22 @@ func (a noticesAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUI
 }
 
 // noticeBroadcaster satisfies notices.Broadcaster by enqueuing each guardian's
-// copy through the email outbox, in the posting transaction. A Bangladesh SMS
-// driver will slot in here behind the same seam.
+// copy through the outbox, in the posting transaction — email as a rendered
+// message, sms as a text. Both are the same enqueuer the rest of the system uses.
 type noticeBroadcaster struct{ outbox *comms.Enqueuer }
 
 var _ notices.Broadcaster = noticeBroadcaster{}
 
-func (b noticeBroadcaster) SendNotice(ctx context.Context, tx pgx.Tx, to, name, subject, body string) error {
+func (b noticeBroadcaster) SendEmail(ctx context.Context, tx pgx.Tx, to, name, subject, body string) error {
 	text := body
 	if name != "" {
 		text = "Dear " + name + ",\n\n" + body
 	}
 	return b.outbox.SendRendered(ctx, tx, to, subject, text)
+}
+
+func (b noticeBroadcaster) SendSMS(ctx context.Context, tx pgx.Tx, to, text string) error {
+	return b.outbox.SendSMS(ctx, tx, to, text)
 }
 
 type staffAuditor struct{ recorder *audit.Recorder }

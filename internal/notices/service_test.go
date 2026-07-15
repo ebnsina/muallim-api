@@ -51,8 +51,9 @@ func seedTenant(t *testing.T, db *database.DB) uuid.UUID {
 	return id
 }
 
-// seedGuardianOf admits a student in a class and links a guardian with an email.
-func seedGuardianOf(t *testing.T, db *database.DB, tenant, class uuid.UUID, admissionNo, guardianEmail string) {
+// seedGuardianOf admits a student in a class and links a guardian with the given
+// email and phone (either may be blank).
+func seedGuardianOf(t *testing.T, db *database.DB, tenant, class uuid.UUID, admissionNo, guardianEmail, guardianPhone string) {
 	t.Helper()
 	err := db.WithTenant(t.Context(), tenant, func(ctx context.Context, tx pgx.Tx) error {
 		var studentID, guardianID uuid.UUID
@@ -62,8 +63,8 @@ func seedGuardianOf(t *testing.T, db *database.DB, tenant, class uuid.UUID, admi
 			return err
 		}
 		if err := tx.QueryRow(ctx,
-			`INSERT INTO guardians (tenant_id, full_name, email) VALUES ($1, $2, $3) RETURNING id`,
-			tenant, "Guardian of "+admissionNo, guardianEmail).Scan(&guardianID); err != nil {
+			`INSERT INTO guardians (tenant_id, full_name, email, phone) VALUES ($1, $2, $3, $4) RETURNING id`,
+			tenant, "Guardian of "+admissionNo, guardianEmail, guardianPhone).Scan(&guardianID); err != nil {
 			return err
 		}
 		_, err := tx.Exec(ctx,
@@ -109,16 +110,24 @@ func seedClass(t *testing.T, db *database.DB, tenant uuid.UUID) uuid.UUID {
 	return id
 }
 
-// countingBroadcaster records every recipient it was asked to send to.
+// countingBroadcaster records every recipient it was asked to send to, per channel.
 type countingBroadcaster struct {
-	mu   sync.Mutex
-	sent []string
+	mu    sync.Mutex
+	sent  []string
+	texts []string
 }
 
-func (b *countingBroadcaster) SendNotice(ctx context.Context, tx pgx.Tx, to, name, subject, body string) error {
+func (b *countingBroadcaster) SendEmail(ctx context.Context, tx pgx.Tx, to, name, subject, body string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.sent = append(b.sent, to)
+	return nil
+}
+
+func (b *countingBroadcaster) SendSMS(ctx context.Context, tx pgx.Tx, to, text string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.texts = append(b.texts, to)
 	return nil
 }
 
@@ -132,8 +141,8 @@ func TestPostNoticeFansOut(t *testing.T) {
 	db := testDB(t)
 	tenant := seedTenant(t, db)
 	class := seedClass(t, db, tenant)
-	seedGuardianOf(t, db, tenant, class, "2025-001", "parent1@example.test")
-	seedGuardianOf(t, db, tenant, class, "2025-002", "parent2@example.test")
+	seedGuardianOf(t, db, tenant, class, "2025-001", "parent1@example.test", "01700000001")
+	seedGuardianOf(t, db, tenant, class, "2025-002", "parent2@example.test", "")
 
 	bc := &countingBroadcaster{}
 	svc := notices.NewService(db, notices.NewPostgresRepository(), bc, stubAuditor{})
@@ -150,16 +159,34 @@ func TestPostNoticeFansOut(t *testing.T) {
 		t.Fatalf("recipient count %d, want 2", notice.RecipientCount)
 	}
 	if len(bc.sent) != 2 {
-		t.Fatalf("broadcast to %d, want 2", len(bc.sent))
+		t.Fatalf("email broadcast to %d, want 2", len(bc.sent))
+	}
+	if notice.Channel != notices.ChannelEmail {
+		t.Fatalf("channel %q, want the email default", notice.Channel)
 	}
 
-	// The notice is on the board.
+	// An SMS notice reaches only the guardian with a phone.
+	bc2 := &countingBroadcaster{}
+	svc2 := notices.NewService(db, notices.NewPostgresRepository(), bc2, stubAuditor{})
+	smsNotice, err := svc2.Post(t.Context(), tenant, notices.NewNotice{
+		Title: "Reminder", Body: "Fees due Friday.", Audience: notices.AudienceClass,
+		TargetID: &class, Channel: notices.ChannelSMS,
+	}, author)
+	if err != nil {
+		t.Fatalf("post sms: %v", err)
+	}
+	if smsNotice.RecipientCount != 1 || len(bc2.texts) != 1 || len(bc2.sent) != 0 {
+		t.Fatalf("sms notice reached email=%d sms=%d count=%d, want only the one phone",
+			len(bc2.sent), len(bc2.texts), smsNotice.RecipientCount)
+	}
+
+	// Both notices are on the board, newest first.
 	page, err := svc.Board(t.Context(), tenant, notices.PageParams{Limit: 50})
 	if err != nil {
 		t.Fatalf("board: %v", err)
 	}
-	if len(page.Notices) != 1 || page.Notices[0].RecipientCount != 2 {
-		t.Fatalf("board is %+v, want one notice to 2", page.Notices)
+	if len(page.Notices) != 2 || page.Notices[0].Title != "Reminder" {
+		t.Fatalf("board is %+v, want the two notices newest first", page.Notices)
 	}
 }
 

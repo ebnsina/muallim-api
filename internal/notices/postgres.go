@@ -42,22 +42,22 @@ func (r *PostgresRepository) RecipientsFor(ctx context.Context, tx pgx.Tx, tenan
 	switch audience {
 	case AudienceAll:
 		rows, err = tx.Query(ctx,
-			`SELECT DISTINCT g.full_name, g.email FROM guardians g
-			 WHERE g.tenant_id = $1 AND g.email <> ''`, tenantID)
+			`SELECT DISTINCT g.full_name, g.email, g.phone FROM guardians g
+			 WHERE g.tenant_id = $1 AND (g.email <> '' OR g.phone <> '')`, tenantID)
 	case AudienceClass:
 		rows, err = tx.Query(ctx,
-			`SELECT DISTINCT g.full_name, g.email
+			`SELECT DISTINCT g.full_name, g.email, g.phone
 			 FROM guardians g
 			 JOIN student_guardians sg ON sg.guardian_id = g.id AND sg.tenant_id = g.tenant_id
 			 JOIN students st ON st.id = sg.student_id AND st.tenant_id = sg.tenant_id
-			 WHERE g.tenant_id = $1 AND st.grade_level_id = $2 AND g.email <> ''`, tenantID, target)
+			 WHERE g.tenant_id = $1 AND st.grade_level_id = $2 AND (g.email <> '' OR g.phone <> '')`, tenantID, target)
 	case AudienceSection:
 		rows, err = tx.Query(ctx,
-			`SELECT DISTINCT g.full_name, g.email
+			`SELECT DISTINCT g.full_name, g.email, g.phone
 			 FROM guardians g
 			 JOIN student_guardians sg ON sg.guardian_id = g.id AND sg.tenant_id = g.tenant_id
 			 JOIN students st ON st.id = sg.student_id AND st.tenant_id = sg.tenant_id
-			 WHERE g.tenant_id = $1 AND st.section_id = $2 AND g.email <> ''`, tenantID, target)
+			 WHERE g.tenant_id = $1 AND st.section_id = $2 AND (g.email <> '' OR g.phone <> '')`, tenantID, target)
 	default:
 		return nil, fmt.Errorf("%w: %q", ErrInvalidNotice, audience)
 	}
@@ -68,7 +68,7 @@ func (r *PostgresRepository) RecipientsFor(ctx context.Context, tx pgx.Tx, tenan
 
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Recipient, error) {
 		var rec Recipient
-		err := row.Scan(&rec.Name, &rec.Email)
+		err := row.Scan(&rec.Name, &rec.Email, &rec.Phone)
 		return rec, err
 	})
 }

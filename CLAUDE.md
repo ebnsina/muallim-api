@@ -16,7 +16,7 @@ The primary market is **Bangladesh**; international is the second. This sets *de
 - **Gateways: bKash and SSLCommerz are primary, Stripe is for international.** This is already why `commerce` makes each school its own merchant. Keep that ordering in UI, docs, and defaults.
 - **Localisation: Bengali (bn) + English**, plus **Arabic (RTL)** wherever Quranic/madrasa content appears. Bengali is LTR; reach for RTL only for Arabic.
 - **Institution types are BD-weighted.** Madrasa and coaching are first-class alongside school/college. Report-card grading offers the **GPA 5.0 scale** and the **madrasa ladder** (Ebtedayee → Dakhil → Alim → Fazil → Kamil), plus percentage and generic K-12/higher-ed scales.
-- **Guardian comms include SMS**, not just email — a BD SMS driver sits behind the same mailer-style driver interface. (Phase B.)
+- **Guardian comms include SMS**, not just email — a BD SMS driver (`platform/sms`) sits behind the same mailer-style driver interface, enqueued as a River job like email. Guardian notices (`internal/notices`) fan out on `email`, `sms`, or `both`; the gateway is configured with `MUALLIM_SMS_GATEWAY_URL` / `MUALLIM_SMS_API_KEY` / `MUALLIM_SMS_SENDER_ID`, and logs texts when unset.
 
 The product is growing from an LMS into an institution super-app (school/college/madrasa/coaching + attendance, exams/report cards, fees, timetable, staff, guardian notices). The academic layer is new domains under the existing contract; see `docs/plan.md`.
 

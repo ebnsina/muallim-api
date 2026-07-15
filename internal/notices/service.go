@@ -18,11 +18,13 @@ type Repository interface {
 	Notices(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, after *cursor, limit int) ([]Notice, error)
 }
 
-// Broadcaster delivers one notice to one recipient, in the posting transaction.
-// Declared here; cmd/ wires the email enqueuer behind it. A message and its
-// delivery job commit together — the reason the queue is in Postgres.
+// Broadcaster enqueues one notice to one recipient's channel, in the posting
+// transaction. Declared here; cmd/ wires the email and sms enqueuers behind it. A
+// message and its delivery job commit together — the reason the queue is in
+// Postgres.
 type Broadcaster interface {
-	SendNotice(ctx context.Context, tx pgx.Tx, to, name, subject, body string) error
+	SendEmail(ctx context.Context, tx pgx.Tx, to, name, subject, body string) error
+	SendSMS(ctx context.Context, tx pgx.Tx, to, text string) error
 }
 
 // AuditRecorder writes an audit line in the transaction of the thing it describes.
@@ -67,22 +69,40 @@ func (s *Service) Post(ctx context.Context, tenantID uuid.UUID, n NewNotice, aut
 	}
 	var notice Notice
 	err := s.db.WithTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
-		recipients, err := s.repo.RecipientsFor(ctx, tx, tenantID, n.Audience, n.TargetID)
+		all, err := s.repo.RecipientsFor(ctx, tx, tenantID, n.Audience, n.TargetID)
 		if err != nil {
 			return err
+		}
+
+		// Only those we can actually reach on the chosen channel count, and only they
+		// are billed a delivery: an audience nobody in it can be reached on is refused
+		// before the notice is written.
+		var recipients []Recipient
+		for _, r := range all {
+			if r.reachable(n.Channel) {
+				recipients = append(recipients, r)
+			}
 		}
 		if len(recipients) == 0 {
 			return ErrNoRecipients
 		}
 
-		notice, err = s.repo.Create(ctx, tx, tenantID, n, ChannelEmail, author.UserID)
+		notice, err = s.repo.Create(ctx, tx, tenantID, n, n.Channel, author.UserID)
 		if err != nil {
 			return err
 		}
 
+		smsText := n.Title + "\n" + n.Body
 		for _, r := range recipients {
-			if err := s.broadcaster.SendNotice(ctx, tx, r.Email, r.Name, n.Title, n.Body); err != nil {
-				return fmt.Errorf("notices: enqueue to %s: %w", r.Email, err)
+			if (n.Channel == ChannelEmail || n.Channel == ChannelBoth) && r.Email != "" {
+				if err := s.broadcaster.SendEmail(ctx, tx, r.Email, r.Name, n.Title, n.Body); err != nil {
+					return fmt.Errorf("notices: enqueue email to %s: %w", r.Email, err)
+				}
+			}
+			if (n.Channel == ChannelSMS || n.Channel == ChannelBoth) && r.Phone != "" {
+				if err := s.broadcaster.SendSMS(ctx, tx, r.Phone, smsText); err != nil {
+					return fmt.Errorf("notices: enqueue sms to %s: %w", r.Phone, err)
+				}
 			}
 		}
 		notice.RecipientCount = len(recipients)

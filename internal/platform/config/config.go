@@ -103,6 +103,14 @@ type Config struct {
 	// development.
 	MailFile string
 
+	// SMSGatewayURL is the HTTP SMS gateway a guardian notice's texts are posted to.
+	// Empty means the process logs texts instead of sending them — a development
+	// convenience, and free, since a laptop has no gateway. SMSAPIKey and
+	// SMSSenderID identify the account and the registered sender to it.
+	SMSGatewayURL string
+	SMSAPIKey     string
+	SMSSenderID   string
+
 	// StreamCustomer is the Cloudflare Stream customer code — the label in
 	// `customer-<code>.cloudflarestream.com`. Empty means this deployment hosts no
 	// video of its own, and the `hosted` source is refused rather than stored.
@@ -224,6 +232,9 @@ func Load() (Config, error) {
 		SMTPPort:               number("MUALLIM_SMTP_PORT", 587),
 		SMTPUsername:           env("MUALLIM_SMTP_USERNAME", ""),
 		SMTPPassword:           env("MUALLIM_SMTP_PASSWORD", ""),
+		SMSGatewayURL:          env("MUALLIM_SMS_GATEWAY_URL", ""),
+		SMSAPIKey:              env("MUALLIM_SMS_API_KEY", ""),
+		SMSSenderID:            env("MUALLIM_SMS_SENDER_ID", ""),
 		MailFrom:               env("MUALLIM_MAIL_FROM", "Muallim <no-reply@localhost>"),
 		MailFile:               env("MUALLIM_MAIL_FILE", ""),
 
@@ -365,6 +376,9 @@ func (c Config) StorageConfigured() bool {
 
 // MailerConfigured reports whether mail can actually be delivered.
 func (c Config) MailerConfigured() bool { return c.SMTPHost != "" }
+
+// SMSConfigured reports whether texts can actually be delivered.
+func (c Config) SMSConfigured() bool { return c.SMSGatewayURL != "" && c.SMSAPIKey != "" }
 
 // list splits a comma-separated environment value, trimming blanks. An empty
 // value yields no entries rather than one empty string, so an unset variable

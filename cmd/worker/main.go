@@ -35,6 +35,7 @@ import (
 	"github.com/ebnsina/muallim-api/internal/platform/logging"
 	"github.com/ebnsina/muallim-api/internal/platform/mailer"
 	vault "github.com/ebnsina/muallim-api/internal/platform/secret"
+	"github.com/ebnsina/muallim-api/internal/platform/sms"
 )
 
 // erasureInterval is how often orphaned users are swept. Daily: often enough
@@ -83,7 +84,17 @@ func run() error {
 		return err
 	}
 
+	smsSender, err := newSMSSender(cfg, log)
+	if err != nil {
+		return err
+	}
+
 	emails, err := comms.NewEmailWorker(sender, log)
+	if err != nil {
+		return err
+	}
+
+	texts, err := comms.NewSMSWorker(smsSender, log)
 	if err != nil {
 		return err
 	}
@@ -220,6 +231,7 @@ func run() error {
 
 	workers := river.NewWorkers()
 	river.AddWorker(workers, emails)
+	river.AddWorker(workers, texts)
 	river.AddWorker(workers, orphans)
 	river.AddWorker(workers, revocations)
 	river.AddWorker(workers, grading)
@@ -304,5 +316,19 @@ func newSender(cfg config.Config, log *slog.Logger) (comms.Sender, error) {
 		Username: cfg.SMTPUsername,
 		Password: cfg.SMTPPassword,
 		From:     cfg.MailFrom,
+	})
+}
+
+// newSMSSender picks an SMS driver. With no gateway configured it logs texts
+// rather than sending them, which is free and is what a laptop wants.
+func newSMSSender(cfg config.Config, log *slog.Logger) (comms.SMSSender, error) {
+	if !cfg.SMSConfigured() {
+		log.Warn("no SMS gateway configured; guardian notice texts will be logged, not sent")
+		return sms.NewLog(log), nil
+	}
+	return sms.NewHTTP(sms.HTTPOptions{
+		URL:      cfg.SMSGatewayURL,
+		APIKey:   cfg.SMSAPIKey,
+		SenderID: cfg.SMSSenderID,
 	})
 }

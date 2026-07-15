@@ -93,6 +93,7 @@ func registerNotices(api huma.API, svc *notices.Service) {
 			Body     string `json:"body" minLength:"1" maxLength:"5000"`
 			Audience string `json:"audience" enum:"all_guardians,class_guardians,section_guardians"`
 			TargetID string `json:"target_id,omitempty" format:"uuid"`
+			Channel  string `json:"channel,omitempty" enum:"email,sms,both" default:"email"`
 		}
 	}) (*struct {
 		Body struct {
@@ -108,7 +109,8 @@ func registerNotices(api huma.API, svc *notices.Service) {
 			return nil, err
 		}
 		notice, err := svc.Post(ctx, p.TenantID, notices.NewNotice{
-			Title: in.Body.Title, Body: in.Body.Body, Audience: in.Body.Audience, TargetID: target,
+			Title: in.Body.Title, Body: in.Body.Body, Audience: in.Body.Audience,
+			TargetID: target, Channel: in.Body.Channel,
 		}, notices.Author{UserID: p.UserID})
 		if err != nil {
 			return nil, noticesError(err)

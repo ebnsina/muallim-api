@@ -30,10 +30,21 @@ const (
 	AudienceSection = "section_guardians"
 )
 
-// Channels a notice can go out on. Only email is wired today; sms follows.
+// Channels a notice can go out on.
 const (
 	ChannelEmail = "email"
+	ChannelSMS   = "sms"
+	ChannelBoth  = "both"
 )
+
+func validChannel(c string) bool {
+	switch c {
+	case ChannelEmail, ChannelSMS, ChannelBoth:
+		return true
+	default:
+		return false
+	}
+}
 
 // MaxPage bounds a page of the notice board.
 const MaxPage = 100
@@ -59,20 +70,42 @@ type NewNotice struct {
 	Body     string
 	Audience string
 	TargetID *uuid.UUID
+	Channel  string
 }
 
-// Recipient is one person a notice reaches.
+// Recipient is one person a notice reaches, with the contacts it can reach them on.
 type Recipient struct {
 	Name  string
 	Email string
+	Phone string
 }
 
-func (n NewNotice) validate() error {
+// reachable reports whether this recipient can be reached on the notice's channel.
+func (r Recipient) reachable(channel string) bool {
+	switch channel {
+	case ChannelEmail:
+		return r.Email != ""
+	case ChannelSMS:
+		return r.Phone != ""
+	case ChannelBoth:
+		return r.Email != "" || r.Phone != ""
+	default:
+		return false
+	}
+}
+
+func (n *NewNotice) validate() error {
 	if n.Title == "" {
 		return fmt.Errorf("%w: give it a title", ErrInvalidNotice)
 	}
 	if n.Body == "" {
 		return fmt.Errorf("%w: give it a body", ErrInvalidNotice)
+	}
+	if n.Channel == "" {
+		n.Channel = ChannelEmail
+	}
+	if !validChannel(n.Channel) {
+		return fmt.Errorf("%w: %q is not a channel", ErrInvalidNotice, n.Channel)
 	}
 	switch n.Audience {
 	case AudienceAll:
