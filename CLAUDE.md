@@ -8,6 +8,18 @@ An API-first, multi-tenant LMS backend. A **modular monolith** in Go, backed by 
 
 Because those clients are separate, **the OpenAPI spec is a public interface.** Renaming an `OperationID` or narrowing a field breaks consumers you cannot see.
 
+## Market — Bangladesh first, international second
+
+The primary market is **Bangladesh**; international is the second. This sets *defaults*, never architecture — the multi-tenant model already lets a workspace choose otherwise.
+
+- **Money defaults to BDT** (poisha minor units). Still `bigint + currency char(3)`; an international workspace picks its own currency. Pricing examples, seeds, and marketing copy default to BDT (`৳`).
+- **Gateways: bKash and SSLCommerz are primary, Stripe is for international.** This is already why `commerce` makes each school its own merchant. Keep that ordering in UI, docs, and defaults.
+- **Localisation: Bengali (bn) + English**, plus **Arabic (RTL)** wherever Quranic/madrasa content appears. Bengali is LTR; reach for RTL only for Arabic.
+- **Institution types are BD-weighted.** Madrasa and coaching are first-class alongside school/college. Report-card grading offers the **GPA 5.0 scale** and the **madrasa ladder** (Ebtedayee → Dakhil → Alim → Fazil → Kamil), plus percentage and generic K-12/higher-ed scales.
+- **Guardian comms include SMS**, not just email — a BD SMS driver sits behind the same mailer-style driver interface. (Phase B.)
+
+The product is growing from an LMS into an institution super-app (school/college/madrasa/coaching + attendance, exams/report cards, fees, timetable, staff, guardian notices). The academic layer is new domains under the existing contract; see `docs/plan.md`.
+
 ## Stack
 
 Go 1.26 · Postgres 17 · Huma v2 (`humago` stdlib adapter, OpenAPI 3.1, RFC 9457 errors) · pgx v5 · goose (migrations) · River (Postgres-backed jobs — **no Redis**) · `log/slog` · argon2id + JWT.
