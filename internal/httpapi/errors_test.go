@@ -18,6 +18,7 @@ import (
 	"github.com/ebnsina/muallim-api/internal/certify"
 	"github.com/ebnsina/muallim-api/internal/commerce"
 	"github.com/ebnsina/muallim-api/internal/enroll"
+	"github.com/ebnsina/muallim-api/internal/exams"
 	"github.com/ebnsina/muallim-api/internal/forum"
 	"github.com/ebnsina/muallim-api/internal/grade"
 	"github.com/ebnsina/muallim-api/internal/learn"
@@ -211,6 +212,31 @@ func TestAcademicsSentinelsMapToADeliberateStatus(t *testing.T) {
 		}
 		wrapped := fmt.Errorf("academics: doing a thing: %w", err)
 		if got := statusOf(academicsError(wrapped)); got != want {
+			t.Errorf("wrapped %v mapped to %d, want %d", err, got, want)
+		}
+	}
+}
+
+func TestExamsSentinelsMapToADeliberateStatus(t *testing.T) {
+	t.Parallel()
+
+	tests := map[error]int{
+		exams.ErrNotFound:      http.StatusNotFound,
+		exams.ErrExamPublished: http.StatusConflict,
+		exams.ErrNoScale:       http.StatusUnprocessableEntity,
+		exams.ErrUngraded:      http.StatusUnprocessableEntity,
+		exams.ErrInvalidPage:   http.StatusUnprocessableEntity,
+		exams.ErrInvalidScale:  http.StatusUnprocessableEntity,
+		exams.ErrInvalidExam:   http.StatusUnprocessableEntity,
+		exams.ErrInvalidMark:   http.StatusUnprocessableEntity,
+	}
+
+	for err, want := range tests {
+		if got := statusOf(examsError(err)); got != want {
+			t.Errorf("%v mapped to %d, want %d", err, got, want)
+		}
+		wrapped := fmt.Errorf("exams: doing a thing: %w", err)
+		if got := statusOf(examsError(wrapped)); got != want {
 			t.Errorf("wrapped %v mapped to %d, want %d", err, got, want)
 		}
 	}

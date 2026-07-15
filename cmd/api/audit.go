@@ -14,6 +14,7 @@ import (
 	"github.com/ebnsina/muallim-api/internal/catalog"
 	"github.com/ebnsina/muallim-api/internal/certify"
 	"github.com/ebnsina/muallim-api/internal/enroll"
+	"github.com/ebnsina/muallim-api/internal/exams"
 )
 
 // The dependency rule forbids a domain package from importing a sibling, so auth
@@ -45,6 +46,20 @@ type academicsAuditor struct{ recorder *audit.Recorder }
 var _ academics.AuditRecorder = academicsAuditor{}
 
 func (a academicsAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, e academics.AuditEntry) error {
+	return a.recorder.Record(ctx, tx, tenantID, audit.Entry{
+		ActorID:    e.ActorID,
+		Action:     e.Action,
+		TargetType: e.TargetType,
+		TargetID:   e.TargetID,
+		Metadata:   e.Metadata,
+	})
+}
+
+type examsAuditor struct{ recorder *audit.Recorder }
+
+var _ exams.AuditRecorder = examsAuditor{}
+
+func (a examsAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, e exams.AuditEntry) error {
 	return a.recorder.Record(ctx, tx, tenantID, audit.Entry{
 		ActorID:    e.ActorID,
 		Action:     e.Action,
