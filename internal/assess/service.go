@@ -3,12 +3,15 @@ package assess
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/netip"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/ebnsina/muallim-api/internal/platform/blob"
 	"github.com/ebnsina/muallim-api/internal/platform/database"
 )
 
@@ -98,6 +101,7 @@ type Service struct {
 	completions Completions
 	grades      Grades
 	notifier    Notifier
+	store       blob.Store
 
 	now func() time.Time
 }
@@ -105,12 +109,13 @@ type Service struct {
 // NewService returns a Service.
 // NewService returns a Service. A nil notifier sends nothing, which is what the
 // worker — where an auto-graded quiz notifies no one, because the learner who
-// just submitted it is watching the result — passes.
+// just submitted it is watching the result — passes. The store is where a
+// draw_image answer's bytes live; a nil store refuses those uploads.
 func NewService(db *database.DB, repo Repository, recorder AuditRecorder, jobs Enqueuer,
-	completions Completions, grades Grades, notifier Notifier) *Service {
+	completions Completions, grades Grades, notifier Notifier, store blob.Store) *Service {
 	return &Service{
 		db: db, repo: repo, audit: recorder, jobs: jobs,
-		completions: completions, grades: grades, notifier: notifier,
+		completions: completions, grades: grades, notifier: notifier, store: store,
 		now: time.Now,
 	}
 }
@@ -416,8 +421,114 @@ func (s *Service) SaveAnswer(ctx context.Context, tenantID, lessonID, userID, qu
 			return ErrAttemptExpired
 		}
 
+		// A drawing's key must sit under this learner's own prefix for this attempt
+		// and question. The prefix is recomputed from the caller, so a key naming
+		// somebody else's object — or another workspace's — is refused rather than
+		// stored as this learner's answer.
+		if response.Upload != "" {
+			want := drawPrefix(tenantID, attempt.ID, questionID, userID)
+			if !strings.HasPrefix(response.Upload, want+"/") {
+				return fmt.Errorf("%w: the upload key is not yours", ErrInvalidUpload)
+			}
+		}
+
 		return s.repo.SaveAnswer(ctx, tx, tenantID, attempt.ID, questionID, response)
 	})
+}
+
+// PresignDrawUpload signs a one-object URL for a draw_image answer's PNG.
+//
+// The learner uploads straight to the store and then sends back the key with their
+// answer. The key is a uuid under a prefix built from tenant, attempt, question and
+// learner, so nothing they typed reaches the store and a key from another
+// submission is refused at save time.
+func (s *Service) PresignDrawUpload(ctx context.Context, tenantID, lessonID, userID, questionID uuid.UUID, size int64) (blob.Upload, string, error) {
+	if size < 1 || size > MaxDrawingBytes {
+		return blob.Upload{}, "", fmt.Errorf("%w: a drawing must be between 1 and %d bytes", ErrInvalidUpload, MaxDrawingBytes)
+	}
+
+	var (
+		upload blob.Upload
+		key    string
+	)
+	err := s.db.WithTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		quiz, err := s.repo.QuizByLesson(ctx, tx, tenantID, lessonID)
+		if err != nil {
+			return err
+		}
+		attempt, err := s.repo.LiveAttempt(ctx, tx, tenantID, quiz.ID, userID)
+		if err != nil {
+			return err
+		}
+		if expired(attempt, s.now()) {
+			return ErrAttemptExpired
+		}
+
+		questions, err := s.repo.Questions(ctx, tx, tenantID, quiz.ID)
+		if err != nil {
+			return err
+		}
+		question, ok := find(questions, questionID)
+		if !ok {
+			return ErrNotFound
+		}
+		if question.Type != TypeDrawImage {
+			return fmt.Errorf("%w: %s", ErrNotDrawQuestion, question.Type)
+		}
+
+		key = drawKey(tenantID, attempt.ID, questionID, userID)
+		upload, err = s.store.PresignPut(ctx, key, size, drawUploadTTL)
+		return err
+	})
+	if err != nil {
+		return blob.Upload{}, "", err
+	}
+	return upload, key, nil
+}
+
+// DrawDownloadURL signs a short-lived URL to view a learner's uploaded drawing.
+//
+// The viewer must own the attempt or be allowed to mark it; anyone else is refused
+// before the store is asked anything. The key comes from the stored answer, never
+// from the caller.
+func (s *Service) DrawDownloadURL(ctx context.Context, tenantID, attemptID, questionID, viewerID uuid.UUID, canMark bool) (string, error) {
+	var url string
+	err := s.db.WithTenantReadOnly(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		attempt, err := s.repo.AttemptByID(ctx, tx, tenantID, attemptID)
+		if err != nil {
+			return err
+		}
+		if attempt.UserID != viewerID && !canMark {
+			return ErrNotYourAttempt
+		}
+
+		responses, err := s.repo.Responses(ctx, tx, tenantID, attemptID)
+		if err != nil {
+			return err
+		}
+		response, ok := responses[questionID]
+		if !ok || response.Upload == "" {
+			return ErrNotFound
+		}
+
+		url, err = s.store.PresignGet(ctx, response.Upload, "drawing.png", drawDownloadTTL)
+		return err
+	})
+	if err != nil {
+		return "", err
+	}
+	return url, nil
+}
+
+// drawPrefix is where one learner's drawings for one question of one attempt live.
+// Recomputed from the authenticated caller, so a key outside it belongs to somebody
+// else and is refused before the store is asked anything.
+func drawPrefix(tenantID, attemptID, questionID, userID uuid.UUID) string {
+	return fmt.Sprintf("t/%s/attempts/%s/q/%s/u/%s", tenantID, attemptID, questionID, userID)
+}
+
+func drawKey(tenantID, attemptID, questionID, userID uuid.UUID) string {
+	return fmt.Sprintf("%s/%s", drawPrefix(tenantID, attemptID, questionID, userID), uuid.New())
 }
 
 // SubmitAttempt closes the learner's live attempt and queues its grading.

@@ -43,7 +43,7 @@ type QuizView struct {
 // this layer a type that has nowhere to put them.
 type QuestionView struct {
 	ID       string `json:"id" format:"uuid"`
-	Type     string `json:"type" enum:"true_false,single_choice,multiple_choice,fill_blanks,short_answer,ordering,matching,open_ended,range,image_answering,image_matching"`
+	Type     string `json:"type" enum:"true_false,single_choice,multiple_choice,fill_blanks,short_answer,ordering,matching,open_ended,range,image_answering,image_matching,puzzle,pin,graph,draw_image"`
 	Prompt   string `json:"prompt"`
 	Points   int    `json:"points"`
 	Position int    `json:"position"`
@@ -56,12 +56,70 @@ type QuestionView struct {
 
 	// Blanks is how many holes a fill-in-the-blanks prompt has.
 	Blanks int `json:"blanks,omitempty"`
+
+	// Image is the base picture for a pin, graph, or drawing. The hotspot regions
+	// and expected points that go with it are the answer and are never here.
+	Image string `json:"image,omitempty"`
 }
 
 // OptionView is a choice, an item to order, or a match. No verdict attached.
 type OptionView struct {
 	ID      string `json:"id" format:"uuid"`
 	Content string `json:"content"`
+}
+
+// QuestionSpec is the pin/graph/draw configuration. Its regions and points are the
+// answer, so it appears in an author's request and an author's view — never in the
+// learner QuestionView, which carries only the base Image.
+type QuestionSpec struct {
+	Image     string       `json:"image,omitempty" maxLength:"2000" doc:"Base image a pin is placed on or a drawing made over."`
+	Regions   []SpecRegion `json:"regions,omitempty" doc:"Correct hotspot rectangles for a pin; a click inside any counts."`
+	Points    []SpecPoint  `json:"points,omitempty" doc:"Coordinates a graph answer must hit, each within tolerance."`
+	Tolerance float64      `json:"tolerance,omitempty" minimum:"0" doc:"How far a graph point may fall from an expected one and still count."`
+}
+
+// SpecRegion is a rectangle on the base image, in the image's own coordinate space.
+type SpecRegion struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+	W float64 `json:"w" minimum:"0"`
+	H float64 `json:"h" minimum:"0"`
+}
+
+// SpecPoint is a coordinate an author expects or a learner plotted.
+type SpecPoint struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+}
+
+// toAssessSpec converts a wire spec to the domain's, nil staying nil.
+func toAssessSpec(s *QuestionSpec) *assess.Spec {
+	if s == nil {
+		return nil
+	}
+	out := &assess.Spec{Image: s.Image, Tolerance: s.Tolerance}
+	for _, r := range s.Regions {
+		out.Regions = append(out.Regions, assess.Region{X: r.X, Y: r.Y, W: r.W, H: r.H})
+	}
+	for _, p := range s.Points {
+		out.Points = append(out.Points, assess.Point{X: p.X, Y: p.Y})
+	}
+	return out
+}
+
+// fromAssessSpec converts a domain spec to the wire's, for an author's view.
+func fromAssessSpec(s *assess.Spec) *QuestionSpec {
+	if s == nil {
+		return nil
+	}
+	out := &QuestionSpec{Image: s.Image, Tolerance: s.Tolerance}
+	for _, r := range s.Regions {
+		out.Regions = append(out.Regions, SpecRegion{X: r.X, Y: r.Y, W: r.W, H: r.H})
+	}
+	for _, p := range s.Points {
+		out.Points = append(out.Points, SpecPoint{X: p.X, Y: p.Y})
+	}
+	return out
 }
 
 // AttemptView is the state of one run at a quiz.
@@ -178,6 +236,9 @@ type AuthoredQuestionView struct {
 	CaseSensitive bool       `json:"case_sensitive"`
 	Accepted      [][]string `json:"accepted,omitempty"`
 
+	// Spec is the pin/graph/draw configuration, answer included — authors only.
+	Spec *QuestionSpec `json:"spec,omitempty"`
+
 	Options []AuthoredOptionView `json:"options,omitempty"`
 }
 
@@ -291,6 +352,84 @@ func registerAssessment(api huma.API, svc *assess.Service, learning *enroll.Serv
 			return nil, assessError(err)
 		}
 		return &struct{}{}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "presign-drawing-upload",
+		Method:        http.MethodPost,
+		Path:          "/v1/lessons/{id}/quiz/attempts/current/answers/{question_id}/drawing",
+		Summary:       "Ask for a URL to upload a drawing to",
+		DefaultStatus: http.StatusCreated,
+		Description: "For a draw_image question. Returns a URL that accepts one image of the declared size " +
+			"for fifteen minutes; the bytes go straight to the object store. Send the returned key back " +
+			"as the answer's `upload`.",
+		Tags:     []string{"Assessment"},
+		Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, in *struct {
+		ID         string `path:"id" format:"uuid"`
+		QuestionID string `path:"question_id" format:"uuid"`
+		Body       struct {
+			Bytes int64 `json:"bytes" minimum:"1" maximum:"8388608"`
+		}
+	}) (*PresignOutput, error) {
+		p, lessonID, err := enrolledLearner(ctx, learning, in.ID)
+		if err != nil {
+			return nil, err
+		}
+		questionID, err := parseUUID(in.QuestionID, "question")
+		if err != nil {
+			return nil, err
+		}
+
+		upload, key, err := svc.PresignDrawUpload(ctx, p.TenantID, lessonID, p.UserID, questionID, in.Body.Bytes)
+		if err != nil {
+			return nil, assessError(err)
+		}
+
+		out := &PresignOutput{CacheControl: "private, no-store"}
+		out.Body.UploadURL = upload.URL
+		out.Body.Method = upload.Method
+		out.Body.Headers = upload.Headers
+		out.Body.Key = key
+		out.Body.ExpiresAt = upload.ExpiresAt
+		return out, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "download-drawing-answer",
+		Method:      http.MethodGet,
+		Path:        "/v1/attempts/{id}/answers/{question_id}/drawing",
+		Summary:     "Get a short-lived URL for an uploaded drawing",
+		Description: "Readable by the learner who drew it, and by anybody who may mark it. The URL lives " +
+			"five minutes.",
+		Tags:     []string{"Assessment"},
+		Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, in *struct {
+		ID         string `path:"id" format:"uuid"`
+		QuestionID string `path:"question_id" format:"uuid"`
+	}) (*DownloadOutput, error) {
+		p, err := requirePrincipal(ctx)
+		if err != nil {
+			return nil, err
+		}
+		attemptID, err := parseUUID(in.ID, "attempt")
+		if err != nil {
+			return nil, err
+		}
+		questionID, err := parseUUID(in.QuestionID, "question")
+		if err != nil {
+			return nil, err
+		}
+
+		url, err := svc.DrawDownloadURL(ctx, p.TenantID, attemptID, questionID, p.UserID, p.Can(auth.PermSubmissionGrade))
+		if err != nil {
+			return nil, assessError(err)
+		}
+
+		out := &DownloadOutput{CacheControl: "private, no-store"}
+		out.Body.URL = url
+		out.Body.ExpiresAt = time.Now().Add(5 * time.Minute)
+		return out, nil
 	})
 
 	huma.Register(api, huma.Operation{
@@ -529,7 +668,7 @@ func registerQuizAuthoring(api huma.API, svc *assess.Service) {
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id" format:"uuid"`
 		Body struct {
-			Type   string `json:"type" enum:"true_false,single_choice,multiple_choice,fill_blanks,short_answer,ordering,matching,open_ended,range,image_answering,image_matching"`
+			Type   string `json:"type" enum:"true_false,single_choice,multiple_choice,fill_blanks,short_answer,ordering,matching,open_ended,range,image_answering,image_matching,puzzle,pin,graph,draw_image"`
 			Prompt string `json:"prompt" minLength:"1" maxLength:"4000"`
 			Points int    `json:"points,omitempty" minimum:"0" maximum:"1000" default:"1"`
 
@@ -537,6 +676,8 @@ func registerQuizAuthoring(api huma.API, svc *assess.Service) {
 			CaseSensitive bool   `json:"case_sensitive,omitempty"`
 
 			Accepted [][]string `json:"accepted,omitempty" doc:"One array of acceptable spellings per blank, in order."`
+
+			Spec *QuestionSpec `json:"spec,omitempty" doc:"Pin/graph/draw configuration: base image, hotspot regions, expected points."`
 
 			Options []struct {
 				Content      string `json:"content" minLength:"1" maxLength:"1000"`
@@ -557,7 +698,7 @@ func registerQuizAuthoring(api huma.API, svc *assess.Service) {
 		n := assess.NewQuestion{
 			Type: in.Body.Type, Prompt: in.Body.Prompt, Points: in.Body.Points,
 			Explanation: in.Body.Explanation, CaseSensitive: in.Body.CaseSensitive,
-			Accepted: in.Body.Accepted,
+			Accepted: in.Body.Accepted, Spec: toAssessSpec(in.Body.Spec),
 		}
 		for _, o := range in.Body.Options {
 			n.Options = append(n.Options, assess.NewOption{
@@ -720,6 +861,7 @@ func quizView(q assess.LearnerQuiz) QuizView {
 		item := QuestionView{
 			ID: question.ID.String(), Type: question.Type, Prompt: question.Prompt,
 			Points: question.Points, Position: question.Position, Blanks: question.Blanks,
+			Image: question.Image,
 		}
 		for _, o := range question.Options {
 			item.Options = append(item.Options, OptionView{ID: o.ID.String(), Content: o.Content})
@@ -745,7 +887,7 @@ func authoredQuestionView(q assess.Question) AuthoredQuestionView {
 	view := AuthoredQuestionView{
 		ID: q.ID.String(), Type: q.Type, Prompt: q.Prompt, Points: q.Points,
 		Position: q.Position, Explanation: q.Explanation, CaseSensitive: q.CaseSensitive,
-		Accepted: q.Accepted,
+		Accepted: q.Accepted, Spec: fromAssessSpec(q.Spec),
 	}
 	for _, o := range q.Options {
 		option := AuthoredOptionView{
@@ -821,8 +963,17 @@ func assessError(err error) error {
 
 	case errors.Is(err, assess.ErrInvalidQuiz),
 		errors.Is(err, assess.ErrInvalidQuestion),
-		errors.Is(err, assess.ErrIncompleteOrder):
+		errors.Is(err, assess.ErrIncompleteOrder),
+		errors.Is(err, assess.ErrInvalidUpload):
 		return huma.Error422UnprocessableEntity(err.Error())
+
+	case errors.Is(err, assess.ErrNotDrawQuestion):
+		return huma.Error409Conflict("That question takes no uploaded drawing.")
+
+	case errors.Is(err, assess.ErrNoStore):
+		// 503: the request was fine; this deployment has no object store to accept a
+		// drawing, which is a server condition, not the client's mistake.
+		return huma.Error503ServiceUnavailable("Uploads are not available on this server.")
 
 	default:
 		// The wrapped cause is logged with a correlation id; the client learns no more.

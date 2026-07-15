@@ -206,16 +206,17 @@ func run() error {
 
 	community := forum.NewService(db, forum.NewPostgresRepository(), forumNotifier{notifications})
 
-	// `learning` satisfies assess.Completions: passing a quiz completes its lesson,
-	// in the transaction that recorded the grade. The interface is declared by
-	// assess and satisfied by enroll, which have never heard of each other.
-	quizzes := assess.NewService(db, assess.NewPostgresRepository(), assessAuditor{recorder},
-		grading, learning, quizGrades{grades}, assessNotifier{notifications})
-
 	store, err := newObjectStore(cfg, log)
 	if err != nil {
 		return err
 	}
+
+	// `learning` satisfies assess.Completions: passing a quiz completes its lesson,
+	// in the transaction that recorded the grade. The interface is declared by
+	// assess and satisfied by enroll, which have never heard of each other. The
+	// store is where a draw_image answer's bytes live.
+	quizzes := assess.NewService(db, assess.NewPostgresRepository(), assessAuditor{recorder},
+		grading, learning, quizGrades{grades}, assessNotifier{notifications}, store)
 
 	deletions, err := assign.NewRiverEnqueuer(jobs)
 	if err != nil {

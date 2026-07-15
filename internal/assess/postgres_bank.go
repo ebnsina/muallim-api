@@ -17,11 +17,12 @@ func loadAsNew(ctx context.Context, tx pgx.Tx, tenantID, id uuid.UUID, qTable, o
 	var (
 		n        NewQuestion
 		accepted []byte
+		spec     []byte
 	)
 	err := tx.QueryRow(ctx,
-		`SELECT type, prompt, points, explanation, case_sensitive, accepted FROM `+qTable+`
+		`SELECT type, prompt, points, explanation, case_sensitive, accepted, spec FROM `+qTable+`
 		 WHERE tenant_id = $1 AND id = $2`,
-		tenantID, id).Scan(&n.Type, &n.Prompt, &n.Points, &n.Explanation, &n.CaseSensitive, &accepted)
+		tenantID, id).Scan(&n.Type, &n.Prompt, &n.Points, &n.Explanation, &n.CaseSensitive, &accepted, &spec)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return NewQuestion{}, ErrNotFound
@@ -30,6 +31,13 @@ func loadAsNew(ctx context.Context, tx pgx.Tx, tenantID, id uuid.UUID, qTable, o
 	}
 	if err := json.Unmarshal(accepted, &n.Accepted); err != nil {
 		return NewQuestion{}, fmt.Errorf("assess: decode accepted: %w", err)
+	}
+	if len(spec) > 0 {
+		var s Spec
+		if err := json.Unmarshal(spec, &s); err != nil {
+			return NewQuestion{}, fmt.Errorf("assess: decode spec: %w", err)
+		}
+		n.Spec = &s
 	}
 
 	rows, err := tx.Query(ctx,
@@ -68,13 +76,17 @@ func (r *PostgresRepository) SaveToBank(ctx context.Context, tx pgx.Tx, tenantID
 	if err != nil {
 		return BankQuestion{}, fmt.Errorf("assess: encode accepted: %w", err)
 	}
+	spec, err := encodeSpec(n.Spec)
+	if err != nil {
+		return BankQuestion{}, fmt.Errorf("assess: encode spec: %w", err)
+	}
 
 	var b BankQuestion
 	err = tx.QueryRow(ctx,
-		`INSERT INTO bank_questions (tenant_id, type, prompt, points, explanation, case_sensitive, accepted, category)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		`INSERT INTO bank_questions (tenant_id, type, prompt, points, explanation, case_sensitive, accepted, spec, category)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		 RETURNING id, type, prompt, points, category`,
-		tenantID, n.Type, n.Prompt, n.Points, n.Explanation, n.CaseSensitive, accepted, category).
+		tenantID, n.Type, n.Prompt, n.Points, n.Explanation, n.CaseSensitive, accepted, spec, category).
 		Scan(&b.ID, &b.Type, &b.Prompt, &b.Points, &b.Category)
 	if err != nil {
 		return BankQuestion{}, fmt.Errorf("assess: save to bank: %w", err)

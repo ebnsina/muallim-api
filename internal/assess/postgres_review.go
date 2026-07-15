@@ -70,7 +70,7 @@ func (r *PostgresRepository) MarkAnswer(ctx context.Context, tx pgx.Tx, tenantID
 		 FROM questions q, quiz_attempts a
 		 WHERE aa.tenant_id = $1 AND aa.attempt_id = $2 AND aa.question_id = $3
 		   AND q.tenant_id = aa.tenant_id AND q.id = aa.question_id
-		   AND q.type = 'open_ended' AND $5 <= q.points
+		   AND q.type IN ('open_ended', 'draw_image') AND $5 <= q.points
 		   AND a.tenant_id = aa.tenant_id AND a.id = aa.attempt_id
 		   AND a.status = 'awaiting_review'`,
 		tenantID, attemptID, questionID, m.Feedback, m.Points, correct)

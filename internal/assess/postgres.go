@@ -160,7 +160,7 @@ func (r *PostgresRepository) DeleteQuiz(ctx context.Context, tx pgx.Tx, tenantID
 // questions costs what a quiz of four hundred does.
 func (r *PostgresRepository) Questions(ctx context.Context, tx pgx.Tx, tenantID, quizID uuid.UUID) ([]Question, error) {
 	rows, err := tx.Query(ctx,
-		`SELECT id, quiz_id, type, prompt, points, position, explanation, case_sensitive, accepted
+		`SELECT id, quiz_id, type, prompt, points, position, explanation, case_sensitive, accepted, spec
 		 FROM questions
 		 WHERE tenant_id = $1 AND quiz_id = $2
 		 ORDER BY position, id`,
@@ -174,15 +174,19 @@ func (r *PostgresRepository) Questions(ctx context.Context, tx pgx.Tx, tenantID,
 
 	for rows.Next() {
 		var q Question
-		var accepted []byte
+		var accepted, spec []byte
 		if err := rows.Scan(&q.ID, &q.QuizID, &q.Type, &q.Prompt, &q.Points, &q.Position,
-			&q.Explanation, &q.CaseSensitive, &accepted); err != nil {
+			&q.Explanation, &q.CaseSensitive, &accepted, &spec); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("assess: scan question: %w", err)
 		}
 		if err := json.Unmarshal(accepted, &q.Accepted); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("assess: decode accepted answers of question %s: %w", q.ID, err)
+		}
+		if err := decodeSpec(spec, &q); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("assess: decode spec of question %s: %w", q.ID, err)
 		}
 		questions = append(questions, q)
 		ids = append(ids, q.ID)
@@ -243,15 +247,19 @@ func (r *PostgresRepository) CreateQuestion(ctx context.Context, tx pgx.Tx, tena
 	if err != nil {
 		return Question{}, fmt.Errorf("assess: encode accepted answers: %w", err)
 	}
+	spec, err := encodeSpec(n.Spec)
+	if err != nil {
+		return Question{}, fmt.Errorf("assess: encode spec: %w", err)
+	}
 
 	var q Question
 	err = tx.QueryRow(ctx,
 		`INSERT INTO questions (tenant_id, quiz_id, type, prompt, points, explanation,
-		                        case_sensitive, accepted, position)
-		 SELECT $1, $2, $3, $4, $5, $6, $7, $8, coalesce(max(position) + 1, 0)
+		                        case_sensitive, accepted, spec, position)
+		 SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, coalesce(max(position) + 1, 0)
 		 FROM questions WHERE tenant_id = $1 AND quiz_id = $2
 		 RETURNING id, quiz_id, type, prompt, points, position, explanation, case_sensitive`,
-		tenantID, quizID, n.Type, n.Prompt, n.Points, n.Explanation, n.CaseSensitive, accepted).
+		tenantID, quizID, n.Type, n.Prompt, n.Points, n.Explanation, n.CaseSensitive, accepted, spec).
 		Scan(&q.ID, &q.QuizID, &q.Type, &q.Prompt, &q.Points, &q.Position, &q.Explanation, &q.CaseSensitive)
 
 	if err != nil {
@@ -261,6 +269,7 @@ func (r *PostgresRepository) CreateQuestion(ctx context.Context, tx pgx.Tx, tena
 		return Question{}, fmt.Errorf("assess: create question: %w", err)
 	}
 	q.Accepted = n.Accepted
+	q.Spec = n.Spec
 
 	if len(n.Options) == 0 {
 		return q, nil
@@ -305,6 +314,29 @@ func acceptedOrEmpty(a [][]string) [][]string {
 		return [][]string{}
 	}
 	return a
+}
+
+// encodeSpec marshals a spec for the nullable `spec` column: nil for a type that
+// has none, so the column stores SQL NULL rather than an empty object.
+func encodeSpec(s *Spec) (any, error) {
+	if s == nil {
+		return nil, nil
+	}
+	return json.Marshal(s)
+}
+
+// decodeSpec fills q.Spec from a `spec` column that may be SQL NULL (nil bytes),
+// leaving it nil for every type that carries no spec.
+func decodeSpec(raw []byte, q *Question) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	var s Spec
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return err
+	}
+	q.Spec = &s
+	return nil
 }
 
 // DeleteQuestion removes a question and closes the gap it leaves, in one

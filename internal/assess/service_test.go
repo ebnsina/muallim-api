@@ -17,6 +17,7 @@ import (
 	"github.com/ebnsina/muallim-api/internal/certify"
 	"github.com/ebnsina/muallim-api/internal/enroll"
 	"github.com/ebnsina/muallim-api/internal/grade"
+	"github.com/ebnsina/muallim-api/internal/platform/blob"
 	"github.com/ebnsina/muallim-api/internal/platform/database"
 )
 
@@ -122,8 +123,43 @@ func (c *captureNotifier) Notify(ctx context.Context, tx pgx.Tx, tenantID uuid.U
 }
 
 func newServiceWith(db *database.DB, jobs assess.Enqueuer, notifier assess.Notifier) *assess.Service {
+	return newServiceWithStore(db, jobs, notifier, blob.Unconfigured{})
+}
+
+// testStore is the real object store, or a skip. A drawing upload is exactly the
+// question the store exists to answer, so a mock would be answering it for us.
+func testStore(t *testing.T) *blob.S3 {
+	t.Helper()
+
+	endpoint := os.Getenv("MUALLIM_TEST_S3_ENDPOINT")
+	if endpoint == "" {
+		t.Skip("MUALLIM_TEST_S3_ENDPOINT is not set; skipping object-store tests")
+	}
+
+	store, err := blob.NewS3(blob.Options{
+		Endpoint:  endpoint,
+		Bucket:    testEnvOr("MUALLIM_TEST_S3_BUCKET", "muallim-uploads"),
+		AccessKey: testEnvOr("MUALLIM_TEST_S3_ACCESS_KEY", "muallim"),
+		SecretKey: testEnvOr("MUALLIM_TEST_S3_SECRET_KEY", "muallim-secret-key"),
+		Region:    "auto",
+		PathStyle: true,
+	})
+	if err != nil {
+		t.Fatalf("object store: %v", err)
+	}
+	return store
+}
+
+func testEnvOr(name, fallback string) string {
+	if value := os.Getenv(name); value != "" {
+		return value
+	}
+	return fallback
+}
+
+func newServiceWithStore(db *database.DB, jobs assess.Enqueuer, notifier assess.Notifier, store blob.Store) *assess.Service {
 	return assess.NewService(db, assess.NewPostgresRepository(), assessAuditor{audit.NewRecorder()},
-		jobs, newCompletions(db), quizGrades{grade.NewService(db, grade.NewPostgresRepository())}, notifier)
+		jobs, newCompletions(db), quizGrades{grade.NewService(db, grade.NewPostgresRepository())}, notifier, store)
 }
 
 func seedTenant(t *testing.T, db *database.DB) uuid.UUID {
@@ -1180,4 +1216,55 @@ func (f fixture) secondQuizLesson(t *testing.T) uuid.UUID {
 		t.Fatalf("second quiz: %v", err)
 	}
 	return lessonID
+}
+
+// A draw_image answer's bytes go to the object store, and a key from somebody
+// else's prefix is refused rather than stored as this learner's answer.
+func TestDrawImageUpload(t *testing.T) {
+	t.Parallel()
+
+	store := testStore(t) // skips without MUALLIM_TEST_S3_ENDPOINT
+	db := testDB(t)
+	tenantID := seedTenant(t, db)
+	lessonID, slug := seedLesson(t, db, tenantID)
+	svc := newServiceWithStore(db, &recordingEnqueuer{}, &captureNotifier{}, store)
+	learning := newCompletions(db)
+	learner := seedUser(t, db, tenantID)
+	author := assess.Author{UserID: seedUser(t, db, tenantID)}
+
+	if _, err := svc.CreateQuiz(t.Context(), tenantID, lessonID, assess.NewQuiz{Title: "Draw"}, author); err != nil {
+		t.Fatalf("create quiz: %v", err)
+	}
+	q, err := svc.AddQuestion(t.Context(), tenantID, lessonID, assess.NewQuestion{
+		Type: assess.TypeDrawImage, Prompt: "Sketch a cell.", Points: 5,
+	}, author)
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+
+	if _, err := learning.Enrol(t.Context(), tenantID, slug, enroll.Actor{UserID: learner}, enroll.SourceSelf); err != nil {
+		t.Fatalf("enrol: %v", err)
+	}
+	if _, err := svc.StartAttempt(t.Context(), tenantID, lessonID, learner, assess.Author{UserID: learner}); err != nil {
+		t.Fatalf("start attempt: %v", err)
+	}
+
+	upload, key, err := svc.PresignDrawUpload(t.Context(), tenantID, lessonID, learner, q.ID, 1024)
+	if err != nil {
+		t.Fatalf("presign: %v", err)
+	}
+	if upload.URL == "" || key == "" {
+		t.Fatal("presign returned no URL or key")
+	}
+
+	// A foreign key is refused.
+	err = svc.SaveAnswer(t.Context(), tenantID, lessonID, learner, q.ID, assess.Response{Upload: "t/someone/else/object"})
+	if !errors.Is(err, assess.ErrInvalidUpload) {
+		t.Fatalf("a foreign upload key was accepted: %v", err)
+	}
+
+	// The learner's own key is accepted.
+	if err := svc.SaveAnswer(t.Context(), tenantID, lessonID, learner, q.ID, assess.Response{Upload: key}); err != nil {
+		t.Fatalf("own upload key refused: %v", err)
+	}
 }

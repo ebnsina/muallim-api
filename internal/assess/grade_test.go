@@ -194,7 +194,7 @@ func TestGrade(t *testing.T) {
 		{"an empty essay is still for a person", essay, Response{}, Verdict{Manual: true}},
 
 		// A type this build cannot grade scores zero rather than passing silently.
-		{"an unknown type", Question{Type: "graph", Points: 5}, Response{Text: "x"}, Verdict{}},
+		{"an unknown type", Question{Type: "nonesuch", Points: 5}, Response{Text: "x"}, Verdict{}},
 	}
 
 	for _, test := range tests {
@@ -227,6 +227,7 @@ func TestEveryValidTypeIsGraded(t *testing.T) {
 	types := []string{
 		TypeTrueFalse, TypeSingleChoice, TypeMultipleChoice, TypeFillBlanks,
 		TypeShortAnswer, TypeOrdering, TypeMatching, TypeOpenEnded,
+		TypePuzzle, TypePin, TypeGraph, TypeDrawImage,
 	}
 
 	for _, questionType := range types {
@@ -284,9 +285,99 @@ func wellFormed(questionType string) (Question, Response) {
 
 	case TypeOpenEnded:
 		return q, Response{Text: "An answer of some length."}
+
+	case TypePuzzle:
+		q.Options = []Option{choice(optA, false, 0), choice(optB, false, 1)}
+		return q, Response{Order: []uuid.UUID{optA, optB}}
+
+	case TypePin:
+		q.Spec = &Spec{Image: "img", Regions: []Region{{X: 0, Y: 0, W: 10, H: 10}}}
+		return q, Response{Point: &Point{X: 5, Y: 5}}
+
+	case TypeGraph:
+		q.Spec = &Spec{Points: []Point{{X: 1, Y: 2}}, Tolerance: 0.5}
+		return q, Response{Points: []Point{{X: 1, Y: 2}}}
+
+	case TypeDrawImage:
+		// Manual: grade() hands it to a person before it reads a response.
+		return q, Response{}
 	}
 
 	return q, Response{}
+}
+
+// gradePin: a point inside a hotspot is right; anywhere else, or with no regions,
+// is wrong.
+func TestGradePin(t *testing.T) {
+	t.Parallel()
+
+	q := Question{Type: TypePin, Points: 4, Spec: &Spec{
+		Image:   "img",
+		Regions: []Region{{X: 10, Y: 10, W: 20, H: 20}},
+	}}
+
+	tests := []struct {
+		name string
+		r    Response
+		want bool
+	}{
+		{"inside", Response{Point: &Point{X: 15, Y: 15}}, true},
+		{"on the edge", Response{Point: &Point{X: 30, Y: 30}}, true},
+		{"left of it", Response{Point: &Point{X: 5, Y: 15}}, false},
+		{"below it", Response{Point: &Point{X: 15, Y: 40}}, false},
+		{"no point placed", Response{}, false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			if got := gradePin(q, test.r); got != test.want {
+				t.Errorf("gradePin(%s) = %v, want %v", test.name, got, test.want)
+			}
+		})
+	}
+
+	// No regions: nothing can be right.
+	if gradePin(Question{Type: TypePin, Spec: &Spec{Image: "img"}}, Response{Point: &Point{X: 1, Y: 1}}) {
+		t.Error("a pin with no regions accepted a point")
+	}
+}
+
+// gradeGraph: every expected point must be hit within tolerance, and no extra
+// point may be plotted.
+func TestGradeGraph(t *testing.T) {
+	t.Parallel()
+
+	q := Question{Type: TypeGraph, Points: 6, Spec: &Spec{
+		Points:    []Point{{X: 1, Y: 1}, {X: 2, Y: 2}},
+		Tolerance: 0.5,
+	}}
+
+	tests := []struct {
+		name string
+		r    Response
+		want bool
+	}{
+		{"exact", Response{Points: []Point{{X: 1, Y: 1}, {X: 2, Y: 2}}}, true},
+		{"within tolerance", Response{Points: []Point{{X: 1.4, Y: 0.6}, {X: 2, Y: 2}}}, true},
+		{"any order", Response{Points: []Point{{X: 2, Y: 2}, {X: 1, Y: 1}}}, true},
+		{"one off", Response{Points: []Point{{X: 1, Y: 1}, {X: 2, Y: 3}}}, false},
+		{"one missing", Response{Points: []Point{{X: 1, Y: 1}}}, false},
+		{"an extra point", Response{Points: []Point{{X: 1, Y: 1}, {X: 2, Y: 2}, {X: 3, Y: 3}}}, false},
+		{"nothing plotted", Response{}, false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			if got := gradeGraph(q, test.r); got != test.want {
+				t.Errorf("gradeGraph(%s) = %v, want %v", test.name, got, test.want)
+			}
+		})
+	}
+
+	// A repeated learner point cannot cover two distinct expectations.
+	if gradeGraph(q, Response{Points: []Point{{X: 1, Y: 1}, {X: 1, Y: 1}}}) {
+		t.Error("two identical points covered two distinct expected points")
+	}
 }
 
 // A quiz is scored out of all its points, and one essay is enough to hold the

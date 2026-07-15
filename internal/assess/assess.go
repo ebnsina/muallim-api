@@ -65,6 +65,29 @@ var (
 	// ErrIncompleteOrder means a submitted order did not name every sibling
 	// exactly once, so it is refused rather than half-applied.
 	ErrIncompleteOrder = errors.New("assess: the order must list every question exactly once")
+
+	// ErrNotDrawQuestion means an upload was asked for a question that takes no
+	// drawing. Only draw_image answers are uploaded.
+	ErrNotDrawQuestion = errors.New("assess: that question takes no uploaded drawing")
+
+	// ErrNoStore means this deployment has no object store, so a drawing has nowhere
+	// to go. A workspace without a bucket cannot use draw_image questions.
+	ErrNoStore = errors.New("assess: no object store is configured")
+
+	// ErrInvalidUpload means an upload's size or key was refused: a key outside the
+	// learner's own prefix is somebody else's object and is never recorded.
+	ErrInvalidUpload = errors.New("assess: the upload is not valid")
+)
+
+// MaxDrawingBytes bounds an uploaded drawing. A canvas PNG is small; this is room
+// for a large one and a wall against a bucket-filling upload.
+const MaxDrawingBytes = 8 << 20
+
+// How long a signed drawing URL lives: long enough to finish an upload on a slow
+// phone, short enough that a stale URL is worth nothing.
+const (
+	drawUploadTTL   = 15 * time.Minute
+	drawDownloadTTL = 5 * time.Minute
 )
 
 // Audit actions this package emits.
@@ -122,6 +145,22 @@ const (
 	// TypeImageMatching grades exactly as matching; the item and its match are
 	// image URLs. The grading mechanism is the same, only the widget differs.
 	TypeImageMatching = "image_matching"
+
+	// TypePuzzle grades exactly as ordering: its pieces are options with the
+	// author's positions, arranged by the learner. Only the browser widget differs.
+	TypePuzzle = "puzzle"
+
+	// TypePin places a marker on an image; correct when the point lands inside a
+	// hotspot region the author drew. The image and regions live in Spec.
+	TypePin = "pin"
+
+	// TypeGraph plots points on a plane; correct when every expected point in Spec
+	// is hit within Spec.Tolerance, and no extra point is plotted.
+	TypeGraph = "graph"
+
+	// TypeDrawImage is a freehand drawing over an optional backdrop. No machine
+	// grades it: the learner's image is uploaded and an instructor marks it.
+	TypeDrawImage = "draw_image"
 )
 
 // ValidQuestionType reports whether t is a type this system grades.
@@ -132,7 +171,8 @@ func ValidQuestionType(t string) bool {
 	switch t {
 	case TypeTrueFalse, TypeSingleChoice, TypeMultipleChoice, TypeFillBlanks,
 		TypeShortAnswer, TypeOrdering, TypeMatching, TypeOpenEnded, TypeRange,
-		TypeImageAnswering, TypeImageMatching:
+		TypeImageAnswering, TypeImageMatching,
+		TypePuzzle, TypePin, TypeGraph, TypeDrawImage:
 		return true
 	default:
 		return false
@@ -140,7 +180,41 @@ func ValidQuestionType(t string) bool {
 }
 
 // IsManual reports whether a type needs a human to grade it.
-func IsManual(t string) bool { return t == TypeOpenEnded }
+func IsManual(t string) bool { return t == TypeOpenEnded || t == TypeDrawImage }
+
+// Spec carries a type's extra configuration that neither options nor accepted
+// spellings can hold: a pin's image and hotspot regions, a graph's expected points
+// and tolerance, a drawing's backdrop. It is nil for every type that needs none,
+// and its answer-bearing halves (Regions, Points) never leave the domain in a
+// learner view — see view.go.
+type Spec struct {
+	// Image is the base picture a pin is placed on or a drawing is made over.
+	Image string `json:"image,omitempty"`
+
+	// Regions are the correct hotspot areas for a pin; a click inside any counts.
+	Regions []Region `json:"regions,omitempty"`
+
+	// Points are the coordinates a graph answer must hit, each within Tolerance.
+	Points []Point `json:"points,omitempty"`
+
+	// Tolerance is how far a graph point may fall from an expected one and still
+	// count. Zero demands an exact hit.
+	Tolerance float64 `json:"tolerance,omitempty"`
+}
+
+// Region is a rectangle on the base image, in the image's own coordinate space.
+type Region struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+	W float64 `json:"w"`
+	H float64 `json:"h"`
+}
+
+// Point is a coordinate a learner clicked (pin) or plotted (graph).
+type Point struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+}
 
 // Attempt statuses.
 const (
@@ -207,6 +281,9 @@ type Question struct {
 	// Accepted holds, for each blank in order, the spellings that count as right.
 	// Used by fill_blanks and short_answer; empty for every other type.
 	Accepted [][]string
+
+	// Spec is the pin/graph/draw configuration; nil for every other type.
+	Spec *Spec
 
 	Options []Option
 }

@@ -331,6 +331,10 @@ func TestAssessmentSentinelsMapToADeliberateStatus(t *testing.T) {
 		assess.ErrInvalidQuiz:     http.StatusUnprocessableEntity,
 		assess.ErrInvalidQuestion: http.StatusUnprocessableEntity,
 		assess.ErrIncompleteOrder: http.StatusUnprocessableEntity,
+		assess.ErrInvalidUpload:   http.StatusUnprocessableEntity,
+
+		assess.ErrNotDrawQuestion: http.StatusConflict,
+		assess.ErrNoStore:         http.StatusServiceUnavailable,
 	}
 
 	for err, want := range tests {

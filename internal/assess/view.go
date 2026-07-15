@@ -50,6 +50,11 @@ type LearnerQuestion struct {
 	// spellings are not here, obviously; the count is not a secret and a client
 	// needs it to render the inputs.
 	Blanks int
+
+	// Image is the base picture for a pin, graph, or drawing — what the browser
+	// draws the answer on top of. The hotspot regions and expected points that go
+	// with it are the answer and are never here.
+	Image string `json:"image,omitempty"`
 }
 
 // LearnerOption is a choice with no verdict attached.
@@ -103,6 +108,11 @@ func questionForLearner(q Question) LearnerQuestion {
 		Points:   q.Points,
 		Position: q.Position,
 		Blanks:   len(q.Accepted),
+	}
+
+	// The base image a pin/graph/draw answer is made on. Never its regions or points.
+	if q.Spec != nil {
+		view.Image = q.Spec.Image
 	}
 
 	// short_answer has one blank and no prose around it, so the count says nothing

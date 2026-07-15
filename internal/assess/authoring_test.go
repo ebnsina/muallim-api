@@ -44,6 +44,20 @@ func TestNewQuestionValidation(t *testing.T) {
 		"range":        {Type: TypeRange, Prompt: "Boiling point?", Points: 2, Accepted: [][]string{{"99.5", "100.5"}}},
 		"open ended":   {Type: TypeOpenEnded, Prompt: "Discuss.", Points: 10},
 		"zero points":  {Type: TypeOpenEnded, Prompt: "Ungraded reflection.", Points: 0},
+		"puzzle": {
+			Type: TypePuzzle, Prompt: "Assemble these.", Points: 2,
+			Options: []NewOption{opt("Piece one", false), opt("Piece two", false)},
+		},
+		"pin": {
+			Type: TypePin, Prompt: "Click the capital.", Points: 3,
+			Spec: &Spec{Image: "map.png", Regions: []Region{{X: 10, Y: 10, W: 5, H: 5}}},
+		},
+		"graph": {
+			Type: TypeGraph, Prompt: "Plot y = x.", Points: 4,
+			Spec: &Spec{Points: []Point{{X: 1, Y: 1}, {X: 2, Y: 2}}, Tolerance: 0.5},
+		},
+		"draw":                 {Type: TypeDrawImage, Prompt: "Sketch the cell.", Points: 5},
+		"draw with a backdrop": {Type: TypeDrawImage, Prompt: "Trace over this.", Points: 5, Spec: &Spec{Image: "cell.png"}},
 		"an explanation": {
 			Type: TypeTrueFalse, Prompt: "Go is compiled.", Points: 1, Explanation: "It is.",
 			Options: []NewOption{opt("True", true), opt("False", false)},
@@ -60,7 +74,29 @@ func TestNewQuestionValidation(t *testing.T) {
 	}
 
 	bad := map[string]NewQuestion{
-		"a type nothing grades": {Type: "graph", Prompt: "Draw.", Points: 1},
+		"a type nothing grades": {Type: "nonesuch", Prompt: "Draw.", Points: 1},
+
+		"pin with no image":   {Type: TypePin, Prompt: "Click.", Points: 1, Spec: &Spec{Regions: []Region{{X: 0, Y: 0, W: 5, H: 5}}}},
+		"pin with no regions": {Type: TypePin, Prompt: "Click.", Points: 1, Spec: &Spec{Image: "map.png"}},
+		"pin with no spec":    {Type: TypePin, Prompt: "Click.", Points: 1},
+		"pin with a flat region": {
+			Type: TypePin, Prompt: "Click.", Points: 1,
+			Spec: &Spec{Image: "map.png", Regions: []Region{{X: 0, Y: 0, W: 0, H: 5}}},
+		},
+		"pin with options":     {Type: TypePin, Prompt: "Click.", Points: 1, Spec: &Spec{Image: "m.png", Regions: []Region{{X: 0, Y: 0, W: 5, H: 5}}}, Options: []NewOption{opt("A", false)}},
+		"graph with no points": {Type: TypeGraph, Prompt: "Plot.", Points: 1, Spec: &Spec{Tolerance: 1}},
+		"graph with no spec":   {Type: TypeGraph, Prompt: "Plot.", Points: 1},
+		"graph with a negative tolerance": {
+			Type: TypeGraph, Prompt: "Plot.", Points: 1,
+			Spec: &Spec{Points: []Point{{X: 1, Y: 1}}, Tolerance: -1},
+		},
+		"draw with options": {Type: TypeDrawImage, Prompt: "Sketch.", Points: 1, Options: []NewOption{opt("A", false)}},
+		// A spec belongs only to the canvas and coordinate types.
+		"a spec on a choice question": {
+			Type: TypeSingleChoice, Prompt: "Which?", Points: 1,
+			Options: []NewOption{opt("A", true), opt("B", false)},
+			Spec:    &Spec{Image: "smuggled.png"},
+		},
 		"no prompt": {
 			Type: TypeTrueFalse, Prompt: "  ", Points: 1,
 			Options: []NewOption{opt("True", true), opt("False", false)},

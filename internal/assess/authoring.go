@@ -37,6 +37,9 @@ type NewQuestion struct {
 	// Accepted holds one set of acceptable spellings per blank, in order.
 	Accepted [][]string
 
+	// Spec is the pin/graph/draw configuration; nil for every other type.
+	Spec *Spec
+
 	Options []NewOption
 }
 
@@ -135,7 +138,7 @@ func (n NewQuestion) validate() error {
 			return fmt.Errorf("%w: a multiple-choice question where every option is correct asks nothing", ErrInvalidQuestion)
 		}
 
-	case TypeOrdering:
+	case TypeOrdering, TypePuzzle:
 		if len(n.Options) < 2 {
 			return fmt.Errorf("%w: an ordering question needs at least two items", ErrInvalidQuestion)
 		}
@@ -184,6 +187,38 @@ func (n NewQuestion) validate() error {
 		if lo > hi {
 			return fmt.Errorf("%w: a range's low bound cannot exceed its high bound", ErrInvalidQuestion)
 		}
+
+	case TypePin:
+		if len(n.Options) > 0 {
+			return fmt.Errorf("%w: a pin question has nothing to choose from", ErrInvalidQuestion)
+		}
+		if n.Spec == nil || strings.TrimSpace(n.Spec.Image) == "" {
+			return fmt.Errorf("%w: a pin question needs an image", ErrInvalidQuestion)
+		}
+		if len(n.Spec.Regions) == 0 {
+			return fmt.Errorf("%w: a pin question needs at least one hotspot region", ErrInvalidQuestion)
+		}
+		for _, reg := range n.Spec.Regions {
+			if reg.W <= 0 || reg.H <= 0 {
+				return fmt.Errorf("%w: a hotspot region needs a positive width and height", ErrInvalidQuestion)
+			}
+		}
+
+	case TypeGraph:
+		if len(n.Options) > 0 {
+			return fmt.Errorf("%w: a graph question has nothing to choose from", ErrInvalidQuestion)
+		}
+		if n.Spec == nil || len(n.Spec.Points) == 0 {
+			return fmt.Errorf("%w: a graph question needs at least one expected point", ErrInvalidQuestion)
+		}
+		if n.Spec.Tolerance < 0 {
+			return fmt.Errorf("%w: a graph's tolerance cannot be negative", ErrInvalidQuestion)
+		}
+
+	case TypeDrawImage:
+		if len(n.Options) > 0 {
+			return fmt.Errorf("%w: a drawing has nothing to choose from", ErrInvalidQuestion)
+		}
 	}
 
 	// The typed types need spellings; the others must not carry any, or an author
@@ -215,7 +250,19 @@ func (n NewQuestion) validate() error {
 		}
 	}
 
-	if n.Type != TypeOpenEnded && len(n.Options) == 0 && len(n.Accepted) == 0 {
+	// Only the canvas and coordinate types carry a spec; anywhere else it would be
+	// an answer nothing reads.
+	switch n.Type {
+	case TypePin, TypeGraph, TypeDrawImage:
+	default:
+		if n.Spec != nil {
+			return fmt.Errorf("%w: a %s question has no spec", ErrInvalidQuestion, n.Type)
+		}
+	}
+
+	// Something to answer: options, blanks, a spec, or — for a manual type — nothing
+	// but the prompt, which is the whole of an essay or a drawing.
+	if len(n.Options) == 0 && len(n.Accepted) == 0 && n.Spec == nil && !IsManual(n.Type) {
 		return fmt.Errorf("%w: a %s question needs something to answer", ErrInvalidQuestion, n.Type)
 	}
 	return nil

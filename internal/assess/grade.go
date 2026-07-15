@@ -1,6 +1,7 @@
 package assess
 
 import (
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -35,6 +36,18 @@ type Response struct {
 	// Number is a numeric answer: range. A pointer so that "not answered" and "the
 	// number zero" are different — zero is a legitimate answer to grade.
 	Number *float64 `json:"number,omitempty"`
+
+	// Point is where the learner placed a marker: pin. A pointer so an unplaced pin
+	// is distinct from one placed at the origin.
+	Point *Point `json:"point,omitempty"`
+
+	// Points are the coordinates the learner plotted: graph.
+	Points []Point `json:"points,omitempty"`
+
+	// Upload is the object-store key of an uploaded answer image: draw_image. The
+	// bytes never transit the API; the learner PUTs them to a presigned URL and
+	// sends the key here.
+	Upload string `json:"upload,omitempty"`
 }
 
 // Verdict is what grading concluded about one answer.
@@ -73,12 +86,16 @@ func grade(q Question, r Response) Verdict {
 		correct = gradeBlanks(q, []string{r.Text})
 	case TypeFillBlanks:
 		correct = gradeBlanks(q, r.Blanks)
-	case TypeOrdering:
+	case TypeOrdering, TypePuzzle:
 		correct = gradeOrdering(q, r)
 	case TypeMatching, TypeImageMatching:
 		correct = gradeMatching(q, r)
 	case TypeRange:
 		correct = gradeRange(q, r)
+	case TypePin:
+		correct = gradePin(q, r)
+	case TypeGraph:
+		correct = gradeGraph(q, r)
 	default:
 		// A type nothing here grades. It cannot reach the database — authoring
 		// refuses it — so arriving is a bug, and the safe answer to a bug is zero.
@@ -287,6 +304,52 @@ func gradeMatching(q Question, r Response) bool {
 
 	for _, o := range q.Options {
 		if r.Pairs[o.ID] != o.MatchID {
+			return false
+		}
+	}
+	return true
+}
+
+// gradePin is right when the learner's point lands inside any hotspot region the
+// author drew. No point placed, or a question with no regions, is wrong — there is
+// nothing to be right about.
+func gradePin(q Question, r Response) bool {
+	if r.Point == nil || q.Spec == nil || len(q.Spec.Regions) == 0 {
+		return false
+	}
+	for _, reg := range q.Spec.Regions {
+		if r.Point.X >= reg.X && r.Point.X <= reg.X+reg.W &&
+			r.Point.Y >= reg.Y && r.Point.Y <= reg.Y+reg.H {
+			return true
+		}
+	}
+	return false
+}
+
+// gradeGraph is right when every expected point is matched, once, by one of the
+// learner's within the tolerance — and no extra point is plotted, because credit
+// is all-or-nothing and a superfluous point is a different answer. Each learner
+// point is spent on at most one expectation, so plotting the same point twice
+// cannot cover two expectations.
+func gradeGraph(q Question, r Response) bool {
+	if q.Spec == nil || len(q.Spec.Points) == 0 || len(r.Points) != len(q.Spec.Points) {
+		return false
+	}
+	tol := q.Spec.Tolerance
+	spent := make([]bool, len(r.Points))
+	for _, want := range q.Spec.Points {
+		matched := false
+		for i, got := range r.Points {
+			if spent[i] {
+				continue
+			}
+			if math.Abs(got.X-want.X) <= tol && math.Abs(got.Y-want.Y) <= tol {
+				spent[i] = true
+				matched = true
+				break
+			}
+		}
+		if !matched {
 			return false
 		}
 	}

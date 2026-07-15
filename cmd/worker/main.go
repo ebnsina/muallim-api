@@ -136,20 +136,21 @@ func run() error {
 	// transaction, through the same adapter the API uses.
 	grades := grade.NewService(db, grade.NewPostgresRepository())
 
-	// A nil notifier: an auto-graded quiz notifies no one, because the learner who
-	// just submitted it is already watching the result.
-	quizzes := assess.NewService(db, assess.NewPostgresRepository(), assessAuditor{audit.NewRecorder()},
-		refusingEnqueuer{}, learning, quizGrades{grades}, nil)
-
-	grading, err := assess.NewGradeAttemptWorker(quizzes)
+	// The object store, for deleting files whose rows have gone. A deployment with
+	// no bucket has no such files, and the worker refuses the job rather than
+	// pretending it did something. The grading path never presigns a draw upload —
+	// draw_image is marked by a person — so this store is only along for the ride.
+	store, err := newObjectStore(cfg, log)
 	if err != nil {
 		return err
 	}
 
-	// The object store, for deleting files whose rows have gone. A deployment with
-	// no bucket has no such files, and the worker refuses the job rather than
-	// pretending it did something.
-	store, err := newObjectStore(cfg, log)
+	// A nil notifier: an auto-graded quiz notifies no one, because the learner who
+	// just submitted it is already watching the result.
+	quizzes := assess.NewService(db, assess.NewPostgresRepository(), assessAuditor{audit.NewRecorder()},
+		refusingEnqueuer{}, learning, quizGrades{grades}, nil, store)
+
+	grading, err := assess.NewGradeAttemptWorker(quizzes)
 	if err != nil {
 		return err
 	}
