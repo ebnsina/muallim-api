@@ -346,6 +346,73 @@ func TestSubjects(t *testing.T) {
 	}
 }
 
+func TestPromoteClass(t *testing.T) {
+	t.Parallel()
+
+	db := testDB(t)
+	tenant := seedTenant(t, db)
+	svc := newService(db)
+	author := academics.Author{UserID: uuid.New()}
+
+	six, err := svc.CreateClass(t.Context(), tenant, academics.NewGradeLevel{Name: "Class 6", Rank: 6}, author)
+	if err != nil {
+		t.Fatalf("create class 6: %v", err)
+	}
+	seven, err := svc.CreateClass(t.Context(), tenant, academics.NewGradeLevel{Name: "Class 7", Rank: 7}, author)
+	if err != nil {
+		t.Fatalf("create class 7: %v", err)
+	}
+
+	amina, err := svc.AdmitStudent(t.Context(), tenant, academics.NewStudent{
+		AdmissionNo: "2025-001", FullName: "Amina", GradeLevelID: &six.ID,
+	}, author)
+	if err != nil {
+		t.Fatalf("admit: %v", err)
+	}
+	if _, err := svc.AdmitStudent(t.Context(), tenant, academics.NewStudent{
+		AdmissionNo: "2025-002", FullName: "Bilal", GradeLevelID: &six.ID,
+	}, author); err != nil {
+		t.Fatalf("admit: %v", err)
+	}
+
+	// Promoting into the same class is refused.
+	if _, err := svc.PromoteClass(t.Context(), tenant, six.ID, academics.Promotion{ToGradeLevelID: &six.ID}, author); !errors.Is(err, academics.ErrInvalidPromotion) {
+		t.Fatalf("a self-promotion was accepted: %v", err)
+	}
+
+	// Promote class 6 into class 7: both active students move.
+	moved, err := svc.PromoteClass(t.Context(), tenant, six.ID, academics.Promotion{ToGradeLevelID: &seven.ID}, author)
+	if err != nil {
+		t.Fatalf("promote: %v", err)
+	}
+	if moved != 2 {
+		t.Fatalf("moved %d, want 2", moved)
+	}
+	got, err := svc.Student(t.Context(), tenant, amina.ID)
+	if err != nil {
+		t.Fatalf("load student: %v", err)
+	}
+	if got.GradeLevelID == nil || *got.GradeLevelID != seven.ID {
+		t.Fatalf("amina is in %v, want class 7", got.GradeLevelID)
+	}
+
+	// Graduating class 7 (no target) marks them graduated, and re-running moves none.
+	grad, err := svc.PromoteClass(t.Context(), tenant, seven.ID, academics.Promotion{}, author)
+	if err != nil {
+		t.Fatalf("graduate: %v", err)
+	}
+	if grad != 2 {
+		t.Fatalf("graduated %d, want 2", grad)
+	}
+	again, err := svc.PromoteClass(t.Context(), tenant, seven.ID, academics.Promotion{}, author)
+	if err != nil {
+		t.Fatalf("re-graduate: %v", err)
+	}
+	if again != 0 {
+		t.Fatalf("re-running graduated %d, want 0 — only active students move", again)
+	}
+}
+
 func TestTimetable(t *testing.T) {
 	t.Parallel()
 

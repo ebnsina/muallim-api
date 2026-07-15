@@ -464,6 +464,60 @@ func registerAcademics(api huma.API, svc *academics.Service) {
 		return &struct{}{}, nil
 	})
 
+	huma.Register(api, huma.Operation{
+		OperationID: "promote-class",
+		Method:      http.MethodPost,
+		Path:        "/v1/classes/{id}/promote",
+		Summary:     "Promote a class's students, or graduate them",
+		Description: "Moves every active student in this class to to_grade_level_id " +
+			"(optionally into to_section_id). With no target, they are graduated.",
+		Tags:     []string{"Academics"},
+		Security: admin,
+	}, func(ctx context.Context, in *struct {
+		ID   string `path:"id" format:"uuid"`
+		Body struct {
+			ToGradeLevelID string `json:"to_grade_level_id,omitempty" format:"uuid"`
+			ToSectionID    string `json:"to_section_id,omitempty" format:"uuid"`
+		}
+	}) (*struct {
+		Body struct {
+			Moved     int  `json:"moved"`
+			Graduated bool `json:"graduated"`
+		}
+	}, error) {
+		p, err := requirePermission(ctx, auth.PermAcademicsManage)
+		if err != nil {
+			return nil, err
+		}
+		classID, err := parseUUID(in.ID, "class")
+		if err != nil {
+			return nil, err
+		}
+		toClass, err := optionalUUIDPtr(in.Body.ToGradeLevelID, "target class")
+		if err != nil {
+			return nil, err
+		}
+		toSection, err := optionalUUIDPtr(in.Body.ToSectionID, "target section")
+		if err != nil {
+			return nil, err
+		}
+		moved, err := svc.PromoteClass(ctx, p.TenantID, classID,
+			academics.Promotion{ToGradeLevelID: toClass, ToSectionID: toSection},
+			academics.Author{UserID: p.UserID})
+		if err != nil {
+			return nil, academicsError(err)
+		}
+		out := &struct {
+			Body struct {
+				Moved     int  `json:"moved"`
+				Graduated bool `json:"graduated"`
+			}
+		}{}
+		out.Body.Moved = moved
+		out.Body.Graduated = toClass == nil
+		return out, nil
+	})
+
 	// --- Sections --------------------------------------------------------------
 
 	huma.Register(api, huma.Operation{
@@ -711,6 +765,7 @@ func academicsError(err error) error {
 		errors.Is(err, academics.ErrInvalidSubject),
 		errors.Is(err, academics.ErrInvalidAttendance),
 		errors.Is(err, academics.ErrInvalidPeriod),
+		errors.Is(err, academics.ErrInvalidPromotion),
 		errors.Is(err, academics.ErrInvalidInstitutionType):
 		return huma.Error422UnprocessableEntity(err.Error())
 

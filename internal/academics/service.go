@@ -55,6 +55,8 @@ type Repository interface {
 	CreatePeriod(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, n NewPeriod) (Period, error)
 	SectionTimetable(ctx context.Context, tx pgx.Tx, tenantID, sectionID uuid.UUID) ([]Period, error)
 	DeletePeriod(ctx context.Context, tx pgx.Tx, tenantID, periodID uuid.UUID) error
+
+	PromoteClass(ctx context.Context, tx pgx.Tx, tenantID, sourceClassID uuid.UUID, p Promotion) (int, error)
 }
 
 // AuditRecorder writes an audit line in the transaction of the thing it describes.

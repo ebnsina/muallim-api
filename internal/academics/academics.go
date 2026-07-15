@@ -28,6 +28,9 @@ var (
 	ErrInvalidSection = errors.New("academics: the section is not valid")
 	ErrInvalidSubject = errors.New("academics: the subject is not valid")
 
+	// ErrInvalidPromotion means a class was asked to promote into itself.
+	ErrInvalidPromotion = errors.New("academics: the promotion is not valid")
+
 	// ErrInvalidInstitutionType means a type outside the known set was submitted.
 	ErrInvalidInstitutionType = errors.New("academics: unknown institution type")
 )
@@ -65,6 +68,7 @@ const (
 	ActionYearSetCurrent = "academic_year.set_current"
 	ActionClassCreated   = "grade_level.created"
 	ActionAttendanceMark = "attendance.marked"
+	ActionClassPromoted  = "grade_level.promoted"
 )
 
 // AcademicYear is the calendar everything is scheduled within.
