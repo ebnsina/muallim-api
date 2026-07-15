@@ -35,6 +35,7 @@ import (
 	"github.com/ebnsina/muallim-api/internal/forum"
 	"github.com/ebnsina/muallim-api/internal/gamify"
 	"github.com/ebnsina/muallim-api/internal/grade"
+	"github.com/ebnsina/muallim-api/internal/hifz"
 	"github.com/ebnsina/muallim-api/internal/httpapi"
 	"github.com/ebnsina/muallim-api/internal/learn"
 	"github.com/ebnsina/muallim-api/internal/notices"
@@ -233,6 +234,9 @@ func run() error {
 	// email, in the posting transaction. `outbox` is the same enqueuer auth uses.
 	noticeboard := notices.NewService(db, notices.NewPostgresRepository(), noticeBroadcaster{outbox}, noticesAuditor{recorder})
 
+	// The madrasa memorization log: Sabaq, Sabqi, Manzil per student.
+	memorization := hifz.NewService(db, hifz.NewPostgresRepository())
+
 	// `learning` satisfies assess.Completions: passing a quiz completes its lesson,
 	// in the transaction that recorded the grade. The interface is declared by
 	// assess and satisfied by enroll, which have never heard of each other. The
@@ -337,6 +341,7 @@ func run() error {
 		Fees:        billing,
 		Staff:       people,
 		Notices:     noticeboard,
+		Hifz:        memorization,
 		Auth:        identities,
 		Enrol:       learning,
 		Assess:      quizzes,

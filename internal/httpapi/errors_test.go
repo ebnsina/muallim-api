@@ -22,6 +22,7 @@ import (
 	"github.com/ebnsina/muallim-api/internal/fees"
 	"github.com/ebnsina/muallim-api/internal/forum"
 	"github.com/ebnsina/muallim-api/internal/grade"
+	"github.com/ebnsina/muallim-api/internal/hifz"
 	"github.com/ebnsina/muallim-api/internal/learn"
 	"github.com/ebnsina/muallim-api/internal/notices"
 	"github.com/ebnsina/muallim-api/internal/notify"
@@ -241,6 +242,26 @@ func TestExamsSentinelsMapToADeliberateStatus(t *testing.T) {
 		}
 		wrapped := fmt.Errorf("exams: doing a thing: %w", err)
 		if got := statusOf(examsError(wrapped)); got != want {
+			t.Errorf("wrapped %v mapped to %d, want %d", err, got, want)
+		}
+	}
+}
+
+func TestHifzSentinelsMapToADeliberateStatus(t *testing.T) {
+	t.Parallel()
+
+	tests := map[error]int{
+		hifz.ErrNotFound:     http.StatusNotFound,
+		hifz.ErrInvalidPage:  http.StatusUnprocessableEntity,
+		hifz.ErrInvalidEntry: http.StatusUnprocessableEntity,
+	}
+
+	for err, want := range tests {
+		if got := statusOf(hifzError(err)); got != want {
+			t.Errorf("%v mapped to %d, want %d", err, got, want)
+		}
+		wrapped := fmt.Errorf("hifz: doing a thing: %w", err)
+		if got := statusOf(hifzError(wrapped)); got != want {
 			t.Errorf("wrapped %v mapped to %d, want %d", err, got, want)
 		}
 	}

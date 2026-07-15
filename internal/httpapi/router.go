@@ -26,6 +26,7 @@ import (
 	"github.com/ebnsina/muallim-api/internal/forum"
 	"github.com/ebnsina/muallim-api/internal/gamify"
 	"github.com/ebnsina/muallim-api/internal/grade"
+	"github.com/ebnsina/muallim-api/internal/hifz"
 	"github.com/ebnsina/muallim-api/internal/learn"
 	"github.com/ebnsina/muallim-api/internal/notices"
 	"github.com/ebnsina/muallim-api/internal/notify"
@@ -88,6 +89,10 @@ type Options struct {
 	// Notices posts guardian broadcasts. Nil alongside Academics in an LMS-only
 	// deployment.
 	Notices *notices.Service
+
+	// Hifz is the madrasa memorization log. Nil in a non-madrasa or LMS-only
+	// deployment.
+	Hifz *hifz.Service
 
 	// Commerce may be nil: a deployment with no gateway configured sells nothing,
 	// and every course in it is free — which is exactly what this product was
@@ -175,6 +180,7 @@ func New(opts Options) (http.Handler, huma.API) {
 	registerFees(api, opts.Fees)
 	registerStaff(api, opts.Staff)
 	registerNotices(api, opts.Notices)
+	registerHifz(api, opts.Hifz)
 	registerGamification(api, opts.Gamify)
 
 	// Order matters, outermost first.
