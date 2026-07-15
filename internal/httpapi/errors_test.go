@@ -200,6 +200,7 @@ func TestAcademicsSentinelsMapToADeliberateStatus(t *testing.T) {
 		academics.ErrInvalidSection:         http.StatusUnprocessableEntity,
 		academics.ErrInvalidStudent:         http.StatusUnprocessableEntity,
 		academics.ErrInvalidGuardian:        http.StatusUnprocessableEntity,
+		academics.ErrInvalidSubject:         http.StatusUnprocessableEntity,
 		academics.ErrInvalidInstitutionType: http.StatusUnprocessableEntity,
 	}
 

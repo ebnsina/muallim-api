@@ -26,6 +26,7 @@ var (
 	ErrInvalidTerm    = errors.New("academics: the term is not valid")
 	ErrInvalidClass   = errors.New("academics: the class is not valid")
 	ErrInvalidSection = errors.New("academics: the section is not valid")
+	ErrInvalidSubject = errors.New("academics: the subject is not valid")
 
 	// ErrInvalidInstitutionType means a type outside the known set was submitted.
 	ErrInvalidInstitutionType = errors.New("academics: unknown institution type")
@@ -53,8 +54,9 @@ func ValidInstitutionType(t string) bool {
 // than paginated, and the cap is generous enough that reaching it is a mistake, not
 // a school.
 const (
-	MaxYears   = 100
-	MaxClasses = 200
+	MaxYears    = 100
+	MaxClasses  = 200
+	MaxSubjects = 300
 )
 
 // Audit actions this package emits.
@@ -133,6 +135,21 @@ type NewSection struct {
 	Capacity int
 }
 
+// Subject is something the institution teaches. Exams mark against it later.
+type Subject struct {
+	ID        uuid.UUID
+	Name      string
+	Code      string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// NewSubject describes a subject to add to the catalog.
+type NewSubject struct {
+	Name string
+	Code string
+}
+
 func (n NewAcademicYear) validate() error {
 	if strings.TrimSpace(n.Name) == "" {
 		return fmt.Errorf("%w: a year needs a name", ErrInvalidYear)
@@ -166,6 +183,13 @@ func (n NewSection) validate() error {
 	}
 	if n.Capacity < 0 {
 		return fmt.Errorf("%w: capacity cannot be negative", ErrInvalidSection)
+	}
+	return nil
+}
+
+func (n NewSubject) validate() error {
+	if strings.TrimSpace(n.Name) == "" {
+		return fmt.Errorf("%w: a subject needs a name", ErrInvalidSubject)
 	}
 	return nil
 }

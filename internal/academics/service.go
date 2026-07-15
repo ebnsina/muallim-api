@@ -33,6 +33,10 @@ type Repository interface {
 	Sections(ctx context.Context, tx pgx.Tx, tenantID, classID uuid.UUID) ([]Section, error)
 	DeleteSection(ctx context.Context, tx pgx.Tx, tenantID, sectionID uuid.UUID) error
 
+	CreateSubject(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, n NewSubject) (Subject, error)
+	Subjects(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, limit int) ([]Subject, error)
+	DeleteSubject(ctx context.Context, tx pgx.Tx, tenantID, subjectID uuid.UUID) error
+
 	CreateStudent(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, n NewStudent) (Student, error)
 	Roster(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, filter RosterFilter, after *cursor, limit int) ([]Student, error)
 	StudentByID(ctx context.Context, tx pgx.Tx, tenantID, studentID uuid.UUID) (Student, error)
@@ -255,5 +259,37 @@ func (s *Service) Sections(ctx context.Context, tenantID, classID uuid.UUID) ([]
 func (s *Service) DeleteSection(ctx context.Context, tenantID, sectionID uuid.UUID) error {
 	return s.db.WithTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
 		return s.repo.DeleteSection(ctx, tx, tenantID, sectionID)
+	})
+}
+
+// CreateSubject adds a subject to the catalog.
+func (s *Service) CreateSubject(ctx context.Context, tenantID uuid.UUID, n NewSubject) (Subject, error) {
+	if err := n.validate(); err != nil {
+		return Subject{}, err
+	}
+	var subject Subject
+	err := s.db.WithTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		subject, err = s.repo.CreateSubject(ctx, tx, tenantID, n)
+		return err
+	})
+	return subject, err
+}
+
+// Subjects lists the workspace's subjects by name.
+func (s *Service) Subjects(ctx context.Context, tenantID uuid.UUID) ([]Subject, error) {
+	var subjects []Subject
+	err := s.db.WithTenantReadOnly(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		subjects, err = s.repo.Subjects(ctx, tx, tenantID, MaxSubjects)
+		return err
+	})
+	return subjects, err
+}
+
+// DeleteSubject removes a subject.
+func (s *Service) DeleteSubject(ctx context.Context, tenantID, subjectID uuid.UUID) error {
+	return s.db.WithTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		return s.repo.DeleteSubject(ctx, tx, tenantID, subjectID)
 	})
 }

@@ -294,3 +294,32 @@ func TestStudentsAndGuardians(t *testing.T) {
 		t.Fatalf("a guardian against a missing student was accepted: %v", err)
 	}
 }
+
+// A subject is added to the catalog, listed by name, and its name is unique.
+func TestSubjects(t *testing.T) {
+	t.Parallel()
+
+	db := testDB(t)
+	tenant := seedTenant(t, db)
+	svc := newService(db)
+
+	if _, err := svc.CreateSubject(t.Context(), tenant, academics.NewSubject{Name: "Mathematics", Code: "MATH"}); err != nil {
+		t.Fatalf("create subject: %v", err)
+	}
+	if _, err := svc.CreateSubject(t.Context(), tenant, academics.NewSubject{Name: "Bangla"}); err != nil {
+		t.Fatalf("create bangla: %v", err)
+	}
+
+	// A duplicate name is refused.
+	if _, err := svc.CreateSubject(t.Context(), tenant, academics.NewSubject{Name: "mathematics"}); !errors.Is(err, academics.ErrNameTaken) {
+		t.Fatalf("a duplicate subject name was accepted: %v", err)
+	}
+
+	subjects, err := svc.Subjects(t.Context(), tenant)
+	if err != nil {
+		t.Fatalf("list subjects: %v", err)
+	}
+	if len(subjects) != 2 || subjects[0].Name != "Bangla" {
+		t.Fatalf("subjects not sorted by name: %+v", subjects)
+	}
+}

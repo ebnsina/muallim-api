@@ -252,6 +252,51 @@ func (r *PostgresRepository) DeleteSection(ctx context.Context, tx pgx.Tx, tenan
 	return nil
 }
 
+func (r *PostgresRepository) CreateSubject(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, n NewSubject) (Subject, error) {
+	var s Subject
+	err := tx.QueryRow(ctx,
+		`INSERT INTO subjects (tenant_id, name, code)
+		 VALUES ($1, $2, $3)
+		 RETURNING id, name, code, created_at, updated_at`,
+		tenantID, n.Name, n.Code).
+		Scan(&s.ID, &s.Name, &s.Code, &s.CreatedAt, &s.UpdatedAt)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return Subject{}, ErrNameTaken
+		}
+		return Subject{}, fmt.Errorf("academics: create subject: %w", err)
+	}
+	return s, nil
+}
+
+func (r *PostgresRepository) Subjects(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, limit int) ([]Subject, error) {
+	rows, err := tx.Query(ctx,
+		`SELECT id, name, code, created_at, updated_at
+		 FROM subjects WHERE tenant_id = $1
+		 ORDER BY name, id LIMIT $2`, tenantID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("academics: list subjects: %w", err)
+	}
+	defer rows.Close()
+
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Subject, error) {
+		var s Subject
+		err := row.Scan(&s.ID, &s.Name, &s.Code, &s.CreatedAt, &s.UpdatedAt)
+		return s, err
+	})
+}
+
+func (r *PostgresRepository) DeleteSubject(ctx context.Context, tx pgx.Tx, tenantID, subjectID uuid.UUID) error {
+	tag, err := tx.Exec(ctx, `DELETE FROM subjects WHERE tenant_id = $1 AND id = $2`, tenantID, subjectID)
+	if err != nil {
+		return fmt.Errorf("academics: delete subject: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"

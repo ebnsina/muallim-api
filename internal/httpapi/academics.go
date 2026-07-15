@@ -571,6 +571,109 @@ func registerAcademics(api huma.API, svc *academics.Service) {
 	})
 }
 
+// SubjectView is a subject in the catalog.
+type SubjectView struct {
+	ID   string `json:"id" format:"uuid"`
+	Name string `json:"name"`
+	Code string `json:"code,omitempty"`
+}
+
+func registerSubjects(api huma.API, svc *academics.Service) {
+	admin := []map[string][]string{{"bearer": {}}}
+
+	huma.Register(api, huma.Operation{
+		OperationID: "list-subjects",
+		Method:      http.MethodGet,
+		Path:        "/v1/subjects",
+		Summary:     "List the subjects the institution teaches",
+		Tags:        []string{"Academics"},
+		Security:    admin,
+	}, func(ctx context.Context, _ *struct{}) (*struct {
+		Body struct {
+			Subjects []SubjectView `json:"subjects"`
+		}
+	}, error) {
+		p, err := requirePermission(ctx, auth.PermAcademicsManage)
+		if err != nil {
+			return nil, err
+		}
+		subjects, err := svc.Subjects(ctx, p.TenantID)
+		if err != nil {
+			return nil, academicsError(err)
+		}
+		out := &struct {
+			Body struct {
+				Subjects []SubjectView `json:"subjects"`
+			}
+		}{}
+		out.Body.Subjects = make([]SubjectView, 0, len(subjects))
+		for _, s := range subjects {
+			out.Body.Subjects = append(out.Body.Subjects, SubjectView{ID: s.ID.String(), Name: s.Name, Code: s.Code})
+		}
+		return out, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "create-subject",
+		Method:        http.MethodPost,
+		Path:          "/v1/subjects",
+		Summary:       "Add a subject",
+		DefaultStatus: http.StatusCreated,
+		Tags:          []string{"Academics"},
+		Security:      admin,
+	}, func(ctx context.Context, in *struct {
+		Body struct {
+			Name string `json:"name" minLength:"1" maxLength:"120"`
+			Code string `json:"code,omitempty" maxLength:"40"`
+		}
+	}) (*struct {
+		Body struct {
+			Subject SubjectView `json:"subject"`
+		}
+	}, error) {
+		p, err := requirePermission(ctx, auth.PermAcademicsManage)
+		if err != nil {
+			return nil, err
+		}
+		subject, err := svc.CreateSubject(ctx, p.TenantID, academics.NewSubject{Name: in.Body.Name, Code: in.Body.Code})
+		if err != nil {
+			return nil, academicsError(err)
+		}
+		out := &struct {
+			Body struct {
+				Subject SubjectView `json:"subject"`
+			}
+		}{}
+		out.Body.Subject = SubjectView{ID: subject.ID.String(), Name: subject.Name, Code: subject.Code}
+		return out, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "delete-subject",
+		Method:        http.MethodDelete,
+		Path:          "/v1/subjects/{id}",
+		Summary:       "Remove a subject",
+		DefaultStatus: http.StatusNoContent,
+		Tags:          []string{"Academics"},
+		Security:      admin,
+	}, func(ctx context.Context, in *struct {
+		ID string `path:"id" format:"uuid"`
+	}) (*struct{}, error) {
+		p, err := requirePermission(ctx, auth.PermAcademicsManage)
+		if err != nil {
+			return nil, err
+		}
+		subjectID, err := parseUUID(in.ID, "subject")
+		if err != nil {
+			return nil, err
+		}
+		if err := svc.DeleteSubject(ctx, p.TenantID, subjectID); err != nil {
+			return nil, academicsError(err)
+		}
+		return &struct{}{}, nil
+	})
+}
+
 // parseDates reads two calendar days, refusing a malformed one with 422.
 func parseDates(startsOn, endsOn string) (time.Time, time.Time, error) {
 	starts, err := time.Parse(dateLayout, startsOn)
@@ -605,6 +708,7 @@ func academicsError(err error) error {
 		errors.Is(err, academics.ErrInvalidSection),
 		errors.Is(err, academics.ErrInvalidStudent),
 		errors.Is(err, academics.ErrInvalidGuardian),
+		errors.Is(err, academics.ErrInvalidSubject),
 		errors.Is(err, academics.ErrInvalidInstitutionType):
 		return huma.Error422UnprocessableEntity(err.Error())
 

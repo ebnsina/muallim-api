@@ -147,6 +147,7 @@ func New(opts Options) (http.Handler, huma.API) {
 	registerNotifications(api, opts.Notify)
 	registerForum(api, opts.Forum)
 	registerAcademics(api, opts.Academics)
+	registerSubjects(api, opts.Academics)
 	registerStudents(api, opts.Academics)
 	registerGamification(api, opts.Gamify)
 
