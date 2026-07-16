@@ -31,7 +31,7 @@ curl -s -H 'Host: acme.muallim.test' localhost:8080/v1/courses | jq
 open http://localhost:8080/docs                 # interactive API reference
 ```
 
-Every setting is an environment variable prefixed `MUALLIM_`; `.env.example` lists them all with their defaults.
+Every setting is an environment variable prefixed `MUALLIM_`, and `.env.example` carries the ones a local run needs, with their defaults. It does **not** carry the credentials — the gateway keys, the sealer key, and the SMS gateway are documented below and set deliberately rather than copied out of a file that lives in the repository.
 
 ## Object storage
 
@@ -87,6 +87,22 @@ What each gateway needs from you once you have the credentials:
 The one that will bite you: bKash blocks a merchant for an hour after more than two
 token refreshes in one, so the driver caches its token per app key and single-flights
 the grant. Do not add a code path that grants a token per request.
+
+## SMS
+
+Guardian notices fan out on `email`, `sms`, or both, so a Bangladesh SMS gateway
+sits behind the same driver interface the mailer uses, enqueued as a River job like
+email. It is the **worker** that sends, so these belong to the worker's environment.
+
+```bash
+MUALLIM_SMS_GATEWAY_URL=https://gateway.example/api/sms
+MUALLIM_SMS_API_KEY=...
+MUALLIM_SMS_SENDER_ID=Muallim
+```
+
+Unset, the worker warns at boot and installs a driver that **logs** each text
+instead of sending it — free, and what a laptop wants. A non-2xx from the gateway
+is an error rather than a shrug, so River retries it.
 
 ## Development
 
