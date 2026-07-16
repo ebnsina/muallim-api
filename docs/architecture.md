@@ -30,6 +30,7 @@ internal/liveclass      bring-your-own-link live sessions: a schedule and a URL
 internal/notify         a person's in-app notifications
 internal/comms          outbound email and SMS, enqueued in the deciding txn
 internal/automation     a workspace's own rules for the mail it sends
+internal/leads          demo requests from people who have no workspace yet
 internal/commerce       prices, orders, gateways, webhooks, refunds
 
 internal/academics      institution spine: years, terms, classes, sections, subjects, students, guardians, attendance, timetable

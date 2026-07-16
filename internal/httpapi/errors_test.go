@@ -24,6 +24,7 @@ import (
 	"github.com/ebnsina/muallim-api/internal/forum"
 	"github.com/ebnsina/muallim-api/internal/grade"
 	"github.com/ebnsina/muallim-api/internal/hifz"
+	"github.com/ebnsina/muallim-api/internal/leads"
 	"github.com/ebnsina/muallim-api/internal/learn"
 	"github.com/ebnsina/muallim-api/internal/notices"
 	"github.com/ebnsina/muallim-api/internal/notify"
@@ -746,6 +747,35 @@ func TestAutomationSentinelsMapToADeliberateStatus(t *testing.T) {
 		if got := statusOf(automationError(wrapped)); got != want {
 			t.Errorf("wrapped %v mapped to %d, want %d", err, got, want)
 		}
+	}
+}
+
+// The leads sentinels go through their own mapper.
+func TestLeadsSentinelsMapToADeliberateStatus(t *testing.T) {
+	t.Parallel()
+
+	tests := map[error]int{
+		leads.ErrInvalidRequest: http.StatusUnprocessableEntity,
+		leads.ErrNotAgreed:      http.StatusUnprocessableEntity,
+	}
+
+	for err, want := range tests {
+		if got := statusOf(leadsError(err)); got != want {
+			t.Errorf("%v mapped to %d, want %d", err, got, want)
+		}
+
+		wrapped := fmt.Errorf("leads: doing a thing: %w", err)
+		if got := statusOf(leadsError(wrapped)); got != want {
+			t.Errorf("wrapped %v mapped to %d, want %d", err, got, want)
+		}
+	}
+}
+
+func TestAnUnmappedLeadsErrorIsFiveHundred(t *testing.T) {
+	t.Parallel()
+
+	if got := statusOf(leadsError(errors.New("leads: something new"))); got != http.StatusInternalServerError {
+		t.Errorf("an unmapped leads error mapped to %d, want 500", got)
 	}
 }
 

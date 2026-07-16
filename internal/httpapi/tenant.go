@@ -11,7 +11,16 @@ import (
 
 // systemPaths serve the platform rather than a tenant: probes, the OpenAPI
 // document, and the docs UI. They are reachable on any host.
-var systemPaths = []string{"/v1/healthz", "/v1/readyz", "/openapi", "/docs", "/schemas/"}
+//
+// /v1/demo-requests is here because the sender has no workspace — that is the
+// entire content of the request. It arrives on the marketing site's host, which
+// resolves to no tenant, and every other path answers "No workspace is configured
+// for this address" there. Nothing behind it reads a tenant from the context, and
+// its table has no tenant column to read one into.
+var systemPaths = []string{
+	"/v1/healthz", "/v1/readyz", "/openapi", "/docs", "/schemas/",
+	"/v1/demo-requests",
+}
 
 // resolveTenant maps the inbound Host to a tenant and binds it to the request
 // context, where domain services read it.

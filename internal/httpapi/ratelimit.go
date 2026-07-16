@@ -34,6 +34,11 @@ var throttledPrefixes = []string{
 	// Changing a password verifies the old one, which is another 64 MiB hash. The
 	// caller is signed in, and a signed-in attacker is still an attacker with a loop.
 	"/v1/me/password",
+
+	// Verifies nothing and hashes nothing, but it is an unauthenticated INSERT: a
+	// shell and a loop is a table full of somebody else's rubbish, and a person
+	// reading that list is the product's first impression of us.
+	"/v1/demo-requests",
 }
 
 // throttle limits credential-verifying endpoints per client address per path.

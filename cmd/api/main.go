@@ -46,6 +46,7 @@ import (
 	"github.com/ebnsina/muallim-api/internal/hostel"
 	"github.com/ebnsina/muallim-api/internal/httpapi"
 	"github.com/ebnsina/muallim-api/internal/idcard"
+	"github.com/ebnsina/muallim-api/internal/leads"
 	"github.com/ebnsina/muallim-api/internal/learn"
 	"github.com/ebnsina/muallim-api/internal/learnpath"
 	"github.com/ebnsina/muallim-api/internal/ledger"
@@ -212,6 +213,10 @@ func run() error {
 
 	// A workspace's own rules for the mail it sends. It borrows comms for the
 	// sending and knows nothing else about it.
+	// Demo requests arrive before there is a workspace, so this service takes no
+	// tenant and no auditor: there is no workspace to audit the write against.
+	demoRequests := leads.NewService(db, leads.NewPostgresRepository(), nil)
+
 	automations := automation.NewService(db, automation.NewPostgresRepository(), outbox,
 		automationAuditor{recorder})
 
@@ -421,6 +426,7 @@ func run() error {
 		Bundle:      bundles,
 		LearnPath:   paths,
 		Automation:  automations,
+		Leads:       demoRequests,
 		Chat:        messaging,
 		ChatHub:     chatHub,
 		Auth:        identities,
