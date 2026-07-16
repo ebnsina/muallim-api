@@ -45,6 +45,7 @@ const listPublishedCoursesSQL = `
 	  AND ($5::text IS NULL OR difficulty = $5)
 	  AND ($6::text IS NULL OR title ILIKE '%' || $6 || '%')
 	  AND ($7::uuid IS NULL OR created_by = $7)
+	  AND ($8::uuid[] IS NULL OR id = ANY($8))
 	ORDER BY created_at DESC, id DESC
 	LIMIT $4`
 
@@ -64,6 +65,7 @@ const listAllCoursesSQL = `
 	  AND ($5::text IS NULL OR difficulty = $5)
 	  AND ($6::text IS NULL OR title ILIKE '%' || $6 || '%')
 	  AND ($7::uuid IS NULL OR created_by = $7)
+	  AND ($8::uuid[] IS NULL OR id = ANY($8))
 	ORDER BY created_at DESC, id DESC
 	LIMIT $4`
 
@@ -92,7 +94,7 @@ func (r *PostgresRepository) ListCourses(ctx context.Context, tx pgx.Tx, tenantI
 
 	// Blank filters go to the database as NULL, which the query reads as "no
 	// filter". A non-null empty string would match nothing, which is the opposite.
-	var difficulty, search, author any
+	var difficulty, search, author, restrict any
 	if p.Difficulty != "" {
 		difficulty = p.Difficulty
 	}
@@ -102,8 +104,12 @@ func (r *PostgresRepository) ListCourses(ctx context.Context, tx pgx.Tx, tenantI
 	if p.Author != nil {
 		author = *p.Author
 	}
+	// Nil is no restriction; a non-nil slice restricts, an empty one to nothing.
+	if p.RestrictToIDs != nil {
+		restrict = p.RestrictToIDs
+	}
 
-	rows, err := tx.Query(ctx, query, tenantID, afterTime, afterID, p.Limit+1, difficulty, search, author)
+	rows, err := tx.Query(ctx, query, tenantID, afterTime, afterID, p.Limit+1, difficulty, search, author, restrict)
 	if err != nil {
 		return nil, fmt.Errorf("catalog: list courses: %w", err)
 	}

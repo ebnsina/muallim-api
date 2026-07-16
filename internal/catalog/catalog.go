@@ -238,6 +238,12 @@ type ListParams struct {
 	// An id and not a name: two people in a workspace may be called Ahmed, and a
 	// listing keyed on a display name would quietly merge them.
 	Author *uuid.UUID
+
+	// RestrictToIDs confines the listing to a set of course ids, for a filter
+	// resolved outside the catalogue (a category or tag). Nil means no
+	// restriction; a non-nil slice restricts to exactly those ids, and an empty
+	// non-nil slice matches nothing — a filter that resolved to no course.
+	RestrictToIDs []uuid.UUID
 }
 
 // Page size bounds. An unbounded list endpoint is an outage waiting for the

@@ -195,7 +195,7 @@ func New(opts Options) (http.Handler, huma.API) {
 	if opts.Commerce != nil {
 		pricing = opts.Commerce
 	}
-	registerCatalog(api, opts.Catalog, opts.Enrol, pricing)
+	registerCatalog(api, opts.Catalog, opts.Enrol, pricing, opts.Taxonomy)
 	registerCatalogWrites(api, opts.Catalog)
 	registerCourseCopy(api, opts.Catalog)
 	registerAnnouncements(api, opts.Catalog)

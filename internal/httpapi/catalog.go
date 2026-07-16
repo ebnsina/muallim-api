@@ -13,6 +13,7 @@ import (
 	"github.com/ebnsina/muallim-api/internal/catalog"
 	"github.com/ebnsina/muallim-api/internal/commerce"
 	"github.com/ebnsina/muallim-api/internal/enroll"
+	"github.com/ebnsina/muallim-api/internal/taxonomy"
 	"github.com/ebnsina/muallim-api/internal/tenant"
 )
 
@@ -194,7 +195,7 @@ func pricesFor(ctx context.Context, pricing coursePricing, courses []catalog.Cou
 	return pricing.PricesOf(ctx, tenant.ID(ctx), ids)
 }
 
-func registerCatalog(api huma.API, svc *catalog.Service, facts courseFacts, pricing coursePricing) {
+func registerCatalog(api huma.API, svc *catalog.Service, facts courseFacts, pricing coursePricing, tags *taxonomy.Service) {
 	huma.Register(api, huma.Operation{
 		OperationID: "list-courses",
 		Method:      http.MethodGet,
@@ -209,20 +210,39 @@ func registerCatalog(api huma.API, svc *catalog.Service, facts courseFacts, pric
 		Q          string `query:"q" maxLength:"200" doc:"Filter to courses whose title contains this"`
 		Difficulty string `query:"difficulty" maxLength:"20" doc:"Filter to one of: beginner, intermediate, advanced, expert"`
 		Author     string `query:"author" format:"uuid" doc:"Filter to the courses one person wrote, by their id"`
+		Category   string `query:"category" format:"uuid" doc:"Filter to a category id"`
+		Tag        string `query:"tag" format:"uuid" doc:"Filter to a tag id"`
 	}) (*ListCoursesOutput, error) {
 		author, err := optionalUUID(in.Author)
 		if err != nil {
 			return nil, huma.Error422UnprocessableEntity("author must be a uuid.")
 		}
+		category, err := optionalUUID(in.Category)
+		if err != nil {
+			return nil, huma.Error422UnprocessableEntity("category must be a uuid.")
+		}
+		tag, err := optionalUUID(in.Tag)
+		if err != nil {
+			return nil, huma.Error422UnprocessableEntity("tag must be a uuid.")
+		}
+
+		// A category and/or tag resolve to a set of course ids outside the
+		// catalogue; the listing is then confined to that set. A non-nil slice
+		// (empty when the filter matched nothing) restricts; nil does not.
+		restrict, err := restrictIDs(ctx, tags, tenant.ID(ctx), category, tag)
+		if err != nil {
+			return nil, catalogError(err)
+		}
 
 		// IncludeDrafts is left false. This route is anonymous, and there is no
 		// query parameter that could set it.
 		page, err := svc.ListCourses(ctx, tenant.ID(ctx), catalog.ListParams{
-			Limit:      in.Limit,
-			Cursor:     in.Cursor,
-			Search:     in.Q,
-			Difficulty: in.Difficulty,
-			Author:     author,
+			Limit:         in.Limit,
+			Cursor:        in.Cursor,
+			Search:        in.Q,
+			Difficulty:    in.Difficulty,
+			Author:        author,
+			RestrictToIDs: restrict,
 		})
 		if err != nil {
 			return nil, catalogError(err)
@@ -674,6 +694,65 @@ func courseImageURL(c catalog.Course) string {
 		return ""
 	}
 	return "/v1/courses/" + c.Slug + "/image"
+}
+
+// restrictIDs resolves the category and tag filters to the set of course ids the
+// listing is confined to. Nil means neither filter was set — no restriction.
+// When both are set the result is their intersection, so a course must be filed
+// under the category and carry the tag. Either filter matching nothing yields a
+// non-nil empty slice, which the listing reads as "no course qualifies".
+func restrictIDs(ctx context.Context, tags *taxonomy.Service, tenantID uuid.UUID, category, tag *uuid.UUID) ([]uuid.UUID, error) {
+	if category == nil && tag == nil {
+		return nil, nil
+	}
+
+	var byCategory, byTag []uuid.UUID
+	if category != nil {
+		ids, err := tags.CourseIDsInCategory(ctx, tenantID, *category)
+		if err != nil {
+			return nil, err
+		}
+		byCategory = ids
+	}
+	if tag != nil {
+		ids, err := tags.CourseIDsWithTag(ctx, tenantID, *tag)
+		if err != nil {
+			return nil, err
+		}
+		byTag = ids
+	}
+
+	switch {
+	case category != nil && tag != nil:
+		return intersectIDs(byCategory, byTag), nil
+	case category != nil:
+		return nonNilIDs(byCategory), nil
+	default:
+		return nonNilIDs(byTag), nil
+	}
+}
+
+// intersectIDs keeps the ids present in both slices, as a non-nil slice.
+func intersectIDs(a, b []uuid.UUID) []uuid.UUID {
+	in := make(map[uuid.UUID]struct{}, len(a))
+	for _, id := range a {
+		in[id] = struct{}{}
+	}
+	out := make([]uuid.UUID, 0, len(a))
+	for _, id := range b {
+		if _, ok := in[id]; ok {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// nonNilIDs returns ids as a non-nil slice, so an empty result still restricts.
+func nonNilIDs(ids []uuid.UUID) []uuid.UUID {
+	if ids == nil {
+		return []uuid.UUID{}
+	}
+	return ids
 }
 
 // optionalUUID reads a query parameter that may simply not be there. An empty
