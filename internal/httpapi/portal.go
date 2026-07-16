@@ -11,6 +11,7 @@ package httpapi
 import (
 	"context"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -207,6 +208,10 @@ func registerGuardianLink(api huma.API, schooling *academics.Service) {
 		if err != nil {
 			return nil, err
 		}
+		studentID, err := parseUUID(in.ID, "student")
+		if err != nil {
+			return nil, err
+		}
 		guardianID, err := parseUUID(in.GuardianID, "guardian")
 		if err != nil {
 			return nil, err
@@ -215,6 +220,20 @@ func registerGuardianLink(api huma.API, schooling *academics.Service) {
 		if err != nil {
 			return nil, err
 		}
+
+		// The path says this guardian is that student's, so it has to be: the segment
+		// was decorative, and a link made under the name of a child who has nothing to
+		// do with it is a mistake that succeeds silently. The caller may manage every
+		// student here, so this buys no privilege — it makes the address mean what it
+		// says, and a mismatch fail while somebody can still see it.
+		guardians, err := schooling.Guardians(ctx, p.TenantID, studentID)
+		if err != nil {
+			return nil, academicsError(err)
+		}
+		if !slices.ContainsFunc(guardians, func(g academics.Guardian) bool { return g.ID == guardianID }) {
+			return nil, huma.Error404NotFound("That guardian is not on this student's record.")
+		}
+
 		if err := schooling.LinkGuardianUser(ctx, p.TenantID, guardianID, userID); err != nil {
 			return nil, academicsError(err)
 		}
