@@ -119,7 +119,7 @@ func TestPathFlow(t *testing.T) {
 	}
 
 	// Get returns the courses in the reordered order.
-	got, err := svc.Get(t.Context(), tenant, "maths-track")
+	got, err := svc.Get(t.Context(), tenant, "maths-track", true)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestPathFlow(t *testing.T) {
 	// Get loads the courses in a constant number of queries, whatever their count.
 	counter := &database.Counter{}
 	cctx := database.WithCounter(t.Context(), counter)
-	if _, err := svc.Get(cctx, tenant, "maths-track"); err != nil {
+	if _, err := svc.Get(cctx, tenant, "maths-track", true); err != nil {
 		t.Fatalf("get counted: %v", err)
 	}
 	small := counter.Count()
@@ -150,7 +150,7 @@ func TestPathFlow(t *testing.T) {
 		t.Fatalf("grow: %v", err)
 	}
 	counter.Reset()
-	if _, err := svc.Get(cctx, tenant, "maths-track"); err != nil {
+	if _, err := svc.Get(cctx, tenant, "maths-track", true); err != nil {
 		t.Fatalf("get counted grown: %v", err)
 	}
 	if grown := counter.Count(); grown != small {
@@ -162,14 +162,14 @@ func TestPathFlow(t *testing.T) {
 	if _, err := svc.Update(t.Context(), tenant, "maths-track", learnpath.PathPatch{Status: &published}, author); err != nil {
 		t.Fatalf("publish: %v", err)
 	}
-	page, err := svc.List(t.Context(), tenant, learnpath.PathFilter{Status: learnpath.StatusPublished}, learnpath.PageParams{})
+	page, err := svc.List(t.Context(), tenant, learnpath.PathFilter{IncludeDrafts: true, Status: learnpath.StatusPublished}, learnpath.PageParams{})
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
 	if len(page.Paths) != 1 || page.Paths[0].Status != learnpath.StatusPublished {
 		t.Fatalf("published listing: %+v", page.Paths)
 	}
-	draftPage, err := svc.List(t.Context(), tenant, learnpath.PathFilter{Status: learnpath.StatusDraft}, learnpath.PageParams{})
+	draftPage, err := svc.List(t.Context(), tenant, learnpath.PathFilter{IncludeDrafts: true, Status: learnpath.StatusDraft}, learnpath.PageParams{})
 	if err != nil {
 		t.Fatalf("list drafts: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestPathFlow(t *testing.T) {
 	if err := svc.Delete(t.Context(), tenant, "maths-track", author); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	if _, err := svc.Get(t.Context(), tenant, "maths-track"); !errors.Is(err, learnpath.ErrNotFound) {
+	if _, err := svc.Get(t.Context(), tenant, "maths-track", true); !errors.Is(err, learnpath.ErrNotFound) {
 		t.Fatalf("deleted path still resolves: %v", err)
 	}
 }
@@ -202,14 +202,14 @@ func TestListKeysetPaginates(t *testing.T) {
 		}
 	}
 
-	first, err := svc.List(t.Context(), tenant, learnpath.PathFilter{}, learnpath.PageParams{Limit: 2})
+	first, err := svc.List(t.Context(), tenant, learnpath.PathFilter{IncludeDrafts: true}, learnpath.PageParams{Limit: 2})
 	if err != nil {
 		t.Fatalf("first page: %v", err)
 	}
 	if len(first.Paths) != 2 || !first.HasMore || first.NextCursor == "" {
 		t.Fatalf("first page: got %d, hasMore=%v cursor=%q", len(first.Paths), first.HasMore, first.NextCursor)
 	}
-	second, err := svc.List(t.Context(), tenant, learnpath.PathFilter{}, learnpath.PageParams{Limit: 2, Cursor: first.NextCursor})
+	second, err := svc.List(t.Context(), tenant, learnpath.PathFilter{IncludeDrafts: true}, learnpath.PageParams{Limit: 2, Cursor: first.NextCursor})
 	if err != nil {
 		t.Fatalf("second page: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestGetUnknownIsNotFound(t *testing.T) {
 	tenant := seedTenant(t, db)
 	svc := newService(db)
 
-	if _, err := svc.Get(t.Context(), tenant, "no-such-path"); !errors.Is(err, learnpath.ErrNotFound) {
+	if _, err := svc.Get(t.Context(), tenant, "no-such-path", true); !errors.Is(err, learnpath.ErrNotFound) {
 		t.Fatalf("unknown path did not 404: %v", err)
 	}
 }
@@ -239,5 +239,76 @@ func TestSetCoursesOnUnknownPathIsNotFound(t *testing.T) {
 
 	if err := svc.SetCourses(t.Context(), tenant, uuid.New(), nil, learnpath.Author{UserID: uuid.New()}); !errors.Is(err, learnpath.ErrNotFound) {
 		t.Fatalf("set courses on a missing path did not 404: %v", err)
+	}
+}
+
+// A draft path belongs to the people writing it. Everybody else is told the same
+// thing they are told about a path that was never written — nothing. The reader's
+// authority decides this, so no query parameter can widen it.
+func TestDraftPathIsInvisibleToAReader(t *testing.T) {
+	t.Parallel()
+
+	db := testDB(t)
+	tenant := seedTenant(t, db)
+	svc := newService(db)
+	author := learnpath.Author{UserID: uuid.New()}
+
+	if _, err := svc.Create(t.Context(), tenant, learnpath.NewPath{
+		Slug: "secret-track", Title: "Unannounced",
+	}, author); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := svc.Create(t.Context(), tenant, learnpath.NewPath{
+		Slug: "open-track", Title: "Announced",
+	}, author); err != nil {
+		t.Fatalf("create published: %v", err)
+	}
+	published := learnpath.StatusPublished
+	if _, err := svc.Update(t.Context(), tenant, "open-track",
+		learnpath.PathPatch{Status: &published}, author); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	// A reader fetching the draft by name is told it does not exist.
+	if _, err := svc.Get(t.Context(), tenant, "secret-track", false); !errors.Is(err, learnpath.ErrNotFound) {
+		t.Fatalf("a draft path was served to a reader: %v", err)
+	}
+	// The published one they may have.
+	if _, err := svc.Get(t.Context(), tenant, "open-track", false); err != nil {
+		t.Fatalf("published path withheld from a reader: %v", err)
+	}
+	// An author sees the draft.
+	if _, err := svc.Get(t.Context(), tenant, "secret-track", true); err != nil {
+		t.Fatalf("draft withheld from its author: %v", err)
+	}
+
+	// The listing shows a reader the published path and nothing else.
+	page, err := svc.List(t.Context(), tenant, learnpath.PathFilter{}, learnpath.PageParams{})
+	if err != nil {
+		t.Fatalf("reader list: %v", err)
+	}
+	if len(page.Paths) != 1 || page.Paths[0].Slug != "open-track" {
+		t.Fatalf("a reader's listing leaked a draft: %+v", page.Paths)
+	}
+
+	// Asking for drafts does not conjure them: the status narrows what a reader may
+	// see, and can never widen it. This is the vulnerability, so it is asserted.
+	asked, err := svc.List(t.Context(), tenant,
+		learnpath.PathFilter{Status: learnpath.StatusDraft}, learnpath.PageParams{})
+	if err != nil {
+		t.Fatalf("reader asking for drafts: %v", err)
+	}
+	if len(asked.Paths) != 0 {
+		t.Fatalf("?status=draft handed a reader %d drafts", len(asked.Paths))
+	}
+
+	// The same request from somebody who may write finds it.
+	authored, err := svc.List(t.Context(), tenant,
+		learnpath.PathFilter{IncludeDrafts: true, Status: learnpath.StatusDraft}, learnpath.PageParams{})
+	if err != nil {
+		t.Fatalf("author list: %v", err)
+	}
+	if len(authored.Paths) != 1 || authored.Paths[0].Slug != "secret-track" {
+		t.Fatalf("an author cannot see their own draft: %+v", authored.Paths)
 	}
 }

@@ -44,9 +44,10 @@ func registerLearningPaths(api huma.API, svc *learnpath.Service) {
 		Method:      http.MethodGet,
 		Path:        "/v1/learning-paths",
 		Summary:     "Learning paths, newest first",
-		Description: "Keyset-paginated. Filter by status.",
-		Tags:        []string{"Learning paths"},
-		Security:    admin,
+		Description: "Keyset-paginated. Only somebody who may write courses sees drafts; " +
+			"for everybody else this lists published paths, whatever `status` asks for.",
+		Tags:     []string{"Learning paths"},
+		Security: admin,
 	}, func(ctx context.Context, in *struct {
 		Status string `query:"status" enum:"draft,published"`
 		Limit  int    `query:"limit" minimum:"1" maximum:"100" default:"50"`
@@ -62,7 +63,11 @@ func registerLearningPaths(api huma.API, svc *learnpath.Service) {
 		if err != nil {
 			return nil, err
 		}
-		page, err := svc.List(ctx, p.TenantID, learnpath.PathFilter{Status: in.Status},
+		// Only somebody who may edit courses may see a path that is not published.
+		// The query's `status` narrows what such a reader sees; it can never widen
+		// what anybody else does.
+		page, err := svc.List(ctx, p.TenantID,
+			learnpath.PathFilter{IncludeDrafts: p.Can(auth.PermCourseWrite), Status: in.Status},
 			learnpath.PageParams{Limit: in.Limit, Cursor: in.Cursor})
 		if err != nil {
 			return nil, learnPathError(err)
@@ -140,7 +145,9 @@ func registerLearningPaths(api huma.API, svc *learnpath.Service) {
 		if err != nil {
 			return nil, err
 		}
-		path, err := svc.Get(ctx, p.TenantID, in.Slug)
+		// A draft is visible only to somebody who may edit it; everybody else gets
+		// the same 404 as for a path that was never written.
+		path, err := svc.Get(ctx, p.TenantID, in.Slug, p.Can(auth.PermCourseWrite))
 		if err != nil {
 			return nil, learnPathError(err)
 		}
@@ -238,14 +245,15 @@ func registerLearningPaths(api huma.API, svc *learnpath.Service) {
 		if err != nil {
 			return nil, err
 		}
-		path, err := svc.Get(ctx, p.TenantID, in.Slug)
+		// Already gated on course:write above, so drafts are this caller's to see.
+		path, err := svc.Get(ctx, p.TenantID, in.Slug, true)
 		if err != nil {
 			return nil, learnPathError(err)
 		}
 		if err := svc.SetCourses(ctx, p.TenantID, path.ID, ids, learnpath.Author{UserID: p.UserID}); err != nil {
 			return nil, learnPathError(err)
 		}
-		path, err = svc.Get(ctx, p.TenantID, in.Slug)
+		path, err = svc.Get(ctx, p.TenantID, in.Slug, true)
 		if err != nil {
 			return nil, learnPathError(err)
 		}
@@ -263,15 +271,15 @@ func registerLearningPaths(api huma.API, svc *learnpath.Service) {
 func learnPathError(err error) error {
 	switch {
 	case errors.Is(err, learnpath.ErrNotFound):
-		return huma.Error404NotFound("Not found.")
+		return huma.Error404NotFound("We couldn't find that learning path.")
 	case errors.Is(err, learnpath.ErrDuplicate):
 		return huma.Error409Conflict("That slug is already taken.")
 	case errors.Is(err, learnpath.ErrIncompleteOrder):
 		return huma.Error409Conflict("The course order must name each course exactly once.")
 	case errors.Is(err, learnpath.ErrInvalidPage):
-		return huma.Error422UnprocessableEntity("That page cursor is not valid.")
+		return huma.Error422UnprocessableEntity("That page link is no longer valid. Start from the first page.")
 	case errors.Is(err, learnpath.ErrInvalid):
-		return huma.Error422UnprocessableEntity(err.Error())
+		return huma.Error422UnprocessableEntity("Check the learning path details and try again.")
 	default:
 		return err
 	}

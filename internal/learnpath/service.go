@@ -78,6 +78,17 @@ func (s *Service) Create(ctx context.Context, tenantID uuid.UUID, n NewPath, aut
 
 // List lists paths, newest first, keyset-paginated, optionally by status.
 func (s *Service) List(ctx context.Context, tenantID uuid.UUID, f PathFilter, pp PageParams) (Page, error) {
+	// Visibility is a query filter, decided from the reader rather than from what
+	// they asked for. A reader who may not see drafts is confined to published
+	// paths; asking for drafts anyway matches nothing, which is the honest answer
+	// — narrowing to a status they may not see is an empty page, never a wider one.
+	if !f.IncludeDrafts {
+		if f.Status != "" && f.Status != StatusPublished {
+			return Page{}, nil
+		}
+		f.Status = StatusPublished
+	}
+
 	after, err := pp.decode()
 	if err != nil {
 		return Page{}, err
@@ -102,14 +113,22 @@ func (s *Service) List(ctx context.Context, tenantID uuid.UUID, f PathFilter, pp
 }
 
 // Get loads one path with its course ids in order. One extra query loads the
-// courses, whatever their number — no per-course round trip.
-func (s *Service) Get(ctx context.Context, tenantID uuid.UUID, slug string) (Path, error) {
+// courses, whatever their number — no per-course round trip. includeDrafts
+// carries the reader's authority to see an unpublished path and is never a
+// request parameter; without it a draft answers ErrNotFound.
+func (s *Service) Get(ctx context.Context, tenantID uuid.UUID, slug string, includeDrafts bool) (Path, error) {
 	var p Path
 	err := s.db.WithTenantReadOnly(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		p, err = s.repo.BySlug(ctx, tx, tenantID, slug)
 		if err != nil {
 			return err
+		}
+		// A draft is not found rather than forbidden: that it exists at all is a
+		// fact about the workspace's plans a reader has no business learning.
+		if p.Status != StatusPublished && !includeDrafts {
+			p = Path{}
+			return ErrNotFound
 		}
 		refs, err := s.repo.CourseRefs(ctx, tx, tenantID, p.ID)
 		if err != nil {

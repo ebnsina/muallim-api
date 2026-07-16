@@ -86,6 +86,16 @@ type PathPatch struct {
 
 // PathFilter narrows the listing.
 type PathFilter struct {
+	// IncludeDrafts widens the listing to every status.
+	//
+	// It carries an authorisation decision made by the transport layer, never a
+	// request parameter: a client that could ask for drafts by adding one to the
+	// query string would be the whole vulnerability. The zero value lists
+	// published paths, so a caller who forgets it leaks nothing.
+	IncludeDrafts bool
+
+	// Status narrows to a single status. A reader who may not see drafts lists
+	// published paths whatever this asks for.
 	Status string
 }
 

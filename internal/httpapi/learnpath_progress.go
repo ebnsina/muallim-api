@@ -43,7 +43,9 @@ func registerLearnPathProgress(api huma.API, paths *learnpath.Service, learning 
 		if err != nil {
 			return nil, err
 		}
-		path, err := paths.Get(ctx, p.TenantID, in.Slug)
+		// A learner has no progress through a path they may not see: an unpublished
+		// path is 404 here too, exactly as it is on the path itself.
+		path, err := paths.Get(ctx, p.TenantID, in.Slug, p.Can(auth.PermCourseWrite))
 		if err != nil {
 			return nil, learnPathError(err)
 		}
