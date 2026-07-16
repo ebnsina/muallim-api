@@ -230,11 +230,11 @@ func registerCourseBlueprints(api huma.API, svc *coursebuild.Service) {
 func courseBuildError(err error) error {
 	switch {
 	case errors.Is(err, coursebuild.ErrNotFound):
-		return huma.Error404NotFound("Not found.")
+		return huma.Error404NotFound("We couldn't find that course blueprint.")
 	case errors.Is(err, coursebuild.ErrInvalidPage):
-		return huma.Error422UnprocessableEntity("That page cursor is not valid.")
+		return huma.Error422UnprocessableEntity("That page link is no longer valid. Start from the first page.")
 	case errors.Is(err, coursebuild.ErrInvalidBlueprint):
-		return huma.Error422UnprocessableEntity(err.Error())
+		return huma.Error422UnprocessableEntity("Check the course blueprint and try again.")
 	default:
 		return err
 	}

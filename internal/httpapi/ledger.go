@@ -286,12 +286,12 @@ func ledgerFilter(kind, categoryID, from, to string) (ledger.EntryFilter, error)
 func ledgerError(err error) error {
 	switch {
 	case errors.Is(err, ledger.ErrNotFound):
-		return huma.Error404NotFound("Not found.")
+		return huma.Error404NotFound("We couldn't find that entry or category.")
 	case errors.Is(err, ledger.ErrInvalidPage):
-		return huma.Error422UnprocessableEntity("That page cursor is not valid.")
+		return huma.Error422UnprocessableEntity("That page link is no longer valid. Start from the first page.")
 	case errors.Is(err, ledger.ErrInvalidCategory),
 		errors.Is(err, ledger.ErrInvalidEntry):
-		return huma.Error422UnprocessableEntity(err.Error())
+		return huma.Error422UnprocessableEntity("Check the entry details and try again.")
 	default:
 		return err
 	}

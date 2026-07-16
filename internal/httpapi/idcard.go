@@ -325,12 +325,12 @@ func registerIDCards(api huma.API, svc *idcard.Service) {
 func idCardError(err error) error {
 	switch {
 	case errors.Is(err, idcard.ErrNotFound):
-		return huma.Error404NotFound("Not found.")
+		return huma.Error404NotFound("We couldn't find that ID card design.")
 	case errors.Is(err, idcard.ErrInvalidPage):
-		return huma.Error422UnprocessableEntity("That page cursor is not valid.")
+		return huma.Error422UnprocessableEntity("That page link is no longer valid. Start from the first page.")
 	case errors.Is(err, idcard.ErrInvalidLayout),
 		errors.Is(err, idcard.ErrInvalidTemplate):
-		return huma.Error422UnprocessableEntity(err.Error())
+		return huma.Error422UnprocessableEntity("Check the ID card design and try again.")
 	default:
 		return err
 	}

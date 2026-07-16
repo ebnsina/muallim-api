@@ -215,15 +215,15 @@ func registerCatalog(api huma.API, svc *catalog.Service, facts courseFacts, pric
 	}) (*ListCoursesOutput, error) {
 		author, err := optionalUUID(in.Author)
 		if err != nil {
-			return nil, huma.Error422UnprocessableEntity("author must be a uuid.")
+			return nil, huma.Error422UnprocessableEntity("That author link isn't valid.")
 		}
 		category, err := optionalUUID(in.Category)
 		if err != nil {
-			return nil, huma.Error422UnprocessableEntity("category must be a uuid.")
+			return nil, huma.Error422UnprocessableEntity("That category isn't valid.")
 		}
 		tag, err := optionalUUID(in.Tag)
 		if err != nil {
-			return nil, huma.Error422UnprocessableEntity("tag must be a uuid.")
+			return nil, huma.Error422UnprocessableEntity("That tag isn't valid.")
 		}
 
 		// A category and/or tag resolve to a set of course ids outside the
@@ -785,28 +785,33 @@ func catalogError(err error) error {
 	case errors.Is(err, catalog.ErrNotFound):
 		return huma.Error404NotFound("Course not found.")
 
-	case errors.Is(err, catalog.ErrInvalidCourse), errors.Is(err, catalog.ErrInvalidDifficulty):
-		return huma.Error422UnprocessableEntity(err.Error())
+	case errors.Is(err, catalog.ErrInvalidCourse):
+		return huma.Error422UnprocessableEntity("Check the course details: it needs a title, and the description cannot be that long.")
+
+	case errors.Is(err, catalog.ErrInvalidDifficulty):
+		return huma.Error422UnprocessableEntity("Choose a difficulty: beginner, intermediate, advanced or expert.")
 
 	case errors.Is(err, catalog.ErrPrerequisiteCycle):
 		// 422: the request was understood and is impossible. A course that requires
 		// itself, however indirectly, is a course nobody can ever start.
-		return huma.Error422UnprocessableEntity(err.Error())
+		return huma.Error422UnprocessableEntity("A course cannot require itself, directly or through another course.")
 
 	case errors.Is(err, catalog.ErrPrerequisiteExists):
 		return huma.Error409Conflict("That course is already a prerequisite.")
 
 	case errors.Is(err, catalog.ErrInvalidDripMode):
-		return huma.Error422UnprocessableEntity(err.Error())
+		return huma.Error422UnprocessableEntity("Choose how lessons are released: all at once, on a schedule, or one after another.")
 	case errors.Is(err, catalog.ErrInvalidPage):
-		return huma.Error422UnprocessableEntity("The cursor is not valid.")
-	case errors.Is(err, catalog.ErrInvalidLimit), errors.Is(err, catalog.ErrInvalidSlug):
-		return huma.Error422UnprocessableEntity(err.Error())
+		return huma.Error422UnprocessableEntity("That page link is no longer valid. Start from the first page.")
+	case errors.Is(err, catalog.ErrInvalidLimit):
+		return huma.Error422UnprocessableEntity("Ask for a smaller number of courses per page.")
+	case errors.Is(err, catalog.ErrInvalidSlug):
+		return huma.Error422UnprocessableEntity("The web address can use lowercase letters, numbers and hyphens only.")
 	case errors.Is(err, catalog.ErrSlugTaken):
 		return huma.Error409Conflict("A course with that slug already exists in this workspace.")
 
 	case errors.Is(err, catalog.ErrInvalidLesson):
-		return huma.Error422UnprocessableEntity(err.Error())
+		return huma.Error422UnprocessableEntity("Check the lesson details: it needs a title, and the content cannot be that long.")
 
 	case errors.Is(err, catalog.ErrInvalidAnnouncement):
 		return huma.Error422UnprocessableEntity("An announcement needs a title and a body.")
@@ -815,10 +820,10 @@ func catalogError(err error) error {
 		// 422, and the sentence names the URL's problem: this is the one lesson field
 		// whose validity depends on how the workspace is configured, so an author who
 		// is refused deserves to know it was the video and why.
-		return huma.Error422UnprocessableEntity(err.Error())
+		return huma.Error422UnprocessableEntity("That video link isn't one this site can play. Check the address and try again.")
 
 	case errors.Is(err, catalog.ErrIncompleteOrder):
-		return huma.Error422UnprocessableEntity(err.Error())
+		return huma.Error422UnprocessableEntity("The new order must list every item exactly once. Reload the page and try again.")
 
 	case errors.Is(err, catalog.ErrEmptyCourse):
 		return huma.Error409Conflict("A course needs at least one lesson before it can be published.")
@@ -827,7 +832,7 @@ func catalogError(err error) error {
 		return huma.Error409Conflict("That course is already published.")
 
 	case errors.Is(err, catalog.ErrInvalidImage):
-		return huma.Error422UnprocessableEntity(err.Error())
+		return huma.Error422UnprocessableEntity("That image cannot be used. Upload a PNG, JPEG or WebP under 5 MB.")
 
 	case errors.Is(err, catalog.ErrNoImage):
 		// 404: a course with no thumbnail has nothing at this path, same as a course

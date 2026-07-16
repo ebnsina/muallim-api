@@ -129,15 +129,15 @@ func registerNotices(api huma.API, svc *notices.Service) {
 func noticesError(err error) error {
 	switch {
 	case errors.Is(err, notices.ErrNotFound):
-		return huma.Error404NotFound("Not found.")
+		return huma.Error404NotFound("We couldn't find that notice.")
 	case errors.Is(err, notices.ErrNoRecipients):
 		return huma.Error422UnprocessableEntity("Nobody in that audience has a contact to reach.")
 	case errors.Is(err, notices.ErrTargetRequired):
 		return huma.Error422UnprocessableEntity("That audience needs a class or section.")
 	case errors.Is(err, notices.ErrInvalidPage):
-		return huma.Error422UnprocessableEntity("That page cursor is not valid.")
+		return huma.Error422UnprocessableEntity("That page link is no longer valid. Start from the first page.")
 	case errors.Is(err, notices.ErrInvalidNotice):
-		return huma.Error422UnprocessableEntity(err.Error())
+		return huma.Error422UnprocessableEntity("Check the notice details and try again.")
 	default:
 		return err
 	}

@@ -216,11 +216,11 @@ func registerHifz(api huma.API, svc *hifz.Service) {
 func hifzError(err error) error {
 	switch {
 	case errors.Is(err, hifz.ErrNotFound):
-		return huma.Error404NotFound("Not found.")
+		return huma.Error404NotFound("We couldn't find that hifz record.")
 	case errors.Is(err, hifz.ErrInvalidPage):
-		return huma.Error422UnprocessableEntity("That page cursor is not valid.")
+		return huma.Error422UnprocessableEntity("That page link is no longer valid. Start from the first page.")
 	case errors.Is(err, hifz.ErrInvalidEntry):
-		return huma.Error422UnprocessableEntity(err.Error())
+		return huma.Error422UnprocessableEntity("Check the hifz entry and try again.")
 	default:
 		return err
 	}

@@ -384,13 +384,13 @@ func tagViews(tags []taxonomy.Tag) []TagView {
 func taxonomyError(err error) error {
 	switch {
 	case errors.Is(err, taxonomy.ErrNotFound):
-		return huma.Error404NotFound("Not found.")
+		return huma.Error404NotFound("We couldn't find that category or tag.")
 	case errors.Is(err, taxonomy.ErrDuplicate):
 		return huma.Error409Conflict("That slug is already taken.")
 	case errors.Is(err, taxonomy.ErrInvalidPage):
-		return huma.Error422UnprocessableEntity("That page cursor is not valid.")
+		return huma.Error422UnprocessableEntity("That page link is no longer valid. Start from the first page.")
 	case errors.Is(err, taxonomy.ErrInvalid):
-		return huma.Error422UnprocessableEntity(err.Error())
+		return huma.Error422UnprocessableEntity("Check the details and try again.")
 	default:
 		return err
 	}

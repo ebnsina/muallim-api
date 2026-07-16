@@ -225,13 +225,13 @@ func registerAdmissions(api huma.API, svc *admissions.Service) {
 func admissionsError(err error) error {
 	switch {
 	case errors.Is(err, admissions.ErrNotFound):
-		return huma.Error404NotFound("Not found.")
+		return huma.Error404NotFound("We couldn't find that application.")
 	case errors.Is(err, admissions.ErrNotPending):
 		return huma.Error409Conflict("Only a pending application can be decided that way.")
 	case errors.Is(err, admissions.ErrInvalidApplication):
-		return huma.Error422UnprocessableEntity(err.Error())
+		return huma.Error422UnprocessableEntity("Check the application details and try again.")
 	case errors.Is(err, admissions.ErrInvalidPage):
-		return huma.Error422UnprocessableEntity("That page cursor is not valid.")
+		return huma.Error422UnprocessableEntity("That page link is no longer valid. Start from the first page.")
 	default:
 		return err
 	}

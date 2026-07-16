@@ -300,16 +300,16 @@ func optionalStr(s string) *string {
 func libraryError(err error) error {
 	switch {
 	case errors.Is(err, library.ErrNotFound):
-		return huma.Error404NotFound("Not found.")
+		return huma.Error404NotFound("We couldn't find that book or loan.")
 	case errors.Is(err, library.ErrNoCopies):
 		return huma.Error409Conflict("No copies of that book are available to lend.")
 	case errors.Is(err, library.ErrAlreadyReturned):
 		return huma.Error409Conflict("That loan has already been returned.")
 	case errors.Is(err, library.ErrInvalidPage):
-		return huma.Error422UnprocessableEntity("That page cursor is not valid.")
+		return huma.Error422UnprocessableEntity("That page link is no longer valid. Start from the first page.")
 	case errors.Is(err, library.ErrInvalidBook),
 		errors.Is(err, library.ErrInvalidLoan):
-		return huma.Error422UnprocessableEntity(err.Error())
+		return huma.Error422UnprocessableEntity("Check the book and loan details and try again.")
 	default:
 		return err
 	}

@@ -214,7 +214,7 @@ func notifyError(err error) error {
 		return huma.Error404NotFound("That notification does not exist.")
 
 	case errors.Is(err, notify.ErrInvalidPage):
-		return huma.Error422UnprocessableEntity("That page cursor is not valid.")
+		return huma.Error422UnprocessableEntity("That page link is no longer valid. Start from the first page.")
 
 	default:
 		return err

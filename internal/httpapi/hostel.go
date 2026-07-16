@@ -384,17 +384,17 @@ func registerHostel(api huma.API, svc *hostel.Service) {
 func hostelError(err error) error {
 	switch {
 	case errors.Is(err, hostel.ErrNotFound):
-		return huma.Error404NotFound("Not found.")
+		return huma.Error404NotFound("We couldn't find that building, room or allocation.")
 	case errors.Is(err, hostel.ErrRoomFull):
 		return huma.Error409Conflict("That room is full.")
 	case errors.Is(err, hostel.ErrAlreadyAllocated):
 		return huma.Error409Conflict("That student already holds a room.")
 	case errors.Is(err, hostel.ErrInvalidPage):
-		return huma.Error422UnprocessableEntity("That page cursor is not valid.")
+		return huma.Error422UnprocessableEntity("That page link is no longer valid. Start from the first page.")
 	case errors.Is(err, hostel.ErrInvalidBuilding),
 		errors.Is(err, hostel.ErrInvalidRoom),
 		errors.Is(err, hostel.ErrInvalidAllocation):
-		return huma.Error422UnprocessableEntity(err.Error())
+		return huma.Error422UnprocessableEntity("Check the building, room and allocation details and try again.")
 	default:
 		return err
 	}

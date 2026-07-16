@@ -744,13 +744,13 @@ func submissionView(s assign.Submission) AssignmentSubmissionView {
 func assignError(err error) error {
 	switch {
 	case errors.Is(err, assign.ErrNotFound):
-		return huma.Error404NotFound("Not found.")
+		return huma.Error404NotFound("We couldn't find that assignment or submission.")
 
 	case errors.Is(err, assign.ErrNotYours):
 		// A key belonging to somebody else is a key that does not exist, as far as
 		// whoever asked is concerned. The difference between the two is precisely
 		// the fact a probe would be after.
-		return huma.Error404NotFound("Not found.")
+		return huma.Error404NotFound("We couldn't find that assignment or submission.")
 
 	case errors.Is(err, assign.ErrAssignmentExists):
 		return huma.Error409Conflict("That lesson already has an assignment.")
@@ -765,7 +765,7 @@ func assignError(err error) error {
 		return huma.Error409Conflict("That work has not been handed in yet.")
 
 	case errors.Is(err, assign.ErrTooManyFiles):
-		return huma.Error409Conflict(err.Error())
+		return huma.Error409Conflict("You cannot attach any more files to this submission.")
 
 	case errors.Is(err, assign.ErrPastDue):
 		return huma.Error409Conflict("The deadline for that assignment has passed.")
@@ -778,7 +778,7 @@ func assignError(err error) error {
 	case errors.Is(err, assign.ErrInvalidAssignment),
 		errors.Is(err, assign.ErrInvalidFile),
 		errors.Is(err, assign.ErrInvalidGrade):
-		return huma.Error422UnprocessableEntity(err.Error())
+		return huma.Error422UnprocessableEntity("Check the assignment details and the files you attached, and try again.")
 
 	case errors.Is(err, blob.ErrNotConfigured):
 		// 503, not 500. Nothing is broken; this deployment has no bucket, and no

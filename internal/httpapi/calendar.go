@@ -248,11 +248,11 @@ func registerCalendar(api huma.API, svc *calendar.Service) {
 func calendarError(err error) error {
 	switch {
 	case errors.Is(err, calendar.ErrNotFound):
-		return huma.Error404NotFound("Not found.")
+		return huma.Error404NotFound("We couldn't find that event.")
 	case errors.Is(err, calendar.ErrInvalidPage):
-		return huma.Error422UnprocessableEntity("That page cursor is not valid.")
+		return huma.Error422UnprocessableEntity("That page link is no longer valid. Start from the first page.")
 	case errors.Is(err, calendar.ErrInvalidEvent):
-		return huma.Error422UnprocessableEntity(err.Error())
+		return huma.Error422UnprocessableEntity("Check the event details and try again.")
 	default:
 		return err
 	}

@@ -464,17 +464,17 @@ func registerFees(api huma.API, svc *fees.Service) {
 func feesError(err error) error {
 	switch {
 	case errors.Is(err, fees.ErrNotFound):
-		return huma.Error404NotFound("Not found.")
+		return huma.Error404NotFound("We couldn't find that fee, invoice or payment.")
 	case errors.Is(err, fees.ErrNotUnpaid):
 		return huma.Error409Conflict("Only an unpaid invoice can be changed that way.")
 	case errors.Is(err, fees.ErrNoTarget):
 		return huma.Error422UnprocessableEntity("Name the students, or a class, to bill.")
 	case errors.Is(err, fees.ErrInvalidPage):
-		return huma.Error422UnprocessableEntity("That page cursor is not valid.")
+		return huma.Error422UnprocessableEntity("That page link is no longer valid. Start from the first page.")
 	case errors.Is(err, fees.ErrInvalidStructure),
 		errors.Is(err, fees.ErrInvalidInvoice),
 		errors.Is(err, fees.ErrInvalidPayment):
-		return huma.Error422UnprocessableEntity(err.Error())
+		return huma.Error422UnprocessableEntity("Check the fee, invoice and payment details and try again.")
 	default:
 		return err
 	}

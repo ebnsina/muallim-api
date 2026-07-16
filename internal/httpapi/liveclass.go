@@ -137,7 +137,7 @@ func registerLiveSessions(api huma.API, svc *liveclass.Service, courses *catalog
 				return nil, liveClassError(err)
 			}
 			if !enrolled {
-				return nil, huma.Error404NotFound("Not found.")
+				return nil, huma.Error404NotFound("We couldn't find that live class.")
 			}
 		}
 
@@ -260,11 +260,11 @@ func liveClassError(err error) error {
 	case errors.Is(err, liveclass.ErrNotFound), errors.Is(err, catalog.ErrNotFound):
 		// An unknown session, or an unknown course slug, are both a 404 — neither
 		// admits existence to a caller who has none.
-		return huma.Error404NotFound("Not found.")
+		return huma.Error404NotFound("We couldn't find that live class.")
 	case errors.Is(err, liveclass.ErrInvalidSession):
-		return huma.Error422UnprocessableEntity(err.Error())
+		return huma.Error422UnprocessableEntity("Check the live class details and try again.")
 	case errors.Is(err, liveclass.ErrInvalidPage):
-		return huma.Error422UnprocessableEntity("That page cursor is not valid.")
+		return huma.Error422UnprocessableEntity("That page link is no longer valid. Start from the first page.")
 	default:
 		return err
 	}

@@ -372,13 +372,13 @@ func resultView(r grade.Result) ResultView {
 func gradeError(err error) error {
 	switch {
 	case errors.Is(err, grade.ErrNotFound):
-		return huma.Error404NotFound("Not found.")
+		return huma.Error404NotFound("We couldn't find that grading scale.")
 
 	case errors.Is(err, grade.ErrScaleExists):
 		return huma.Error409Conflict("A grading scale with that name already exists.")
 
 	case errors.Is(err, grade.ErrInvalidScale):
-		return huma.Error422UnprocessableEntity(err.Error())
+		return huma.Error422UnprocessableEntity("Check the grading scale: each band needs a name and a mark range.")
 
 	case errors.Is(err, grade.ErrInvalidScore):
 		// A score this system built, not one a client sent. It is a bug here, and it

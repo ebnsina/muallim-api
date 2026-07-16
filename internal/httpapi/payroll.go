@@ -289,16 +289,16 @@ func registerPayroll(api huma.API, svc *payroll.Service) {
 func payrollError(err error) error {
 	switch {
 	case errors.Is(err, payroll.ErrNotFound):
-		return huma.Error404NotFound("Not found.")
+		return huma.Error404NotFound("We couldn't find that payslip or salary structure.")
 	case errors.Is(err, payroll.ErrNotDraft):
 		return huma.Error409Conflict("Only a draft payslip can be paid.")
 	case errors.Is(err, payroll.ErrNoSalary):
 		return huma.Error422UnprocessableEntity("That staff member has no salary structure to pay.")
 	case errors.Is(err, payroll.ErrInvalidPage):
-		return huma.Error422UnprocessableEntity("That page cursor is not valid.")
+		return huma.Error422UnprocessableEntity("That page link is no longer valid. Start from the first page.")
 	case errors.Is(err, payroll.ErrInvalidStructure),
 		errors.Is(err, payroll.ErrInvalidPayslip):
-		return huma.Error422UnprocessableEntity(err.Error())
+		return huma.Error422UnprocessableEntity("Check the salary and payslip details and try again.")
 	default:
 		return err
 	}

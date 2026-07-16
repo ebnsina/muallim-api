@@ -472,7 +472,7 @@ func chatError(err error) error {
 	case errors.Is(err, chat.ErrInvalid):
 		return huma.Error422UnprocessableEntity("That request is not valid.")
 	case errors.Is(err, chat.ErrInvalidPage):
-		return huma.Error422UnprocessableEntity("That page cursor is not valid.")
+		return huma.Error422UnprocessableEntity("That page link is no longer valid. Start from the first page.")
 	default:
 		return err
 	}

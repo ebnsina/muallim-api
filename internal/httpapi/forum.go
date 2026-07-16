@@ -422,7 +422,7 @@ func forumError(err error) error {
 		return huma.Error403Forbidden("You may not do that.")
 
 	case errors.Is(err, forum.ErrInvalidPage):
-		return huma.Error422UnprocessableEntity("That page cursor is not valid.")
+		return huma.Error422UnprocessableEntity("That page link is no longer valid. Start from the first page.")
 
 	default:
 		return err

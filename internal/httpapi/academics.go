@@ -745,7 +745,7 @@ func parseDates(startsOn, endsOn string) (time.Time, time.Time, error) {
 func academicsError(err error) error {
 	switch {
 	case errors.Is(err, academics.ErrNotFound):
-		return huma.Error404NotFound("Not found.")
+		return huma.Error404NotFound("We couldn't find that record.")
 
 	case errors.Is(err, academics.ErrNameTaken):
 		return huma.Error409Conflict("That name is already used in this workspace.")
@@ -754,7 +754,7 @@ func academicsError(err error) error {
 		return huma.Error409Conflict("That admission number is already used in this workspace.")
 
 	case errors.Is(err, academics.ErrInvalidPage):
-		return huma.Error422UnprocessableEntity("That page cursor is not valid.")
+		return huma.Error422UnprocessableEntity("That page link is no longer valid. Start from the first page.")
 
 	case errors.Is(err, academics.ErrInvalidYear),
 		errors.Is(err, academics.ErrInvalidTerm),
@@ -767,7 +767,7 @@ func academicsError(err error) error {
 		errors.Is(err, academics.ErrInvalidPeriod),
 		errors.Is(err, academics.ErrInvalidPromotion),
 		errors.Is(err, academics.ErrInvalidInstitutionType):
-		return huma.Error422UnprocessableEntity(err.Error())
+		return huma.Error422UnprocessableEntity("Check the details and try again.")
 
 	default:
 		return err

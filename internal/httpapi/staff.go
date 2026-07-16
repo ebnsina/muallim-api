@@ -247,13 +247,13 @@ func registerStaff(api huma.API, svc *staff.Service) {
 func staffError(err error) error {
 	switch {
 	case errors.Is(err, staff.ErrNotFound):
-		return huma.Error404NotFound("Not found.")
+		return huma.Error404NotFound("We couldn't find that staff member.")
 	case errors.Is(err, staff.ErrStaffNoTaken):
 		return huma.Error409Conflict("That staff number is already used in this workspace.")
 	case errors.Is(err, staff.ErrInvalidPage):
-		return huma.Error422UnprocessableEntity("That page cursor is not valid.")
+		return huma.Error422UnprocessableEntity("That page link is no longer valid. Start from the first page.")
 	case errors.Is(err, staff.ErrInvalidStaff):
-		return huma.Error422UnprocessableEntity(err.Error())
+		return huma.Error422UnprocessableEntity("Check the staff details and try again.")
 	default:
 		return err
 	}

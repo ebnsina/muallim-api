@@ -365,15 +365,15 @@ func registerTransport(api huma.API, svc *transport.Service) {
 func transportError(err error) error {
 	switch {
 	case errors.Is(err, transport.ErrNotFound):
-		return huma.Error404NotFound("Not found.")
+		return huma.Error404NotFound("We couldn't find that route, vehicle or assignment.")
 	case errors.Is(err, transport.ErrAlreadyAssigned):
 		return huma.Error409Conflict("That student already rides a route.")
 	case errors.Is(err, transport.ErrInvalidPage):
-		return huma.Error422UnprocessableEntity("That page cursor is not valid.")
+		return huma.Error422UnprocessableEntity("That page link is no longer valid. Start from the first page.")
 	case errors.Is(err, transport.ErrInvalidRoute),
 		errors.Is(err, transport.ErrInvalidVehicle),
 		errors.Is(err, transport.ErrInvalidAssignment):
-		return huma.Error422UnprocessableEntity(err.Error())
+		return huma.Error422UnprocessableEntity("Check the route, vehicle and assignment details and try again.")
 	default:
 		return err
 	}

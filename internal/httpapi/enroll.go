@@ -467,7 +467,7 @@ func enrolError(err error) error {
 		return huma.Error409Conflict("You bought this course. Ask the workspace for a refund — cancelling would not return your money.")
 
 	case errors.Is(err, enroll.ErrNotFound):
-		return huma.Error404NotFound("Not found.")
+		return huma.Error404NotFound("We couldn't find that course or enrolment.")
 
 	case errors.Is(err, enroll.ErrNotEnrolled):
 		// 403, not 404: the course is published and visible, so there is nothing to

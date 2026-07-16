@@ -322,12 +322,12 @@ func registerCertDesigns(api huma.API, svc *certdesign.Service) {
 func certDesignError(err error) error {
 	switch {
 	case errors.Is(err, certdesign.ErrNotFound):
-		return huma.Error404NotFound("Not found.")
+		return huma.Error404NotFound("We couldn't find that certificate design.")
 	case errors.Is(err, certdesign.ErrInvalidPage):
-		return huma.Error422UnprocessableEntity("That page cursor is not valid.")
+		return huma.Error422UnprocessableEntity("That page link is no longer valid. Start from the first page.")
 	case errors.Is(err, certdesign.ErrInvalidLayout),
 		errors.Is(err, certdesign.ErrInvalidDesign):
-		return huma.Error422UnprocessableEntity(err.Error())
+		return huma.Error422UnprocessableEntity("Check the certificate design and try again.")
 	default:
 		return err
 	}

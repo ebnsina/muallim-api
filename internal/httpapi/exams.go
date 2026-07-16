@@ -484,19 +484,19 @@ func optionalDate(raw string) (*time.Time, error) {
 func examsError(err error) error {
 	switch {
 	case errors.Is(err, exams.ErrNotFound):
-		return huma.Error404NotFound("Not found.")
+		return huma.Error404NotFound("We couldn't find that exam, scale or mark.")
 	case errors.Is(err, exams.ErrExamPublished):
 		return huma.Error409Conflict("A published exam's marks cannot be changed.")
 	case errors.Is(err, exams.ErrNoScale):
 		return huma.Error422UnprocessableEntity("This exam's grading scale has no bands.")
 	case errors.Is(err, exams.ErrUngraded):
-		return huma.Error422UnprocessableEntity(err.Error())
+		return huma.Error422UnprocessableEntity("A mark falls outside every band of this grading scale. Widen the bands, or correct the mark.")
 	case errors.Is(err, exams.ErrInvalidPage):
-		return huma.Error422UnprocessableEntity("That page cursor is not valid.")
+		return huma.Error422UnprocessableEntity("That page link is no longer valid. Start from the first page.")
 	case errors.Is(err, exams.ErrInvalidScale),
 		errors.Is(err, exams.ErrInvalidExam),
 		errors.Is(err, exams.ErrInvalidMark):
-		return huma.Error422UnprocessableEntity(err.Error())
+		return huma.Error422UnprocessableEntity("Check the exam, grading scale and mark details and try again.")
 	default:
 		return err
 	}

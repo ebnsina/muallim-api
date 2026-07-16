@@ -927,16 +927,16 @@ func assessError(err error) error {
 		// Also the answer for an attempt belonging to somebody else, and for one that
 		// is no longer open. A client learns that there is nothing there for them,
 		// which is all any of those three mean.
-		return huma.Error404NotFound("Not found.")
+		return huma.Error404NotFound("We couldn't find that quiz, question or attempt.")
 
 	case errors.Is(err, assess.ErrNotYourAttempt):
-		return huma.Error404NotFound("Not found.")
+		return huma.Error404NotFound("We couldn't find that quiz, question or attempt.")
 
 	case errors.Is(err, assess.ErrQuizExists):
 		return huma.Error409Conflict("That lesson already has a quiz.")
 
 	case errors.Is(err, assess.ErrInvalidPage):
-		return huma.Error422UnprocessableEntity("That page cursor is not valid.")
+		return huma.Error422UnprocessableEntity("That page link is no longer valid. Start from the first page.")
 
 	case errors.Is(err, assess.ErrAttemptsExhausted):
 		return huma.Error409Conflict("You have used every attempt at this quiz.")
@@ -959,13 +959,13 @@ func assessError(err error) error {
 		return huma.Error422UnprocessableEntity("That question is graded automatically.")
 
 	case errors.Is(err, assess.ErrInvalidGrade):
-		return huma.Error422UnprocessableEntity(err.Error())
+		return huma.Error422UnprocessableEntity("The marks you awarded are outside the range this question allows.")
 
 	case errors.Is(err, assess.ErrInvalidQuiz),
 		errors.Is(err, assess.ErrInvalidQuestion),
 		errors.Is(err, assess.ErrIncompleteOrder),
 		errors.Is(err, assess.ErrInvalidUpload):
-		return huma.Error422UnprocessableEntity(err.Error())
+		return huma.Error422UnprocessableEntity("Check the quiz and question details and try again.")
 
 	case errors.Is(err, assess.ErrNotDrawQuestion):
 		return huma.Error409Conflict("That question takes no uploaded drawing.")

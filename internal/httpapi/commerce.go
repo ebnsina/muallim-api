@@ -600,7 +600,7 @@ func orderView(o commerce.Order) OrderView {
 func commerceError(err error) error {
 	switch {
 	case errors.Is(err, commerce.ErrNotFound):
-		return huma.Error404NotFound("Not found.")
+		return huma.Error404NotFound("We couldn't find that order or price.")
 
 	case errors.Is(err, commerce.ErrNoAccount):
 		return huma.Error409Conflict("This workspace has no payment account. Connect one before pricing a course.")
@@ -615,7 +615,7 @@ func commerceError(err error) error {
 		return huma.Error409Conflict("You have already bought this course.")
 
 	case errors.Is(err, commerce.ErrInvalidPrice):
-		return huma.Error422UnprocessableEntity(err.Error())
+		return huma.Error422UnprocessableEntity("That price isn't valid. Enter an amount greater than zero.")
 
 	case errors.Is(err, commerce.ErrGatewayUnavailable):
 		return huma.Error503ServiceUnavailable("That payment gateway is not configured in this deployment.")

@@ -309,7 +309,7 @@ func invitationView(inv auth.Invitation) InvitationView {
 func membersError(err error) error {
 	switch {
 	case errors.Is(err, auth.ErrInvalidPage):
-		return huma.Error422UnprocessableEntity("That page cursor is not one this API issued.")
+		return huma.Error422UnprocessableEntity("That page link is no longer valid. Start from the first page.")
 
 	case errors.Is(err, auth.ErrInvitationInvalid):
 		return huma.Error404NotFound("That invitation is invalid, expired, or already used.")

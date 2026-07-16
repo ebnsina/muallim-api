@@ -409,16 +409,16 @@ func templateView(t certify.Template) TemplateView {
 func certifyError(err error) error {
 	switch {
 	case errors.Is(err, certify.ErrInvalidPage):
-		return huma.Error422UnprocessableEntity("That page cursor is not one this API issued.")
+		return huma.Error422UnprocessableEntity("That page link is no longer valid. Start from the first page.")
 
 	case errors.Is(err, certify.ErrNotFound):
-		return huma.Error404NotFound("Not found.")
+		return huma.Error404NotFound("We couldn't find that certificate or template.")
 
 	case errors.Is(err, certify.ErrTemplateExists):
 		return huma.Error409Conflict("A certificate template with that name already exists.")
 
 	case errors.Is(err, certify.ErrInvalidTemplate):
-		return huma.Error422UnprocessableEntity(err.Error())
+		return huma.Error422UnprocessableEntity("Check the certificate template and try again.")
 
 	case errors.Is(err, certify.ErrRevoked):
 		// Kept for the day something refuses to act on a revoked certificate. Verifying
