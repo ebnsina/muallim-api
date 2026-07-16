@@ -43,8 +43,13 @@ var (
 // rule for an event nothing fires would never run, and its author would have no
 // way to discover that.
 const (
-	// EventEnrolled fires when a learner joins a course, however they got there —
-	// self-enrolled, imported, granted a bundle, or having paid for it.
+	// EventEnrolled fires when a learner joins a course: enrolling themselves,
+	// being granted a seat, taking a bundle, or paying for it.
+	//
+	// A cohort import is the exception, and deliberately: it enrols hundreds of
+	// people in one statement, and naming each of them to fill a template would be
+	// a query per learner in the one path built to have none. The person who pasted
+	// the list is the one telling that cohort they are on the course.
 	EventEnrolled = "learner.enrolled"
 
 	// EventCompleted fires when a learner finishes the last lesson of a course.

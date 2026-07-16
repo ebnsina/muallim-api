@@ -649,6 +649,14 @@ func (s *Service) Grant(ctx context.Context, tenantID uuid.UUID, slug string, le
 			return err
 		}
 
+		// Granted or not, the learner is on the course, and being put there by
+		// somebody else is no reason to be the one learner nobody welcomes.
+		if s.announcer != nil {
+			if err := s.announcer.Enrolled(ctx, tx, tenantID, learnerID, courseID); err != nil {
+				return err
+			}
+		}
+
 		return s.audit.Record(ctx, tx, tenantID, AuditEntry{
 			ActorID: &actor.UserID, Action: ActionEnrolled,
 			TargetType: "course", TargetID: courseID.String(),
@@ -819,8 +827,15 @@ The source is the caller's, because only they know why: a purchase is not a self
 enrolment, and the difference is what a support conversation turns on.
 */
 func (s *Service) GrantInTx(ctx context.Context, tx pgx.Tx, tenantID, courseID, userID uuid.UUID, source string) error {
-	_, _, err := s.repo.Enrol(ctx, tx, tenantID, courseID, userID, source, nil)
-	return err
+	_, created, err := s.repo.Enrol(ctx, tx, tenantID, courseID, userID, source, nil)
+	if err != nil || !created || s.announcer == nil {
+		return err
+	}
+
+	// Somebody who has just paid is the last learner who should hear nothing. The
+	// gateway delivers an event more than once, so this hangs off `created`: the
+	// second delivery enrols nobody twice and welcomes nobody twice either.
+	return s.announcer.Enrolled(ctx, tx, tenantID, userID, courseID)
 }
 
 // GrantCourses enrols a learner in every course of a set — a bundle grant — in one
@@ -830,8 +845,17 @@ func (s *Service) GrantInTx(ctx context.Context, tx pgx.Tx, tenantID, courseID, 
 func (s *Service) GrantCourses(ctx context.Context, tenantID uuid.UUID, courseIDs []uuid.UUID, learnerID uuid.UUID, source string) error {
 	return s.db.WithTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
 		for _, courseID := range courseIDs {
-			if _, _, err := s.repo.Enrol(ctx, tx, tenantID, courseID, learnerID, source, nil); err != nil {
+			_, created, err := s.repo.Enrol(ctx, tx, tenantID, courseID, learnerID, source, nil)
+			if err != nil {
 				return err
+			}
+			// One welcome per course they did not already hold. A bundle of ten is ten
+			// enrolments and ten notes, which is what a rule about enrolling says; the
+			// workspace that finds that noisy has a switch for it.
+			if created && s.announcer != nil {
+				if err := s.announcer.Enrolled(ctx, tx, tenantID, learnerID, courseID); err != nil {
+					return err
+				}
 			}
 		}
 		return nil
