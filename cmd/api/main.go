@@ -420,6 +420,7 @@ func run() error {
 		Taxonomy:    taxonomies,
 		Bundle:      bundles,
 		LearnPath:   paths,
+		Automation:  automations,
 		Chat:        messaging,
 		ChatHub:     chatHub,
 		Auth:        identities,
