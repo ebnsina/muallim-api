@@ -36,6 +36,7 @@ import (
 	"github.com/ebnsina/muallim-api/internal/learn"
 	"github.com/ebnsina/muallim-api/internal/ledger"
 	"github.com/ebnsina/muallim-api/internal/library"
+	"github.com/ebnsina/muallim-api/internal/liveclass"
 	"github.com/ebnsina/muallim-api/internal/notices"
 	"github.com/ebnsina/muallim-api/internal/notify"
 	"github.com/ebnsina/muallim-api/internal/overview"
@@ -129,6 +130,9 @@ type Options struct {
 
 	// IDCard designs student and staff identity cards.
 	IDCard *idcard.Service
+
+	// LiveClass schedules bring-your-own-link meetings on a course.
+	LiveClass *liveclass.Service
 
 	// Commerce may be nil: a deployment with no gateway configured sells nothing,
 	// and every course in it is free — which is exactly what this product was
@@ -231,6 +235,7 @@ func New(opts Options) (http.Handler, huma.API) {
 	registerAdmissions(api, opts.Admissions)
 	registerAdmissionsAdmit(api, opts.Admissions, opts.Academics)
 	registerIDCards(api, opts.IDCard)
+	registerLiveSessions(api, opts.LiveClass, opts.Catalog, opts.Enrol)
 	registerGamification(api, opts.Gamify)
 
 	// Order matters, outermost first.

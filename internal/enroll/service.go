@@ -128,6 +128,17 @@ func (s *Service) hasLiveEnrolment(ctx context.Context, tx pgx.Tx, tenantID, cou
 	return err == nil && existing.Live(s.now())
 }
 
+// IsEnrolled reports whether the user has a live enrolment in the course — the
+// gate a caller (e.g. live sessions) uses to decide who may read and join.
+func (s *Service) IsEnrolled(ctx context.Context, tenantID, courseID, userID uuid.UUID) (bool, error) {
+	var enrolled bool
+	err := s.db.WithTenantReadOnly(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		enrolled = s.hasLiveEnrolment(ctx, tx, tenantID, courseID, userID)
+		return nil
+	})
+	return enrolled, err
+}
+
 // coursePublished is catalog's published status. Restated rather than imported:
 // a domain package may not depend on a sibling, and the string is part of the
 // schema, not of catalog's API.

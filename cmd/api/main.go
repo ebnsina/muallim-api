@@ -46,6 +46,7 @@ import (
 	"github.com/ebnsina/muallim-api/internal/learn"
 	"github.com/ebnsina/muallim-api/internal/ledger"
 	"github.com/ebnsina/muallim-api/internal/library"
+	"github.com/ebnsina/muallim-api/internal/liveclass"
 	"github.com/ebnsina/muallim-api/internal/notices"
 	"github.com/ebnsina/muallim-api/internal/notify"
 	"github.com/ebnsina/muallim-api/internal/overview"
@@ -271,6 +272,9 @@ func run() error {
 	// ID-card designs (student and staff), with their backgrounds in the object store.
 	idCards := idcard.NewService(db, idcard.NewPostgresRepository(), store, idCardAuditor{recorder})
 
+	// Live class sessions: bring-your-own-link meetings scheduled on a course.
+	liveSessions := liveclass.NewService(db, liveclass.NewPostgresRepository(), liveClassAuditor{recorder})
+
 	// `learning` satisfies assess.Completions: passing a quiz completes its lesson,
 	// in the transaction that recorded the grade. The interface is declared by
 	// assess and satisfied by enroll, which have never heard of each other. The
@@ -387,6 +391,7 @@ func run() error {
 		CourseBuild: blueprints,
 		Admissions:  intake,
 		IDCard:      idCards,
+		LiveClass:   liveSessions,
 		Auth:        identities,
 		Enrol:       learning,
 		Assess:      quizzes,

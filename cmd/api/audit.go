@@ -25,6 +25,7 @@ import (
 	"github.com/ebnsina/muallim-api/internal/idcard"
 	"github.com/ebnsina/muallim-api/internal/ledger"
 	"github.com/ebnsina/muallim-api/internal/library"
+	"github.com/ebnsina/muallim-api/internal/liveclass"
 	"github.com/ebnsina/muallim-api/internal/notices"
 	"github.com/ebnsina/muallim-api/internal/payroll"
 	"github.com/ebnsina/muallim-api/internal/staff"
@@ -205,6 +206,20 @@ type ledgerAuditor struct{ recorder *audit.Recorder }
 var _ ledger.AuditRecorder = ledgerAuditor{}
 
 func (a ledgerAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, e ledger.AuditEntry) error {
+	return a.recorder.Record(ctx, tx, tenantID, audit.Entry{
+		ActorID:    e.ActorID,
+		Action:     e.Action,
+		TargetType: e.TargetType,
+		TargetID:   e.TargetID,
+		Metadata:   e.Metadata,
+	})
+}
+
+type liveClassAuditor struct{ recorder *audit.Recorder }
+
+var _ liveclass.AuditRecorder = liveClassAuditor{}
+
+func (a liveClassAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, e liveclass.AuditEntry) error {
 	return a.recorder.Record(ctx, tx, tenantID, audit.Entry{
 		ActorID:    e.ActorID,
 		Action:     e.Action,
