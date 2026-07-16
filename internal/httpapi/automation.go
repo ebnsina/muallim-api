@@ -24,7 +24,9 @@ type AutomationRuleView struct {
 // templates may use. The chooser is built from this rather than from a list the
 // client keeps: a client guessing at placeholders writes rules that render blank.
 type AutomationEventView struct {
-	Event        string   `json:"event"`
+	// The same closed set the write body takes: a client that reads an event here
+	// must be able to hand it straight back without knowing the enum itself.
+	Event        string   `json:"event" enum:"learner.enrolled,course.completed"`
 	Placeholders []string `json:"placeholders"`
 }
 
