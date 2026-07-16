@@ -18,7 +18,7 @@ import (
 type InvitationView struct {
 	ID        string    `json:"id" format:"uuid"`
 	Email     string    `json:"email" format:"email"`
-	Role      string    `json:"role" enum:"owner,admin,instructor,student"`
+	Role      string    `json:"role" enum:"owner,admin,instructor,student,guardian"`
 	Status    string    `json:"status" enum:"pending,accepted,revoked,expired"`
 	ExpiresAt time.Time `json:"expires_at"`
 	CreatedAt time.Time `json:"created_at"`
@@ -55,7 +55,7 @@ type MemberView struct {
 	UserID        string    `json:"user_id" format:"uuid"`
 	Email         string    `json:"email" format:"email"`
 	Name          string    `json:"name"`
-	Role          string    `json:"role" enum:"owner,admin,instructor,student"`
+	Role          string    `json:"role" enum:"owner,admin,instructor,student,guardian"`
 	Status        string    `json:"status" enum:"active,suspended"`
 	EmailVerified bool      `json:"email_verified"`
 	JoinedAt      time.Time `json:"joined_at" doc:"When they joined this workspace — not when the account was made."`
@@ -87,7 +87,7 @@ func registerMembers(api huma.API, svc *auth.Service) {
 	}, func(ctx context.Context, in *struct {
 		Body struct {
 			Email string `json:"email" format:"email" maxLength:"320"`
-			Role  string `json:"role" enum:"owner,admin,instructor,student" default:"student"`
+			Role  string `json:"role" enum:"owner,admin,instructor,student,guardian" default:"student"`
 		}
 	}) (*CreateInvitationOutput, error) {
 		p, err := requirePermission(ctx, auth.PermUserManage)
@@ -248,7 +248,7 @@ func registerMembers(api huma.API, svc *auth.Service) {
 	}, func(ctx context.Context, in *struct {
 		UserID string `path:"user_id" format:"uuid"`
 		Body   struct {
-			Role string `json:"role" enum:"owner,admin,instructor,student"`
+			Role string `json:"role" enum:"owner,admin,instructor,student,guardian"`
 		}
 	}) (*struct{}, error) {
 		p, err := requirePermission(ctx, auth.PermUserManage)

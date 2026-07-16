@@ -17,7 +17,7 @@ type UserView struct {
 	ID            string `json:"id" format:"uuid"`
 	Email         string `json:"email" format:"email"`
 	Name          string `json:"name"`
-	Role          string `json:"role" enum:"owner,admin,instructor,student"`
+	Role          string `json:"role" enum:"owner,admin,instructor,student,guardian"`
 	EmailVerified bool   `json:"email_verified"`
 }
 
