@@ -95,6 +95,53 @@ func (db *DB) Ping(ctx context.Context) error {
 // Close drains the pool.
 func (db *DB) Close() { db.pool.Close() }
 
+// Notify sends a Postgres NOTIFY on channel with payload, on the pool
+// (autocommit), so it fires at once rather than on some transaction's commit.
+// It is the fan-out primitive realtime features (chat) publish through; it
+// touches no table, so it is not tenant-bound.
+func (db *DB) Notify(ctx context.Context, channel, payload string) error {
+	if _, err := db.pool.Exec(ctx, "SELECT pg_notify($1, $2)", channel, payload); err != nil {
+		return fmt.Errorf("database: notify %s: %w", channel, err)
+	}
+	return nil
+}
+
+// Listen holds one dedicated connection LISTENing on channel and calls onNotify
+// for every notification until ctx is cancelled, reconnecting on a dropped
+// connection. This is how a chat event published on one API instance reaches the
+// WebSocket connections held by every instance.
+func (db *DB) Listen(ctx context.Context, channel string, onNotify func(payload string)) {
+	for ctx.Err() == nil {
+		if err := db.listenOnce(ctx, channel, onNotify); err != nil && ctx.Err() == nil {
+			db.log.Warn("listen dropped; reconnecting", "channel", channel, "error", err)
+			select {
+			case <-ctx.Done():
+			case <-time.After(time.Second):
+			}
+		}
+	}
+}
+
+func (db *DB) listenOnce(ctx context.Context, channel string, onNotify func(string)) error {
+	conn, err := db.pool.Acquire(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Release()
+
+	// channel is a fixed constant from our own code, never user input.
+	if _, err := conn.Exec(ctx, "LISTEN "+channel); err != nil {
+		return err
+	}
+	for {
+		n, err := conn.Conn().WaitForNotification(ctx)
+		if err != nil {
+			return err
+		}
+		onNotify(n.Payload)
+	}
+}
+
 func cmp(v, fallback time.Duration) time.Duration {
 	if v <= 0 {
 		return fallback

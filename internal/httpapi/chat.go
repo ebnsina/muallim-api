@@ -133,7 +133,7 @@ type ChatMessageOutput struct {
 // registerChat wires the chat REST surface. Every read and send is gated on
 // membership: a non-member gets 403 on a conversation they can be told exists, and
 // 404 on one they cannot. Realtime (WebSocket) is registered separately.
-func registerChat(api huma.API, svc *chat.Service, learning *enroll.Service) {
+func registerChat(api huma.API, svc *chat.Service, learning *enroll.Service, hub *ChatHub) {
 	bearer := []map[string][]string{{"bearer": {}}}
 
 	huma.Register(api, huma.Operation{
@@ -296,6 +296,9 @@ func registerChat(api huma.API, svc *chat.Service, learning *enroll.Service) {
 		msg, err := svc.Send(ctx, p.TenantID, in.ID, p.UserID, in.Body.Body)
 		if err != nil {
 			return nil, chatError(err)
+		}
+		if hub != nil {
+			hub.publishMessage(ctx, p.TenantID, msg)
 		}
 		out := &ChatMessageOutput{CacheControl: chatCacheControl}
 		out.Body.Message = chatMessageView(msg, p.UserID)

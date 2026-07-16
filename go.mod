@@ -6,6 +6,7 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.42.1
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.28
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.105.0
+	github.com/coder/websocket v1.8.15
 	github.com/danielgtaylor/huma/v2 v2.38.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
@@ -28,7 +29,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.13.30 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.19.31 // indirect
 	github.com/aws/smithy-go v1.27.3 // indirect
-	github.com/coder/websocket v1.8.15 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect

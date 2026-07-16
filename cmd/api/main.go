@@ -285,6 +285,11 @@ func run() error {
 	paths := learnpath.NewService(db, learnpath.NewPostgresRepository(), learnPathAuditor{recorder})
 	messaging := chat.NewService(db, chat.NewPostgresRepository(), chatAuditor{recorder})
 
+	// Chat's realtime hub, and the LISTEN loop that carries an event published on
+	// any instance to the sockets held here. Cancelled with the server's context.
+	chatHub := httpapi.NewChatHub(db, messaging, cfg.CORSOrigins)
+	go db.Listen(ctx, httpapi.ChatNotifyChannel, chatHub.Dispatch)
+
 	// `learning` satisfies assess.Completions: passing a quiz completes its lesson,
 	// in the transaction that recorded the grade. The interface is declared by
 	// assess and satisfied by enroll, which have never heard of each other. The
@@ -406,6 +411,7 @@ func run() error {
 		Bundle:      bundles,
 		LearnPath:   paths,
 		Chat:        messaging,
+		ChatHub:     chatHub,
 		Auth:        identities,
 		Enrol:       learning,
 		Assess:      quizzes,

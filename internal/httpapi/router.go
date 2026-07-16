@@ -145,6 +145,11 @@ type Options struct {
 	LearnPath *learnpath.Service
 	Chat      *chat.Service
 
+	// ChatHub carries chat's realtime layer — the WebSocket route + LISTEN/NOTIFY
+	// fan-out. Nil disables realtime (REST chat still works). Built in cmd/, which
+	// also owns starting its listener goroutine.
+	ChatHub *ChatHub
+
 	// Commerce may be nil: a deployment with no gateway configured sells nothing,
 	// and every course in it is free — which is exactly what this product was
 	// before there was such a thing as a price.
@@ -250,7 +255,8 @@ func New(opts Options) (http.Handler, huma.API) {
 	registerTaxonomy(api, opts.Taxonomy)
 	registerBundles(api, opts.Bundle)
 	registerLearningPaths(api, opts.LearnPath)
-	registerChat(api, opts.Chat, opts.Enrol)
+	registerChat(api, opts.Chat, opts.Enrol, opts.ChatHub)
+	registerChatWS(api, mux, opts.ChatHub)
 	registerGamification(api, opts.Gamify)
 
 	// Order matters, outermost first.
