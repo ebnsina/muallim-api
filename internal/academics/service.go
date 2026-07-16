@@ -276,7 +276,7 @@ func (s *Service) DeleteSection(ctx context.Context, tenantID, sectionID uuid.UU
 	})
 }
 
-// CreateSubject adds a subject to the catalog.
+// CreateSubject adds a subject to the catalogue.
 func (s *Service) CreateSubject(ctx context.Context, tenantID uuid.UUID, n NewSubject) (Subject, error) {
 	if err := n.validate(); err != nil {
 		return Subject{}, err

@@ -149,7 +149,7 @@ type Subject struct {
 	UpdatedAt time.Time
 }
 
-// NewSubject describes a subject to add to the catalog.
+// NewSubject describes a subject to add to the catalogue.
 type NewSubject struct {
 	Name string
 	Code string

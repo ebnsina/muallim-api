@@ -317,7 +317,7 @@ func TestStudentsAndGuardians(t *testing.T) {
 	}
 }
 
-// A subject is added to the catalog, listed by name, and its name is unique.
+// A subject is added to the catalogue, listed by name, and its name is unique.
 func TestSubjects(t *testing.T) {
 	t.Parallel()
 
