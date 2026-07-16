@@ -26,6 +26,7 @@ import (
 	"github.com/ebnsina/muallim-api/internal/assign"
 	"github.com/ebnsina/muallim-api/internal/audit"
 	"github.com/ebnsina/muallim-api/internal/auth"
+	"github.com/ebnsina/muallim-api/internal/automation"
 	"github.com/ebnsina/muallim-api/internal/bundle"
 	"github.com/ebnsina/muallim-api/internal/calendar"
 	"github.com/ebnsina/muallim-api/internal/catalog"
@@ -209,11 +210,20 @@ func run() error {
 	// arrangement: enroll declares Rewards, gamify satisfies it, wired here.
 	gamification := gamify.NewService(db, gamify.NewPostgresRepository())
 
+	// A workspace's own rules for the mail it sends. It borrows comms for the
+	// sending and knows nothing else about it.
+	automations := automation.NewService(db, automation.NewPostgresRepository(), outbox,
+		automationAuditor{recorder})
+
 	learning := enroll.NewService(db, enroll.NewPostgresRepository(), enrolAuditor{recorder},
 		certificates{credentials}, gamifyRewards{gamification}).
 		// Importing a cohort needs to know who holds an address. That is auth's table,
 		// and this is the only place that knows both packages exist.
-		WithDirectory(directory{authRepo})
+		WithDirectory(directory{authRepo}).
+		// Enrolling and finishing are what a workspace writes rules about. The
+		// announcer resolves the learner and the course; enrol knows neither an
+		// automation nor an email exists.
+		WithAnnouncer(automationAnnouncer{automations, authRepo, catalogRepo, log})
 
 	grading, err := assess.NewRiverEnqueuer(jobs)
 	if err != nil {

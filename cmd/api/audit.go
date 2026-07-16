@@ -12,6 +12,7 @@ import (
 	"github.com/ebnsina/muallim-api/internal/assign"
 	"github.com/ebnsina/muallim-api/internal/audit"
 	"github.com/ebnsina/muallim-api/internal/auth"
+	"github.com/ebnsina/muallim-api/internal/automation"
 	"github.com/ebnsina/muallim-api/internal/bundle"
 	"github.com/ebnsina/muallim-api/internal/calendar"
 	"github.com/ebnsina/muallim-api/internal/catalog"
@@ -405,5 +406,27 @@ func (a certifyAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUI
 		ActorID: e.ActorID, Action: e.Action,
 		TargetType: e.TargetType, TargetID: e.TargetID,
 		Metadata: e.Metadata,
+	})
+}
+
+type automationAuditor struct{ recorder *audit.Recorder }
+
+var _ automation.AuditRecorder = automationAuditor{}
+
+func (a automationAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, e automation.AuditEntry) error {
+	metadata := e.Metadata
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+	// The event is what an automation is: an entry that omitted it would say a rule
+	// changed without saying which thing it answers.
+	metadata["event"] = e.Event
+
+	return a.recorder.Record(ctx, tx, tenantID, audit.Entry{
+		ActorID:    &e.ActorID,
+		Action:     e.Action,
+		TargetType: "automation",
+		TargetID:   e.RuleID.String(),
+		Metadata:   metadata,
 	})
 }

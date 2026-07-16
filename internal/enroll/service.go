@@ -78,6 +78,29 @@ type Rewards interface {
 }
 
 /*
+Announcer is told the things a workspace may have written a rule about: somebody
+joined a course, somebody finished one.
+
+Declared here and satisfied in cmd over the automation service; neither package
+imports the other, and enrolment has no business knowing what an email is. It
+takes the caller's transaction, so a welcome note for an enrolment that rolled
+back is never queued.
+
+Told only of genuine events — a learner re-clicking Enrol, or re-completing the
+last lesson, announces nothing, because a workspace that welcomed them twice
+would be a workspace nobody trusts. A nil Announcer announces nothing, which is
+what the spec-only build and the tests that do not care pass.
+
+The far end must not fail the enrolment over a message. A learner turned away
+from a course because a welcome email misfired is a worse outcome than a welcome
+email nobody sent, and the workspace can see the failure in its logs either way.
+*/
+type Announcer interface {
+	Enrolled(ctx context.Context, tx pgx.Tx, tenantID, userID, courseID uuid.UUID) error
+	CourseCompleted(ctx context.Context, tx pgx.Tx, tenantID, userID, courseID uuid.UUID) error
+}
+
+/*
 Prices says whether a course costs money.
 
 Declared here by the package that needs it, and satisfied in cmd/ over commerce —
@@ -99,6 +122,7 @@ type Service struct {
 	audit        AuditRecorder
 	certificates Certificates
 	rewards      Rewards
+	announcer    Announcer
 	prices       Prices
 	directory    Directory
 
@@ -108,6 +132,12 @@ type Service struct {
 // NewService returns a Service.
 func NewService(db *database.DB, repo Repository, recorder AuditRecorder, certificates Certificates, rewards Rewards) *Service {
 	return &Service{db: db, repo: repo, audit: recorder, certificates: certificates, rewards: rewards, now: time.Now}
+}
+
+// WithAnnouncer supplies the Announcer. Without one, nothing is announced.
+func (s *Service) WithAnnouncer(a Announcer) *Service {
+	s.announcer = a
+	return s
 }
 
 // WithPrices teaches the service that courses can cost money. A Service without it
@@ -205,6 +235,15 @@ func (s *Service) Enrol(ctx context.Context, tenantID uuid.UUID, slug string, ac
 		enrolment, created, err = s.repo.Enrol(ctx, tx, tenantID, courseID, actor.UserID, source, nil)
 		if err != nil {
 			return err
+		}
+
+		// The workspace's own rules, in this transaction: a welcome for an enrolment
+		// that rolls back is never queued. Announced only below the `created` guard,
+		// so a learner re-clicking Enrol is not welcomed twice.
+		if created && s.announcer != nil {
+			if err := s.announcer.Enrolled(ctx, tx, tenantID, actor.UserID, courseID); err != nil {
+				return err
+			}
 		}
 
 		// A learner re-clicking Enrol is not an event. Only a genuinely new
@@ -518,6 +557,15 @@ func (s *Service) completeLessonIn(ctx context.Context, tx pgx.Tx, tenantID, les
 	// Points and a badge for finishing the course, in the same transaction.
 	if s.rewards != nil {
 		if err := s.rewards.CourseCompleted(ctx, tx, tenantID, actor.UserID, courseID); err != nil {
+			return Progress{}, err
+		}
+	}
+
+	// And whatever the workspace wrote to say to somebody who finishes. Past the
+	// `finished` guard above, so re-completing the last lesson congratulates nobody
+	// a second time.
+	if s.announcer != nil {
+		if err := s.announcer.CourseCompleted(ctx, tx, tenantID, actor.UserID, courseID); err != nil {
 			return Progress{}, err
 		}
 	}

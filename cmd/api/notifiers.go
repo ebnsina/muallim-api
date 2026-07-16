@@ -2,12 +2,16 @@ package main
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/ebnsina/muallim-api/internal/assess"
 	"github.com/ebnsina/muallim-api/internal/assign"
+	"github.com/ebnsina/muallim-api/internal/auth"
+	"github.com/ebnsina/muallim-api/internal/automation"
+	"github.com/ebnsina/muallim-api/internal/catalog"
 	"github.com/ebnsina/muallim-api/internal/enroll"
 	"github.com/ebnsina/muallim-api/internal/forum"
 	"github.com/ebnsina/muallim-api/internal/gamify"
@@ -86,4 +90,59 @@ func (r gamifyRewards) LessonCompleted(ctx context.Context, tx pgx.Tx, tenantID,
 
 func (r gamifyRewards) CourseCompleted(ctx context.Context, tx pgx.Tx, tenantID, userID, courseID uuid.UUID) error {
 	return r.svc.AwardCourse(ctx, tx, tenantID, userID, courseID)
+}
+
+/*
+automationAnnouncer adapts the automation service to the Announcer interface
+enroll declares, and resolves what a rule's templates need: who enrolled, and in
+what. Both lookups run in the caller's transaction, so the values are the ones
+that were true when the thing happened.
+
+Nothing here may fail an enrolment. A workspace's welcome note is worth less than
+the enrolment it welcomes, so a lookup that fails or a queue that will not take
+the message is logged and swallowed — the learner is in the course either way,
+and the log is where a workspace finds out its mail is not going out.
+*/
+type automationAnnouncer struct {
+	svc     *automation.Service
+	users   *auth.PostgresRepository
+	courses *catalog.PostgresRepository
+	log     *slog.Logger
+}
+
+var _ enroll.Announcer = automationAnnouncer{}
+
+func (a automationAnnouncer) Enrolled(ctx context.Context, tx pgx.Tx, tenantID, userID, courseID uuid.UUID) error {
+	return a.fire(ctx, tx, tenantID, automation.EventEnrolled, userID, courseID)
+}
+
+func (a automationAnnouncer) CourseCompleted(ctx context.Context, tx pgx.Tx, tenantID, userID, courseID uuid.UUID) error {
+	return a.fire(ctx, tx, tenantID, automation.EventCompleted, userID, courseID)
+}
+
+func (a automationAnnouncer) fire(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, event string, userID, courseID uuid.UUID) error {
+	user, _, err := a.users.UserByID(ctx, tx, tenantID, userID)
+	if err != nil {
+		a.log.ErrorContext(ctx, "automation: cannot name the learner; no message sent",
+			slog.String("event", event), slog.Any("error", err))
+		return nil
+	}
+	course, err := a.courses.CourseByID(ctx, tx, tenantID, courseID)
+	if err != nil {
+		a.log.ErrorContext(ctx, "automation: cannot name the course; no message sent",
+			slog.String("event", event), slog.Any("error", err))
+		return nil
+	}
+
+	if err := a.svc.Fire(ctx, tx, tenantID, event, automation.Message{
+		To: user.Email,
+		Vars: map[string]string{
+			"learner_name": user.Name,
+			"course_title": course.Title,
+		},
+	}); err != nil {
+		a.log.ErrorContext(ctx, "automation: message not queued",
+			slog.String("event", event), slog.Any("error", err))
+	}
+	return nil
 }

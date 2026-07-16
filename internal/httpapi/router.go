@@ -18,6 +18,7 @@ import (
 	"github.com/ebnsina/muallim-api/internal/assess"
 	"github.com/ebnsina/muallim-api/internal/assign"
 	"github.com/ebnsina/muallim-api/internal/auth"
+	"github.com/ebnsina/muallim-api/internal/automation"
 	"github.com/ebnsina/muallim-api/internal/bundle"
 	"github.com/ebnsina/muallim-api/internal/calendar"
 	"github.com/ebnsina/muallim-api/internal/catalog"
@@ -143,7 +144,10 @@ type Options struct {
 	Taxonomy  *taxonomy.Service
 	Bundle    *bundle.Service
 	LearnPath *learnpath.Service
-	Chat      *chat.Service
+
+	// Automation is a workspace's own rules for the mail it sends.
+	Automation *automation.Service
+	Chat       *chat.Service
 
 	// ChatHub carries chat's realtime layer — the WebSocket route + LISTEN/NOTIFY
 	// fan-out. Nil disables realtime (REST chat still works). Built in cmd/, which
@@ -256,6 +260,7 @@ func New(opts Options) (http.Handler, huma.API) {
 	registerBundles(api, opts.Bundle)
 	registerBundleGrant(api, opts.Bundle, opts.Enrol)
 	registerLearningPaths(api, opts.LearnPath)
+	registerAutomations(api, opts.Automation)
 	registerLearnPathProgress(api, opts.LearnPath, opts.Enrol)
 	registerChat(api, opts.Chat, opts.Enrol, opts.ChatHub)
 	registerChatWS(api, mux, opts.ChatHub)

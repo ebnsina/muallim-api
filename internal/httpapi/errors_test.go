@@ -14,6 +14,7 @@ import (
 	"github.com/ebnsina/muallim-api/internal/assess"
 	"github.com/ebnsina/muallim-api/internal/assign"
 	"github.com/ebnsina/muallim-api/internal/auth"
+	"github.com/ebnsina/muallim-api/internal/automation"
 	"github.com/ebnsina/muallim-api/internal/catalog"
 	"github.com/ebnsina/muallim-api/internal/certify"
 	"github.com/ebnsina/muallim-api/internal/commerce"
@@ -724,5 +725,34 @@ func TestAnUnmappedCertifyErrorIsFiveHundred(t *testing.T) {
 
 	if got := statusOf(certifyError(errors.New("certify: something new"))); got != http.StatusInternalServerError {
 		t.Errorf("an unmapped error mapped to %d, want 500", got)
+	}
+}
+
+// The automation sentinels go through their own mapper.
+func TestAutomationSentinelsMapToADeliberateStatus(t *testing.T) {
+	t.Parallel()
+
+	tests := map[error]int{
+		automation.ErrNotFound: http.StatusNotFound,
+		automation.ErrInvalid:  http.StatusUnprocessableEntity,
+	}
+
+	for err, want := range tests {
+		if got := statusOf(automationError(err)); got != want {
+			t.Errorf("%v mapped to %d, want %d", err, got, want)
+		}
+
+		wrapped := fmt.Errorf("automation: doing a thing: %w", err)
+		if got := statusOf(automationError(wrapped)); got != want {
+			t.Errorf("wrapped %v mapped to %d, want %d", err, got, want)
+		}
+	}
+}
+
+func TestAnUnmappedAutomationErrorIsFiveHundred(t *testing.T) {
+	t.Parallel()
+
+	if got := statusOf(automationError(errors.New("automation: something new"))); got != http.StatusInternalServerError {
+		t.Errorf("an unmapped automation error mapped to %d, want 500", got)
 	}
 }
