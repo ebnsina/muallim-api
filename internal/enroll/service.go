@@ -775,6 +775,39 @@ func (s *Service) GrantInTx(ctx context.Context, tx pgx.Tx, tenantID, courseID, 
 	return err
 }
 
+// GrantCourses enrols a learner in every course of a set — a bundle grant — in one
+// transaction, so a partial bundle is never handed out. The loop is over a
+// bundle's courses (a bounded handful), not over rows. `source` is the caller's:
+// a bundle grant is a grant, so the learner cannot simply cancel it back.
+func (s *Service) GrantCourses(ctx context.Context, tenantID uuid.UUID, courseIDs []uuid.UUID, learnerID uuid.UUID, source string) error {
+	return s.db.WithTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		for _, courseID := range courseIDs {
+			if _, _, err := s.repo.Enrol(ctx, tx, tenantID, courseID, learnerID, source, nil); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// PathProgress is a learner's progress across each course of a learning path, keyed
+// by course id — zero for a course they have not started. One read transaction, a
+// bounded loop over the path's own courses.
+func (s *Service) PathProgress(ctx context.Context, tenantID, userID uuid.UUID, courseIDs []uuid.UUID) (map[uuid.UUID]Progress, error) {
+	out := make(map[uuid.UUID]Progress, len(courseIDs))
+	err := s.db.WithTenantReadOnly(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		for _, courseID := range courseIDs {
+			p, err := s.repo.ProgressFor(ctx, tx, tenantID, userID, courseID)
+			if err != nil {
+				return err
+			}
+			out[courseID] = p
+		}
+		return nil
+	})
+	return out, err
+}
+
 // CancelInTx withdraws an enrolment inside the caller's transaction — a refund, and
 // nothing else so far. Progress survives: cancelling is not erasing.
 func (s *Service) CancelInTx(ctx context.Context, tx pgx.Tx, tenantID, courseID, userID uuid.UUID) error {
