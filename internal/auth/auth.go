@@ -45,6 +45,11 @@ const (
 	RoleAdmin      = "admin"
 	RoleInstructor = "instructor"
 	RoleStudent    = "student"
+
+	// RoleGuardian is a parent's login. It carries no course or management rights —
+	// only the portal read of their own child's day. A guardian is a contact record
+	// first (`guardians`), and this role is the account some are given on top.
+	RoleGuardian = "guardian"
 )
 
 // Permissions. A permission names a capability, never a role, so that changing
@@ -71,6 +76,12 @@ const (
 	// years and terms, classes and sections. An administrative act, not a teaching
 	// one: an instructor authors courses but does not redraw the school.
 	PermAcademicsManage = "academics:manage"
+
+	// PermPortalRead is the parent-and-pupil view: a guardian or a student reading
+	// their own (or their child's) attendance, fees, and memorisation. It grants no
+	// management — a guardian who could edit is an admin, which this is deliberately
+	// not. The handler still checks the reader is tied to the specific student.
+	PermPortalRead = "portal:read"
 )
 
 // rolePermissions is the entire authorisation model. It is a map rather than a
@@ -97,6 +108,12 @@ var rolePermissions = map[string]map[string]bool{
 	},
 	RoleStudent: {
 		PermCourseRead: true,
+		// A student reads their own record through the same portal a guardian uses;
+		// the handler scopes it to themselves.
+		PermPortalRead: true,
+	},
+	RoleGuardian: {
+		PermPortalRead: true,
 	},
 }
 

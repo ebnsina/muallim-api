@@ -14,12 +14,16 @@ import (
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
 
 	"github.com/ebnsina/muallim-api/internal/academics"
+	"github.com/ebnsina/muallim-api/internal/admissions"
 	"github.com/ebnsina/muallim-api/internal/assess"
 	"github.com/ebnsina/muallim-api/internal/assign"
 	"github.com/ebnsina/muallim-api/internal/auth"
+	"github.com/ebnsina/muallim-api/internal/calendar"
 	"github.com/ebnsina/muallim-api/internal/catalog"
+	"github.com/ebnsina/muallim-api/internal/certdesign"
 	"github.com/ebnsina/muallim-api/internal/certify"
 	"github.com/ebnsina/muallim-api/internal/commerce"
+	"github.com/ebnsina/muallim-api/internal/coursebuild"
 	"github.com/ebnsina/muallim-api/internal/enroll"
 	"github.com/ebnsina/muallim-api/internal/exams"
 	"github.com/ebnsina/muallim-api/internal/fees"
@@ -27,13 +31,19 @@ import (
 	"github.com/ebnsina/muallim-api/internal/gamify"
 	"github.com/ebnsina/muallim-api/internal/grade"
 	"github.com/ebnsina/muallim-api/internal/hifz"
+	"github.com/ebnsina/muallim-api/internal/hostel"
+	"github.com/ebnsina/muallim-api/internal/idcard"
 	"github.com/ebnsina/muallim-api/internal/learn"
+	"github.com/ebnsina/muallim-api/internal/ledger"
+	"github.com/ebnsina/muallim-api/internal/library"
 	"github.com/ebnsina/muallim-api/internal/notices"
 	"github.com/ebnsina/muallim-api/internal/notify"
 	"github.com/ebnsina/muallim-api/internal/overview"
+	"github.com/ebnsina/muallim-api/internal/payroll"
 	"github.com/ebnsina/muallim-api/internal/platform/ratelimit"
 	"github.com/ebnsina/muallim-api/internal/staff"
 	"github.com/ebnsina/muallim-api/internal/tenant"
+	"github.com/ebnsina/muallim-api/internal/transport"
 )
 
 // Pinger reports whether a dependency is reachable. Declared here, by its
@@ -98,6 +108,27 @@ type Options struct {
 	// Overview is the institution dashboard read-model. Nil alongside Academics in an
 	// LMS-only deployment.
 	Overview *overview.Service
+
+	// Library lends books. Transport rides students to school. Hostel boards them.
+	// Payroll pays the staff. Ledger keeps the school's own books. Calendar holds
+	// its year. All nil in an LMS-only deployment.
+	Library   *library.Service
+	Transport *transport.Service
+	Hostel    *hostel.Service
+	Payroll   *payroll.Service
+	Ledger    *ledger.Service
+	Calendar  *calendar.Service
+
+	// CertDesign and CourseBuild are the two standalone builders — a certificate
+	// canvas and a course blueprint. Independent of certify and catalog.
+	CertDesign  *certdesign.Service
+	CourseBuild *coursebuild.Service
+
+	// Admissions takes applications and, with Academics, admits them into students.
+	Admissions *admissions.Service
+
+	// IDCard designs student and staff identity cards.
+	IDCard *idcard.Service
 
 	// Commerce may be nil: a deployment with no gateway configured sells nothing,
 	// and every course in it is free — which is exactly what this product was
@@ -187,6 +218,19 @@ func New(opts Options) (http.Handler, huma.API) {
 	registerNotices(api, opts.Notices)
 	registerHifz(api, opts.Hifz)
 	registerOverview(api, opts.Overview)
+	registerLibrary(api, opts.Library)
+	registerTransport(api, opts.Transport)
+	registerHostel(api, opts.Hostel)
+	registerPayroll(api, opts.Payroll)
+	registerLedger(api, opts.Ledger)
+	registerCalendar(api, opts.Calendar)
+	registerPortal(api, opts.Academics, opts.Fees, opts.Hifz)
+	registerGuardianLink(api, opts.Academics)
+	registerCertDesigns(api, opts.CertDesign)
+	registerCourseBlueprints(api, opts.CourseBuild)
+	registerAdmissions(api, opts.Admissions)
+	registerAdmissionsAdmit(api, opts.Admissions, opts.Academics)
+	registerIDCards(api, opts.IDCard)
 	registerGamification(api, opts.Gamify)
 
 	// Order matters, outermost first.

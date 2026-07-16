@@ -130,6 +130,23 @@ func TestFeeFlow(t *testing.T) {
 		t.Fatalf("re-issue billed %d, want 0 — the period must be idempotent", again)
 	}
 
+	// The unfiltered listing returns every raised invoice — the workspace-wide
+	// fee board. A status filter narrows it; neither shape may 500.
+	all, err := svc.Invoices(t.Context(), tenant, fees.InvoiceFilter{}, fees.PageParams{})
+	if err != nil {
+		t.Fatalf("list invoices: %v", err)
+	}
+	if len(all.Invoices) != 2 {
+		t.Fatalf("listed %d invoices, want 2", len(all.Invoices))
+	}
+	unpaid, err := svc.Invoices(t.Context(), tenant, fees.InvoiceFilter{Status: fees.StatusUnpaid}, fees.PageParams{})
+	if err != nil {
+		t.Fatalf("list unpaid invoices: %v", err)
+	}
+	if len(unpaid.Invoices) != 2 {
+		t.Fatalf("listed %d unpaid, want 2", len(unpaid.Invoices))
+	}
+
 	// Amina's ledger shows one unpaid invoice and the outstanding balance.
 	ledger, err := svc.StudentLedger(t.Context(), tenant, amina)
 	if err != nil {

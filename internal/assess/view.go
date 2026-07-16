@@ -177,7 +177,7 @@ type ReviewItem struct {
 	MaxPoints int
 
 	// Explanation is the author's note on the question, released once the attempt
-	// has been graded. This is the feature Tutor LMS has never shipped.
+	// has been graded — the after-the-fact explanation many quiz tools never ship.
 	Explanation string
 
 	// Feedback is what an instructor wrote about this particular answer.

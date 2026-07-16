@@ -191,6 +191,72 @@ func (r *PostgresRepository) RemoveGuardian(ctx context.Context, tx pgx.Tx, tena
 	return nil
 }
 
+// LinkGuardianUser binds a guardian contact to the login that will read their
+// child's day. The portal's authorisation hangs off this column.
+func (r *PostgresRepository) LinkGuardianUser(ctx context.Context, tx pgx.Tx, tenantID, guardianID, userID uuid.UUID) error {
+	tag, err := tx.Exec(ctx,
+		`UPDATE guardians SET user_id = $3, updated_at = now() WHERE tenant_id = $1 AND id = $2`,
+		tenantID, guardianID, userID)
+	if err != nil {
+		return fmt.Errorf("academics: link guardian user: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ChildrenFor is the students a signed-in user may see: their own record (a pupil
+// with an account) and every child they are the guardian of. One query — the OR
+// never doubles a row, since a student appears once in `students`.
+func (r *PostgresRepository) ChildrenFor(ctx context.Context, tx pgx.Tx, tenantID, userID uuid.UUID) ([]Student, error) {
+	rows, err := tx.Query(ctx,
+		`SELECT `+rosterColumns+` FROM students
+		 WHERE tenant_id = $1 AND (
+		   user_id = $2
+		   OR id IN (
+		     SELECT sg.student_id FROM student_guardians sg
+		     JOIN guardians g ON g.id = sg.guardian_id AND g.tenant_id = sg.tenant_id
+		     WHERE sg.tenant_id = $1 AND g.user_id = $2
+		   )
+		 )
+		 ORDER BY full_name, id`,
+		tenantID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("academics: children for: %w", err)
+	}
+	defer rows.Close()
+	return pgx.CollectRows(rows, scanStudent)
+}
+
+// ChildStudent loads one student only if the user may see them — their own record
+// or a child they guard. A student the user is not tied to comes back as
+// ErrNotFound, never their data: the portal admits existence to no one.
+func (r *PostgresRepository) ChildStudent(ctx context.Context, tx pgx.Tx, tenantID, userID, studentID uuid.UUID) (Student, error) {
+	rows, err := tx.Query(ctx,
+		`SELECT `+rosterColumns+` FROM students
+		 WHERE tenant_id = $1 AND id = $3 AND (
+		   user_id = $2
+		   OR id IN (
+		     SELECT sg.student_id FROM student_guardians sg
+		     JOIN guardians g ON g.id = sg.guardian_id AND g.tenant_id = sg.tenant_id
+		     WHERE sg.tenant_id = $1 AND g.user_id = $2
+		   )
+		 )`,
+		tenantID, userID, studentID)
+	if err != nil {
+		return Student{}, fmt.Errorf("academics: child student: %w", err)
+	}
+	s, err := pgx.CollectExactlyOneRow(rows, scanStudent)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Student{}, ErrNotFound
+	}
+	if err != nil {
+		return Student{}, fmt.Errorf("academics: child student: %w", err)
+	}
+	return s, nil
+}
+
 func scanStudent(row pgx.CollectableRow) (Student, error) {
 	var s Student
 	err := row.Scan(&s.ID, &s.AdmissionNo, &s.FullName, &s.GradeLevelID, &s.SectionID, &s.Roll, &s.Status, &s.UserID, &s.CreatedAt, &s.UpdatedAt)

@@ -52,6 +52,7 @@ const (
 	demoInstructor = "instructor@muallim.test"
 	demoMarker     = "marker@muallim.test"
 	demoStudent    = "student@muallim.test"
+	demoGuardian   = "guardian@muallim.test"
 )
 
 type config struct {
@@ -348,10 +349,154 @@ func seedWorkspace(ctx context.Context, db *database.DB, cfg config, index int, 
 			return fmt.Errorf("bank: %w", err)
 		}
 
+		if err := seedInstitution(ctx, tx, tenantID, people); err != nil {
+			return fmt.Errorf("institution: %w", err)
+		}
+
 		return nil
 	})
 
 	return got, err
+}
+
+// seedInstitution fills the school-management side — academic structure, a roll of
+// students with guardians, staff, today's attendance, fees, and a notice — so the
+// admin dashboard and roster show something real.
+func seedInstitution(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, p people) error {
+	if _, err := tx.Exec(ctx, `UPDATE tenants SET institution_type = 'madrasa' WHERE id = $1`, tenantID); err != nil {
+		return fmt.Errorf("institution type: %w", err)
+	}
+
+	now := time.Now()
+
+	type cls struct {
+		id   uuid.UUID
+		name string
+		rank int
+	}
+	classes := []cls{
+		{id("class", tenantID, 0), "Class 6", 6},
+		{id("class", tenantID, 1), "Class 7", 7},
+		{id("class", tenantID, 2), "Dakhil", 9},
+	}
+	classRows := make([][]any, len(classes))
+	sections := make([]uuid.UUID, len(classes))
+	sectionRows := make([][]any, len(classes))
+	for i, c := range classes {
+		classRows[i] = []any{c.id, tenantID, c.name, c.rank}
+		sections[i] = id("section", tenantID, i)
+		sectionRows[i] = []any{sections[i], tenantID, c.id, "A"}
+	}
+	if err := bulkInsert(ctx, tx, "grade_levels", []string{"id", "tenant_id", "name", "rank"}, classRows); err != nil {
+		return err
+	}
+	if err := bulkInsert(ctx, tx, "sections", []string{"id", "tenant_id", "grade_level_id", "name"}, sectionRows); err != nil {
+		return err
+	}
+
+	subjects := []struct{ name, code string }{
+		{"Quran", "QUR"}, {"Arabic", "ARB"}, {"Bangla", "BAN"},
+		{"English", "ENG"}, {"Mathematics", "MAT"}, {"Science", "SCI"},
+	}
+	subjectRows := make([][]any, len(subjects))
+	for i, s := range subjects {
+		subjectRows[i] = []any{id("subject", tenantID, i), tenantID, s.name, s.code}
+	}
+	if err := bulkInsert(ctx, tx, "subjects", []string{"id", "tenant_id", "name", "code"}, subjectRows); err != nil {
+		return err
+	}
+
+	students := []string{
+		"Aminul Islam", "Bushra Khatun", "Rafiul Hasan", "Sadia Akter",
+		"Tariqul Islam", "Nusrat Jahan", "Imran Hossain", "Fahmida Begum",
+		"Yusuf Rahman", "Maryam Siddika", "Zayd Chowdhury", "Ayesha Noor",
+	}
+	var studentRows, guardianRows, linkRows, attendanceRows, invoiceRows [][]any
+	for i, name := range students {
+		sid := id("student", tenantID, i)
+		gid := id("guardian", tenantID, i)
+		ci := i % len(classes)
+		studentRows = append(studentRows, []any{
+			sid, tenantID, fmt.Sprintf("2026-%03d", i+1), name, classes[ci].id, sections[ci], i/len(classes) + 1, "active",
+		})
+		// The first guardian of the demo workspace is given a real login, so the
+		// parent portal has someone to sign in as; the rest are contacts only.
+		var guardianUser any
+		if i == 0 && p.guardian != uuid.Nil {
+			guardianUser = p.guardian
+		}
+		guardianRows = append(guardianRows, []any{
+			gid, tenantID, "Guardian of " + name, fmt.Sprintf("018%08d", 10000000+i),
+			fmt.Sprintf("guardian%d@example.test", i), "father", guardianUser,
+		})
+		linkRows = append(linkRows, []any{tenantID, sid, gid, true})
+
+		status := "present"
+		switch i % 6 {
+		case 4:
+			status = "absent"
+		case 5:
+			status = "late"
+		}
+		attendanceRows = append(attendanceRows, []any{tenantID, sid, sections[ci], now, status, p.owner})
+
+		feeStatus := "unpaid"
+		if i%3 == 0 {
+			feeStatus = "paid"
+		}
+		invoiceRows = append(invoiceRows, []any{
+			tenantID, sid, "Monthly tuition — " + now.Format("Jan 2006"), int64(200000), "BDT", now.Format("2006-01"), feeStatus,
+		})
+	}
+	if err := bulkInsert(ctx, tx, "students",
+		[]string{"id", "tenant_id", "admission_no", "full_name", "grade_level_id", "section_id", "roll", "status"}, studentRows); err != nil {
+		return err
+	}
+	if err := bulkInsert(ctx, tx, "guardians",
+		[]string{"id", "tenant_id", "full_name", "phone", "email", "relation", "user_id"}, guardianRows); err != nil {
+		return err
+	}
+	if err := bulkInsert(ctx, tx, "student_guardians",
+		[]string{"tenant_id", "student_id", "guardian_id", "is_primary"}, linkRows); err != nil {
+		return err
+	}
+	if err := bulkInsert(ctx, tx, "attendance",
+		[]string{"tenant_id", "student_id", "section_id", "on_date", "status", "marked_by"}, attendanceRows); err != nil {
+		return err
+	}
+	if err := bulkInsert(ctx, tx, "fee_invoices",
+		[]string{"tenant_id", "student_id", "title", "amount", "currency", "period", "status"}, invoiceRows); err != nil {
+		return err
+	}
+
+	staff := []struct{ no, name, role, email string }{
+		{"T-001", "Abdul Karim", "teacher", "karim@example.test"},
+		{"T-002", "Rahima Sultana", "teacher", "rahima@example.test"},
+		{"P-001", "Mufti Yusuf", "principal", "principal@example.test"},
+		{"A-001", "Nasir Uddin", "accountant", "accounts@example.test"},
+	}
+	staffRows := make([][]any, len(staff))
+	for i, s := range staff {
+		staffRows[i] = []any{id("staff", tenantID, i), tenantID, s.no, s.name, s.role, s.email, "active"}
+	}
+	if err := bulkInsert(ctx, tx, "staff",
+		[]string{"id", "tenant_id", "staff_no", "full_name", "role", "email", "status"}, staffRows); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO fee_structures (tenant_id, name, amount, currency, recurrence)
+		 VALUES ($1, 'Monthly tuition', 200000, 'BDT', 'monthly')`, tenantID); err != nil {
+		return fmt.Errorf("fee structure: %w", err)
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO notices (tenant_id, title, body, audience, channel, recipient_count, posted_by)
+		 VALUES ($1, 'Welcome to the new term', 'Classes resume Sunday — please check the timetable.', 'all_guardians', 'email', $2, $3)`,
+		tenantID, len(students), p.owner); err != nil {
+		return fmt.Errorf("notice: %w", err)
+	}
+
+	return nil
 }
 
 // seedBank fills the question bank with a few reusable questions, so an author
@@ -550,6 +695,7 @@ func seedCommunity(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, catalogue
 type people struct {
 	owner      uuid.UUID
 	instructor uuid.UUID
+	guardian   uuid.UUID
 	students   []uuid.UUID
 	everyone   []uuid.UUID
 
@@ -585,6 +731,7 @@ func seedPeople(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, index int, h
 			{demoInstructor, "Ibn al-Haytham", auth.RoleInstructor},
 			{demoMarker, "Maryam al-Astrulabi", auth.RoleInstructor},
 			{demoStudent, "Al-Khwarizmi", auth.RoleStudent},
+			{demoGuardian, "Khadija bint Khuwaylid", auth.RoleGuardian},
 		} {
 			accounts = append(accounts, account{id("user", seat.email), seat.email, seat.name, seat.role})
 			named[seat.email] = true
@@ -632,6 +779,8 @@ func seedPeople(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, index int, h
 			if p.instructor == uuid.Nil {
 				p.instructor = a.id
 			}
+		case auth.RoleGuardian:
+			p.guardian = a.id
 		case auth.RoleStudent:
 			if !named[a.email] {
 				p.students = append(p.students, a.id)

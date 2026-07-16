@@ -21,14 +21,18 @@ import (
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
 	"github.com/ebnsina/muallim-api/internal/academics"
+	"github.com/ebnsina/muallim-api/internal/admissions"
 	"github.com/ebnsina/muallim-api/internal/assess"
 	"github.com/ebnsina/muallim-api/internal/assign"
 	"github.com/ebnsina/muallim-api/internal/audit"
 	"github.com/ebnsina/muallim-api/internal/auth"
+	"github.com/ebnsina/muallim-api/internal/calendar"
 	"github.com/ebnsina/muallim-api/internal/catalog"
+	"github.com/ebnsina/muallim-api/internal/certdesign"
 	"github.com/ebnsina/muallim-api/internal/certify"
 	"github.com/ebnsina/muallim-api/internal/commerce"
 	"github.com/ebnsina/muallim-api/internal/comms"
+	"github.com/ebnsina/muallim-api/internal/coursebuild"
 	"github.com/ebnsina/muallim-api/internal/enroll"
 	"github.com/ebnsina/muallim-api/internal/exams"
 	"github.com/ebnsina/muallim-api/internal/fees"
@@ -36,11 +40,16 @@ import (
 	"github.com/ebnsina/muallim-api/internal/gamify"
 	"github.com/ebnsina/muallim-api/internal/grade"
 	"github.com/ebnsina/muallim-api/internal/hifz"
+	"github.com/ebnsina/muallim-api/internal/hostel"
 	"github.com/ebnsina/muallim-api/internal/httpapi"
+	"github.com/ebnsina/muallim-api/internal/idcard"
 	"github.com/ebnsina/muallim-api/internal/learn"
+	"github.com/ebnsina/muallim-api/internal/ledger"
+	"github.com/ebnsina/muallim-api/internal/library"
 	"github.com/ebnsina/muallim-api/internal/notices"
 	"github.com/ebnsina/muallim-api/internal/notify"
 	"github.com/ebnsina/muallim-api/internal/overview"
+	"github.com/ebnsina/muallim-api/internal/payroll"
 	"github.com/ebnsina/muallim-api/internal/platform/cache"
 	"github.com/ebnsina/muallim-api/internal/platform/config"
 	"github.com/ebnsina/muallim-api/internal/platform/database"
@@ -50,6 +59,7 @@ import (
 	"github.com/ebnsina/muallim-api/internal/platform/server"
 	"github.com/ebnsina/muallim-api/internal/staff"
 	"github.com/ebnsina/muallim-api/internal/tenant"
+	"github.com/ebnsina/muallim-api/internal/transport"
 )
 
 func main() {
@@ -241,6 +251,26 @@ func run() error {
 	// The institution dashboard read-model: counts and sums for the admin home.
 	dashboard := overview.NewService(db, overview.NewPostgresRepository())
 
+	// Operations layer: the library lends books, transport rides students in,
+	// the hostel boards them, and payroll pays the staff.
+	lending := library.NewService(db, library.NewPostgresRepository(), libraryAuditor{recorder})
+	transporting := transport.NewService(db, transport.NewPostgresRepository(), transportAuditor{recorder})
+	boarding := hostel.NewService(db, hostel.NewPostgresRepository(), hostelAuditor{recorder})
+	payrun := payroll.NewService(db, payroll.NewPostgresRepository(), payrollAuditor{recorder})
+	books := ledger.NewService(db, ledger.NewPostgresRepository(), ledgerAuditor{recorder})
+	almanac := calendar.NewService(db, calendar.NewPostgresRepository(), calendarAuditor{recorder})
+
+	// The two standalone builders: a certificate canvas (its background lives in
+	// the object store) and a course blueprint.
+	certDesigns := certdesign.NewService(db, certdesign.NewPostgresRepository(), store, certDesignAuditor{recorder})
+	blueprints := coursebuild.NewService(db, coursebuild.NewPostgresRepository(), courseBuildAuditor{recorder})
+
+	// Admissions: applications reviewed and, once accepted, admitted into students.
+	intake := admissions.NewService(db, admissions.NewPostgresRepository(), admissionsAuditor{recorder})
+
+	// ID-card designs (student and staff), with their backgrounds in the object store.
+	idCards := idcard.NewService(db, idcard.NewPostgresRepository(), store, idCardAuditor{recorder})
+
 	// `learning` satisfies assess.Completions: passing a quiz completes its lesson,
 	// in the transaction that recorded the grade. The interface is declared by
 	// assess and satisfied by enroll, which have never heard of each other. The
@@ -347,6 +377,16 @@ func run() error {
 		Notices:     noticeboard,
 		Hifz:        memorization,
 		Overview:    dashboard,
+		Library:     lending,
+		Transport:   transporting,
+		Hostel:      boarding,
+		Payroll:     payrun,
+		Ledger:      books,
+		Calendar:    almanac,
+		CertDesign:  certDesigns,
+		CourseBuild: blueprints,
+		Admissions:  intake,
+		IDCard:      idCards,
 		Auth:        identities,
 		Enrol:       learning,
 		Assess:      quizzes,

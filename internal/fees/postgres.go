@@ -132,8 +132,8 @@ func (r *PostgresRepository) IssueBatch(ctx context.Context, tx pgx.Tx, tenantID
 const invoicesAllSQL = `
 	SELECT ` + invoiceColumns + ` FROM fee_invoices
 	WHERE tenant_id = $1
-	  AND ($4::timestamptz IS NULL OR (created_at, id) < ($4, $5::uuid))
-	  AND ($6::text = '' OR status = $6)
+	  AND ($3::timestamptz IS NULL OR (created_at, id) < ($3, $4::uuid))
+	  AND ($5::text = '' OR status = $5)
 	ORDER BY created_at DESC, id DESC LIMIT $2`
 
 const invoicesByStudentSQL = `
@@ -154,7 +154,7 @@ func (r *PostgresRepository) Invoices(ctx context.Context, tx pgx.Tx, tenantID u
 	if f.StudentID != nil {
 		rows, err = tx.Query(ctx, invoicesByStudentSQL, tenantID, limit, *f.StudentID, afterTime, afterID, f.Status)
 	} else {
-		rows, err = tx.Query(ctx, invoicesAllSQL, tenantID, limit, nil, afterTime, afterID, f.Status)
+		rows, err = tx.Query(ctx, invoicesAllSQL, tenantID, limit, afterTime, afterID, f.Status)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("fees: invoices: %w", err)

@@ -47,6 +47,9 @@ type Repository interface {
 	AddGuardian(ctx context.Context, tx pgx.Tx, tenantID, studentID uuid.UUID, n NewGuardian) (Guardian, error)
 	GuardiansOf(ctx context.Context, tx pgx.Tx, tenantID, studentID uuid.UUID) ([]Guardian, error)
 	RemoveGuardian(ctx context.Context, tx pgx.Tx, tenantID, studentID, guardianID uuid.UUID) error
+	LinkGuardianUser(ctx context.Context, tx pgx.Tx, tenantID, guardianID, userID uuid.UUID) error
+	ChildrenFor(ctx context.Context, tx pgx.Tx, tenantID, userID uuid.UUID) ([]Student, error)
+	ChildStudent(ctx context.Context, tx pgx.Tx, tenantID, userID, studentID uuid.UUID) (Student, error)
 
 	MarkAttendance(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, m AttendanceMark) (int, error)
 	Register(ctx context.Context, tx pgx.Tx, tenantID, sectionID uuid.UUID, on time.Time) ([]RegisterEntry, error)

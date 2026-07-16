@@ -6,8 +6,9 @@
 // have no field to put an answer in — and not by remembering to omit a JSON tag.
 //
 // Grading is asynchronous. An attempt is submitted, a job grades it, and the
-// result appears when it is ready. LearnDash blocks a request for thirty-five
-// seconds to save an essay quiz; this is the whole reason not to.
+// result appears when it is ready. A synchronous grader holds the request open
+// for as long as grading takes — tens of seconds for an essay quiz; this is the
+// whole reason not to.
 //
 // It knows nothing about HTTP. It returns its own sentinel errors.
 package assess
@@ -269,8 +270,8 @@ type Question struct {
 	Points   int
 	Position int
 
-	// Explanation is shown after the attempt is graded, never before. Tutor LMS
-	// still cannot do this; it is the single most requested thing it lacks.
+	// Explanation is shown after the attempt is graded, never before — a commonly
+	// requested feature that many quiz tools still lack.
 	Explanation string
 
 	// CaseSensitive applies to the typed types. Off by default, because "Paris"

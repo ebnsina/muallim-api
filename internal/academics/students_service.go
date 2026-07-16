@@ -85,6 +85,38 @@ func (s *Service) RemoveStudent(ctx context.Context, tenantID, studentID uuid.UU
 }
 
 // AddGuardian records a guardian and links them to a student.
+// ChildrenFor is the students a signed-in guardian or pupil may see through the
+// portal. Read-only.
+func (s *Service) ChildrenFor(ctx context.Context, tenantID, userID uuid.UUID) ([]Student, error) {
+	var children []Student
+	err := s.db.WithTenantReadOnly(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		children, err = s.repo.ChildrenFor(ctx, tx, tenantID, userID)
+		return err
+	})
+	return children, err
+}
+
+// ChildStudent loads one of the user's own students, or ErrNotFound — the
+// ownership gate every per-child portal read passes through first.
+func (s *Service) ChildStudent(ctx context.Context, tenantID, userID, studentID uuid.UUID) (Student, error) {
+	var st Student
+	err := s.db.WithTenantReadOnly(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		st, err = s.repo.ChildStudent(ctx, tx, tenantID, userID, studentID)
+		return err
+	})
+	return st, err
+}
+
+// LinkGuardianUser gives a guardian contact the account they sign in with. An
+// administrative act — the portal read follows from it.
+func (s *Service) LinkGuardianUser(ctx context.Context, tenantID, guardianID, userID uuid.UUID) error {
+	return s.db.WithTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		return s.repo.LinkGuardianUser(ctx, tx, tenantID, guardianID, userID)
+	})
+}
+
 func (s *Service) AddGuardian(ctx context.Context, tenantID, studentID uuid.UUID, n NewGuardian) (Guardian, error) {
 	if err := n.validate(); err != nil {
 		return Guardian{}, err

@@ -40,8 +40,8 @@ CREATE TABLE questions (
     points   integer NOT NULL DEFAULT 1 CHECK (points >= 0),
     position integer NOT NULL,
 
-    -- Shown once the attempt is graded, never before. Tutor LMS has never shipped
-    -- this; it is the thing its users ask for most.
+    -- Shown once the attempt is graded, never before — the after-the-fact
+    -- explanation quiz-plugin users most often ask for and rarely get.
     explanation text NOT NULL DEFAULT '',
 
     case_sensitive boolean NOT NULL DEFAULT false,

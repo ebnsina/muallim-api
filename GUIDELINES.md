@@ -156,7 +156,7 @@ Reads use `WithTenantReadOnly`. Postgres then refuses any write inside the trans
 
 ## 6. Performance
 
-Performance is the competitive claim. LearnDash and Tutor are documented as slow — a large site has measured 120 seconds to list quizzes and 35 seconds to save one. Every rule below exists so we never earn that reputation.
+Performance is the competitive claim. Some widely used LMS plugins are documented as slow — large sites have measured up to two minutes to list quizzes and tens of seconds to save one. Every rule below exists so we never earn that reputation.
 
 ### The N+1 problem
 
@@ -206,7 +206,7 @@ The pool is small on purpose. Postgres costs roughly 10 MB of backend memory per
 
 Grading, transcoding, email, transcription, analytics rollups, and report generation are **jobs, not request handlers**. If an operation can exceed ~200ms or calls a third party, it belongs in River.
 
-This is not a stylistic preference. Synchronous grading is the specific defect that makes LearnDash take 35 seconds to save a quiz.
+This is not a stylistic preference. Synchronous grading is the specific defect that makes a synchronous grader take tens of seconds to save a quiz.
 
 Jobs must be **idempotent** — they will be retried. Make the work safe to repeat, or guard it with a uniqueness constraint.
 

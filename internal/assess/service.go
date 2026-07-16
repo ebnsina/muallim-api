@@ -538,8 +538,8 @@ func drawKey(tenantID, attemptID, questionID, userID uuid.UUID) string {
 // which is the entire reason the queue lives in Postgres.
 //
 // Nothing is graded here. An essay quiz that graded in the handler is a request
-// held open for as long as the grading takes, which is how LearnDash comes to
-// spend thirty-five seconds saving one.
+// held open for as long as the grading takes, which is how a synchronous grader
+// comes to spend tens of seconds saving one.
 func (s *Service) SubmitAttempt(ctx context.Context, tenantID, lessonID, userID uuid.UUID, author Author) (Attempt, error) {
 	var submitted Attempt
 

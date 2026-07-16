@@ -549,3 +549,59 @@ func TestAttendance(t *testing.T) {
 		t.Fatalf("bilal's tally is %+v (%d days), want one late day", summary, len(days))
 	}
 }
+
+// TestPortalOwnership is the security invariant of the parent portal: a guardian
+// resolves to their own children and no others, and asking after a student who is
+// not theirs is refused as if the student did not exist.
+func TestPortalOwnership(t *testing.T) {
+	t.Parallel()
+
+	db := testDB(t)
+	tenant := seedTenant(t, db)
+	svc := newService(db)
+
+	amina, err := svc.AdmitStudent(t.Context(), tenant, academics.NewStudent{AdmissionNo: "P-001", FullName: "Amina"}, academics.Author{})
+	if err != nil {
+		t.Fatalf("admit amina: %v", err)
+	}
+	bilal, err := svc.AdmitStudent(t.Context(), tenant, academics.NewStudent{AdmissionNo: "P-002", FullName: "Bilal"}, academics.Author{})
+	if err != nil {
+		t.Fatalf("admit bilal: %v", err)
+	}
+
+	// Amina's parent, given a login.
+	g, err := svc.AddGuardian(t.Context(), tenant, amina.ID, academics.NewGuardian{FullName: "Amina's mother"})
+	if err != nil {
+		t.Fatalf("add guardian: %v", err)
+	}
+	parent := seedUser(t, db)
+	if err := svc.LinkGuardianUser(t.Context(), tenant, g.ID, parent); err != nil {
+		t.Fatalf("link guardian: %v", err)
+	}
+
+	// The parent sees Amina, and only Amina.
+	children, err := svc.ChildrenFor(t.Context(), tenant, parent)
+	if err != nil {
+		t.Fatalf("children for parent: %v", err)
+	}
+	if len(children) != 1 || children[0].ID != amina.ID {
+		t.Fatalf("parent's children are %+v, want only Amina", children)
+	}
+
+	// The ownership gate admits Amina and refuses Bilal as not-found.
+	if _, err := svc.ChildStudent(t.Context(), tenant, parent, amina.ID); err != nil {
+		t.Fatalf("parent could not read their own child: %v", err)
+	}
+	if _, err := svc.ChildStudent(t.Context(), tenant, parent, bilal.ID); !errors.Is(err, academics.ErrNotFound) {
+		t.Fatalf("parent reached another family's child: %v", err)
+	}
+
+	// A user tied to nobody sees no children and can read none.
+	stranger := seedUser(t, db)
+	if kids, err := svc.ChildrenFor(t.Context(), tenant, stranger); err != nil || len(kids) != 0 {
+		t.Fatalf("stranger sees %+v (err %v), want nothing", kids, err)
+	}
+	if _, err := svc.ChildStudent(t.Context(), tenant, stranger, amina.ID); !errors.Is(err, academics.ErrNotFound) {
+		t.Fatalf("stranger reached a child: %v", err)
+	}
+}
