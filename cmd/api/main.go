@@ -26,10 +26,12 @@ import (
 	"github.com/ebnsina/muallim-api/internal/assign"
 	"github.com/ebnsina/muallim-api/internal/audit"
 	"github.com/ebnsina/muallim-api/internal/auth"
+	"github.com/ebnsina/muallim-api/internal/bundle"
 	"github.com/ebnsina/muallim-api/internal/calendar"
 	"github.com/ebnsina/muallim-api/internal/catalog"
 	"github.com/ebnsina/muallim-api/internal/certdesign"
 	"github.com/ebnsina/muallim-api/internal/certify"
+	"github.com/ebnsina/muallim-api/internal/chat"
 	"github.com/ebnsina/muallim-api/internal/commerce"
 	"github.com/ebnsina/muallim-api/internal/comms"
 	"github.com/ebnsina/muallim-api/internal/coursebuild"
@@ -44,6 +46,7 @@ import (
 	"github.com/ebnsina/muallim-api/internal/httpapi"
 	"github.com/ebnsina/muallim-api/internal/idcard"
 	"github.com/ebnsina/muallim-api/internal/learn"
+	"github.com/ebnsina/muallim-api/internal/learnpath"
 	"github.com/ebnsina/muallim-api/internal/ledger"
 	"github.com/ebnsina/muallim-api/internal/library"
 	"github.com/ebnsina/muallim-api/internal/liveclass"
@@ -59,6 +62,7 @@ import (
 	vault "github.com/ebnsina/muallim-api/internal/platform/secret"
 	"github.com/ebnsina/muallim-api/internal/platform/server"
 	"github.com/ebnsina/muallim-api/internal/staff"
+	"github.com/ebnsina/muallim-api/internal/taxonomy"
 	"github.com/ebnsina/muallim-api/internal/tenant"
 	"github.com/ebnsina/muallim-api/internal/transport"
 )
@@ -275,6 +279,12 @@ func run() error {
 	// Live class sessions: bring-your-own-link meetings scheduled on a course.
 	liveSessions := liveclass.NewService(db, liveclass.NewPostgresRepository(), liveClassAuditor{recorder})
 
+	// Catalogue taxonomy, sellable bundles, sequenced learning paths, and chat.
+	taxonomies := taxonomy.NewService(db, taxonomy.NewPostgresRepository(), taxonomyAuditor{recorder})
+	bundles := bundle.NewService(db, bundle.NewPostgresRepository(), bundleAuditor{recorder})
+	paths := learnpath.NewService(db, learnpath.NewPostgresRepository(), learnPathAuditor{recorder})
+	messaging := chat.NewService(db, chat.NewPostgresRepository(), chatAuditor{recorder})
+
 	// `learning` satisfies assess.Completions: passing a quiz completes its lesson,
 	// in the transaction that recorded the grade. The interface is declared by
 	// assess and satisfied by enroll, which have never heard of each other. The
@@ -392,6 +402,10 @@ func run() error {
 		Admissions:  intake,
 		IDCard:      idCards,
 		LiveClass:   liveSessions,
+		Taxonomy:    taxonomies,
+		Bundle:      bundles,
+		LearnPath:   paths,
+		Chat:        messaging,
 		Auth:        identities,
 		Enrol:       learning,
 		Assess:      quizzes,

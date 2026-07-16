@@ -12,10 +12,12 @@ import (
 	"github.com/ebnsina/muallim-api/internal/assign"
 	"github.com/ebnsina/muallim-api/internal/audit"
 	"github.com/ebnsina/muallim-api/internal/auth"
+	"github.com/ebnsina/muallim-api/internal/bundle"
 	"github.com/ebnsina/muallim-api/internal/calendar"
 	"github.com/ebnsina/muallim-api/internal/catalog"
 	"github.com/ebnsina/muallim-api/internal/certdesign"
 	"github.com/ebnsina/muallim-api/internal/certify"
+	"github.com/ebnsina/muallim-api/internal/chat"
 	"github.com/ebnsina/muallim-api/internal/comms"
 	"github.com/ebnsina/muallim-api/internal/coursebuild"
 	"github.com/ebnsina/muallim-api/internal/enroll"
@@ -23,12 +25,14 @@ import (
 	"github.com/ebnsina/muallim-api/internal/fees"
 	"github.com/ebnsina/muallim-api/internal/hostel"
 	"github.com/ebnsina/muallim-api/internal/idcard"
+	"github.com/ebnsina/muallim-api/internal/learnpath"
 	"github.com/ebnsina/muallim-api/internal/ledger"
 	"github.com/ebnsina/muallim-api/internal/library"
 	"github.com/ebnsina/muallim-api/internal/liveclass"
 	"github.com/ebnsina/muallim-api/internal/notices"
 	"github.com/ebnsina/muallim-api/internal/payroll"
 	"github.com/ebnsina/muallim-api/internal/staff"
+	"github.com/ebnsina/muallim-api/internal/taxonomy"
 	"github.com/ebnsina/muallim-api/internal/transport"
 )
 
@@ -212,6 +216,46 @@ func (a ledgerAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID
 		TargetType: e.TargetType,
 		TargetID:   e.TargetID,
 		Metadata:   e.Metadata,
+	})
+}
+
+type taxonomyAuditor struct{ recorder *audit.Recorder }
+
+var _ taxonomy.AuditRecorder = taxonomyAuditor{}
+
+func (a taxonomyAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, e taxonomy.AuditEntry) error {
+	return a.recorder.Record(ctx, tx, tenantID, audit.Entry{
+		ActorID: e.ActorID, Action: e.Action, TargetType: e.TargetType, TargetID: e.TargetID, Metadata: e.Metadata,
+	})
+}
+
+type bundleAuditor struct{ recorder *audit.Recorder }
+
+var _ bundle.AuditRecorder = bundleAuditor{}
+
+func (a bundleAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, e bundle.AuditEntry) error {
+	return a.recorder.Record(ctx, tx, tenantID, audit.Entry{
+		ActorID: e.ActorID, Action: e.Action, TargetType: e.TargetType, TargetID: e.TargetID, Metadata: e.Metadata,
+	})
+}
+
+type learnPathAuditor struct{ recorder *audit.Recorder }
+
+var _ learnpath.AuditRecorder = learnPathAuditor{}
+
+func (a learnPathAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, e learnpath.AuditEntry) error {
+	return a.recorder.Record(ctx, tx, tenantID, audit.Entry{
+		ActorID: e.ActorID, Action: e.Action, TargetType: e.TargetType, TargetID: e.TargetID, Metadata: e.Metadata,
+	})
+}
+
+type chatAuditor struct{ recorder *audit.Recorder }
+
+var _ chat.AuditRecorder = chatAuditor{}
+
+func (a chatAuditor) Record(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, e chat.AuditEntry) error {
+	return a.recorder.Record(ctx, tx, tenantID, audit.Entry{
+		ActorID: e.ActorID, Action: e.Action, TargetType: e.TargetType, TargetID: e.TargetID, Metadata: e.Metadata,
 	})
 }
 

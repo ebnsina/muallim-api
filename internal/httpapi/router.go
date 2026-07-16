@@ -18,10 +18,12 @@ import (
 	"github.com/ebnsina/muallim-api/internal/assess"
 	"github.com/ebnsina/muallim-api/internal/assign"
 	"github.com/ebnsina/muallim-api/internal/auth"
+	"github.com/ebnsina/muallim-api/internal/bundle"
 	"github.com/ebnsina/muallim-api/internal/calendar"
 	"github.com/ebnsina/muallim-api/internal/catalog"
 	"github.com/ebnsina/muallim-api/internal/certdesign"
 	"github.com/ebnsina/muallim-api/internal/certify"
+	"github.com/ebnsina/muallim-api/internal/chat"
 	"github.com/ebnsina/muallim-api/internal/commerce"
 	"github.com/ebnsina/muallim-api/internal/coursebuild"
 	"github.com/ebnsina/muallim-api/internal/enroll"
@@ -34,6 +36,7 @@ import (
 	"github.com/ebnsina/muallim-api/internal/hostel"
 	"github.com/ebnsina/muallim-api/internal/idcard"
 	"github.com/ebnsina/muallim-api/internal/learn"
+	"github.com/ebnsina/muallim-api/internal/learnpath"
 	"github.com/ebnsina/muallim-api/internal/ledger"
 	"github.com/ebnsina/muallim-api/internal/library"
 	"github.com/ebnsina/muallim-api/internal/liveclass"
@@ -43,6 +46,7 @@ import (
 	"github.com/ebnsina/muallim-api/internal/payroll"
 	"github.com/ebnsina/muallim-api/internal/platform/ratelimit"
 	"github.com/ebnsina/muallim-api/internal/staff"
+	"github.com/ebnsina/muallim-api/internal/taxonomy"
 	"github.com/ebnsina/muallim-api/internal/tenant"
 	"github.com/ebnsina/muallim-api/internal/transport"
 )
@@ -133,6 +137,13 @@ type Options struct {
 
 	// LiveClass schedules bring-your-own-link meetings on a course.
 	LiveClass *liveclass.Service
+
+	// Taxonomy tags and categorises courses; Bundle groups them for sale; LearnPath
+	// sequences them into a track; Chat is real-time messaging.
+	Taxonomy  *taxonomy.Service
+	Bundle    *bundle.Service
+	LearnPath *learnpath.Service
+	Chat      *chat.Service
 
 	// Commerce may be nil: a deployment with no gateway configured sells nothing,
 	// and every course in it is free — which is exactly what this product was
@@ -236,6 +247,10 @@ func New(opts Options) (http.Handler, huma.API) {
 	registerAdmissionsAdmit(api, opts.Admissions, opts.Academics)
 	registerIDCards(api, opts.IDCard)
 	registerLiveSessions(api, opts.LiveClass, opts.Catalog, opts.Enrol)
+	registerTaxonomy(api, opts.Taxonomy)
+	registerBundles(api, opts.Bundle)
+	registerLearningPaths(api, opts.LearnPath)
+	registerChat(api, opts.Chat, opts.Enrol)
 	registerGamification(api, opts.Gamify)
 
 	// Order matters, outermost first.
